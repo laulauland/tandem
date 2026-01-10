@@ -1,0 +1,17 @@
+# FP snapshot directory (isolated git repo for workdir snapshots)
+.fp/snapshots/
+
+# Rust
+target/
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

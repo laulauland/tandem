@@ -1,0 +1,54 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tandem-core",
+    "crates/tandem-server",
+    "crates/tandem-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Tandem Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/laulauland/tandem"
+
+[workspace.dependencies]
+# Shared core library
+tandem-core = { path = "crates/tandem-core" }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Utilities
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# CRDT
+yrs = "0.21"
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+async-trait = "0.1"
+futures-util = "0.3"
+
+# Web framework
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono"] }
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Encoding
+hex = "0.4"
+rand = "0.8"
+base64 = "0.22"
