@@ -4,7 +4,7 @@
 > protocol, on-disk format, and CLI surface may change. Don't use it for
 > data you can't regenerate. Back up your repos.
 
-jj workspaces over the network. One server, many agents, real files.
+jj workspaces over the network. One server, many agents in many vms, real files.
 
 ```
 tandem serve --listen 0.0.0.0:13013 --repo ~/project   # server
@@ -32,15 +32,33 @@ conflicts on the transport layer. The server ships to GitHub when you're ready.
 ## How it works
 
 ```
-┌──────────┐     Cap'n Proto RPC      ┌──────────────┐
-│ Agent A   │◄────────────────────────►│              │
-│ (tandem)  │                          │   Server     │
-└──────────┘                           │  (tandem     │
-┌──────────┐     Cap'n Proto RPC      │   serve)     │
-│ Agent B   │◄────────────────────────►│              │──► git push
-│ (tandem)  │                          │  jj+git repo │
-└──────────┘                           └──────────────┘
+┌──────────────┐                           ┌──────────────────────────┐
+│  Agent A      │    Cap'n Proto RPC        │                          │
+│  (Machine B)  │◄─────────────────────────►│    tandem serve           │
+│               │                           │    (Machine A)            │
+│  ~/work-a/    │                           │                          │
+│  src/auth.rs  │                           │  ┌────────────────────┐  │
+│  src/lib.rs   │                           │  │ Content-Addressed  │  │
+└──────────────┘                           │  │ Store              │  │
+┌──────────────┐                           │  │                    │  │
+│  Agent B      │    Cap'n Proto RPC        │  │  jj+git repo       │  │
+│  (Machine C)  │◄─────────────────────────►│  │  operations        │  │──► git push
+│               │                           │  │  views             │  │
+│  ~/work-b/    │                           │  │  op heads (CAS)    │  │
+│  src/api.rs   │                           │  └────────────────────┘  │
+└──────────────┘                           │                          │
+┌──────────────┐                           │                          │
+│  Agent C      │    Cap'n Proto RPC        │                          │
+│  (Machine D)  │◄─────────────────────────►│                          │
+│               │                           │                          │
+│  ~/work-c/    │                           └──────────────────────────┘
+│  tests/*.rs   │
+└──────────────┘
 ```
+
+Each agent has a full working copy on its local disk (fast reads/writes).
+The commit store lives on the server. When Agent A commits, Agent B sees it
+instantly in `tandem log` — no fetch, no pull, no merge.
 
 The `tandem` binary has two modes:
 
@@ -197,7 +215,7 @@ Tested — see `qa/v1/cross-machine-report.md`.
 
 ### Remote machines: sprites.dev / exe.dev / SSH
 
-The real thing. Server on one machine, agents on others.
+Server on one machine, agents on others.
 
 ```bash
 # Machine 1 — server (your laptop, a VPS, etc.)

@@ -1,7 +1,21 @@
 [package]
-name = "tandem"
+name = "jj-tandem"
 version = "0.1.0"
 edition = "2021"
+description = "jj workspaces over the network — one server, many agents, real files"
+license = "MIT"
+repository = "https://github.com/laulauland/tandem"
+homepage = "https://github.com/laulauland/tandem"
+readme = "README.md"
+keywords = ["jj", "jujutsu", "vcs", "distributed", "collaboration"]
+categories = ["development-tools", "command-line-utilities"]
+exclude = [
+    "opensrc/",
+    "qa/",
+    "demos/",
+    ".fp/",
+    ".github/",
+]
 
 [[bin]]
 name = "tandem"
