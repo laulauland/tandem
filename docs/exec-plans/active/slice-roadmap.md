@@ -1,15 +1,12 @@
-# Completed Execution Plan: Slice Roadmap (v1)
+# Completed Execution Plan: Slice Roadmap
 
 **Status:** All slices completed as of 2026-02-15.
 **See:** `docs/exec-plans/completed/` for detailed completion notes.
 
-Rewrite of the prototype slices to implement the original vision:
-**stock `jj` on the client, tandem as a remote jj store backend.**
+**Stock `jj` on the client, tandem as a remote jj store backend.**
 
-The v0 prototype proved the transport (Cap'n Proto), coordination (CAS heads),
-and notification (watchHeads) layers work. This plan rewrites the client and
-server to store real jj objects (commits with tree pointers, trees with file
-entries, file blobs) so that `jj` itself is the client CLI.
+The client and server store real jj objects (commits with tree pointers,
+trees with file entries, file blobs) so that `jj` itself is the client CLI.
 
 ## Invariant
 
@@ -43,7 +40,7 @@ Acceptance:
 ## Slice 2 — Two-agent file visibility ✓
 
 **Completed:** 2026-02-15
-**Test file:** `tests/v1_slice2_two_agent_visibility.rs`
+**Test file:** `tests/slice2_two_agent_visibility.rs`
 
 Goal: two agents on separate workspaces see each other's files.
 
@@ -59,7 +56,7 @@ Acceptance:
 ## Slice 3 — Concurrent file writes converge ✓
 
 **Completed:** 2026-02-15
-**Test file:** `tests/v1_slice3_concurrent_convergence.rs`
+**Test file:** `tests/slice3_concurrent_convergence.rs`
 
 Goal: concurrent commits with different files don't lose data.
 
@@ -165,9 +162,9 @@ Acceptance:
 
 ## Implementation notes
 
-### Client architecture change
+### Client architecture
 
-The v0 client was a custom CLI. The v1 client is a **jj-lib Backend impl**:
+The client is a **jj-lib Backend impl**:
 
 ```rust
 struct TandemBackend { store: store::Client }
@@ -192,28 +189,18 @@ struct TandemOpHeadsStore { store: store::Client }
 impl OpHeadsStore for TandemOpHeadsStore { /* getHeads, updateOpHeads */ }
 ```
 
-The client binary becomes:
-- `tandem serve --listen <addr> --repo <path>` — unchanged
-- `tandem watch` — unchanged
-- `tandem --help` — new, local-only
+The client binary:
+- `tandem serve --listen <addr> --repo <path>` — server mode
+- `tandem watch` — head change notifications
+- `tandem --help` — local-only help
 - All other commands: use **stock `jj`** configured to use TandemBackend
 
-### Server storage change
+### Server storage
 
-The server stores real jj-compatible object bytes:
+The server stores real jj-compatible object bytes via direct content-addressed
+storage that IS the jj store:
 - `objects/commit/<id>` — jj protobuf commit (with tree_id, parent_ids)
 - `objects/tree/<id>` — jj protobuf tree (with file entries)
 - `objects/file/<id>` — raw file bytes
 - `operations/<id>` — jj protobuf operation
 - `views/<id>` — jj protobuf view
-
-The `apply_mirror_update` heuristic (shelling out to `jj new/describe`) is
-replaced by direct object storage that IS the jj store.
-
-### What carries over from v0
-
-- Cap'n Proto schema (`schema/tandem.capnp`) — unchanged
-- Server RPC handler (`store::Server` impl) — mostly unchanged
-- CAS head coordination — unchanged
-- WatchHeads callback system — unchanged
-- Build system (`build.rs`, `Cargo.toml`) — add `jj-lib` dependency

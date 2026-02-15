@@ -1,4 +1,4 @@
-# Slice 6 — Git round-trip (v1)
+# Slice 6 — Git round-trip
 
 - **Date completed:** 2026-02-15
 - **Test file(s):** `tests/slice6_git_round_trip.rs`

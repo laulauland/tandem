@@ -1,4 +1,4 @@
-# Slice 1 — Single-agent round-trip (v1)
+# Slice 1 — Single-agent round-trip
 
 - **Date completed:** 2026-02-15
 - **Test file(s):** `tests/slice1_single_agent_round_trip.rs`
@@ -45,7 +45,7 @@ Integration test `single_agent_round_trip` validates:
 
 ## Architecture notes
 
-This slice established the core v1 architecture:
+This slice established the core architecture:
 - Client is stock jj with remote Backend/OpStore/OpHeadsStore
 - Server is a normal jj+git repo accessed via RPC
 - No command proxying — all operations are store-level RPC calls

@@ -1,7 +1,7 @@
-# Slice 2 — Two-agent visibility (v1)
+# Slice 2 — Two-agent visibility
 
 - **Date completed:** 2026-02-15
-- **Test file(s):** `tests/v1_slice2_two_agent_visibility.rs`
+- **Test file(s):** `tests/slice2_two_agent_visibility.rs`
 
 ## What was implemented
 

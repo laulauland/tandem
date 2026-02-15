@@ -1,4 +1,4 @@
-# Slice 8 — Bookmark management (v1)
+# Slice 8 — Bookmark management
 
 - **Date completed:** 2026-02-15
 - **Test coverage:** `tests/slice7_end_to_end.rs` (includes bookmark operations)

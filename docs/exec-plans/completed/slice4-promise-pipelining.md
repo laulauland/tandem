@@ -1,4 +1,4 @@
-# Slice 4 — Promise pipelining (v1)
+# Slice 4 — Promise pipelining
 
 - **Date completed:** 2026-02-15
 - **Test file(s):** `tests/slice4_promise_pipelining.rs`
@@ -7,8 +7,8 @@
 
 Cap'n Proto promise pipelining for efficient multi-object writes:
 
-1. **Cap'n Proto RPC migration**
-   - Replaced v0's line-JSON transport with Cap'n Proto
+1. **Cap'n Proto RPC transport**
+   - RPC protocol defined in `schema/tandem.capnp`
    - Schema defined in `schema/tandem.capnp`
    - Build integration via `build.rs` and `capnpc` crate
 

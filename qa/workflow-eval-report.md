@@ -2,7 +2,7 @@
 
 **Date:** 2026-02-15  
 **Evaluator:** AI Agent (Claude)  
-**Version:** tandem v0.1.0 (commit as of evaluation)
+**Version:** tandem (commit as of evaluation)
 
 ## Executive Summary
 
@@ -363,7 +363,7 @@ Prioritized by impact on realistic workflows:
 
 - **Server-side mirroring duplicates commits**: Every tandem commit is mirrored into the server's jj repo via `jj new/describe`. This is clever but adds complexity. Consider whether the `.tandem` store could BE the jj store (i.e., tandem directly implements jj's backend traits against `.jj/store` instead of a parallel `.tandem/` directory).
 
-- **No authentication or workspace ownership**: Any client can write to any workspace. Fine for v0.1, but agents will need workspace ACLs for multi-team scenarios.
+- **No authentication or workspace ownership**: Any client can write to any workspace. Agents will eventually need workspace ACLs for multi-team scenarios.
 
 ### What's Missing (Foundational)
 - **File content storage**: Either commit objects need tree/blob pointers, or tandem needs a separate file store backend.
@@ -416,7 +416,7 @@ Prioritized by impact on realistic workflows:
 
 10. **Workspace ownership and ACLs**
     - Prevent agent-a from writing to agent-b's workspace
-    - Requires authentication layer (out of scope for v0.1)
+    - Requires authentication layer (out of scope for now)
 
 11. **Promise pipelining for batch operations**
     - Currently not used (see Slice 4 tests)

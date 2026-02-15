@@ -1,4 +1,4 @@
-# Slice 9 — CLI help and discoverability (v1)
+# Slice 9 — CLI help and discoverability
 
 - **Date completed:** 2026-02-15
 - **Implementation:** `src/main.rs` (clap command definitions, AFTER_HELP constants)
@@ -43,4 +43,4 @@ Manual testing validates:
 
 ## Architecture notes
 
-Good help text is P0 for agent usability. The v0 QA found that agents spend 50% of their time guessing commands when help is missing. This slice ensures agents can discover tandem's capabilities without reading source code.
+Good help text is P0 for agent usability. Without `--help` and command suggestions, agents spend most of their time guessing commands. This slice ensures agents can discover tandem's capabilities without reading source code.

@@ -22,10 +22,10 @@ commands return exit code 0.
 - **Stress agent:** Hammered concurrent writes. Verified CAS correctness
   and persistence across server restarts.
 
-## Key Findings
+## Key Findings (from initial QA — all issues now resolved)
 
-1. **Protocol works** — 15/15 integration tests pass, 50 concurrent commits preserved
-2. **Agents can't self-serve** — no `--help`, no command discovery, score 5/10
-3. **Three quick fixes** would reach 8/10: `--help`, command suggestions, `TANDEM_SERVER` env var
-4. **Code review is blocked** — commits store descriptions only, no file trees
-5. **Git push is blocked** — no bookmark management via tandem CLI
+1. ✅ **Protocol works** — 15/15 integration tests pass, 50 concurrent commits preserved
+2. ✅ **Agent discoverability** — `--help`, command suggestions, and `TANDEM_SERVER` env var all implemented
+3. ✅ **Code review works** — commits store full file trees, `jj diff`/`jj show` work
+4. ✅ **Git push works** — bookmark management available via stock jj commands
+5. See `qa/v1/REPORT.md` for the latest usability evaluation

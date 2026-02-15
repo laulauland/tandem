@@ -1,4 +1,4 @@
-# Slice 5 — WatchHeads notifications (v1)
+# Slice 5 — WatchHeads notifications
 
 - **Date completed:** 2026-02-15
 - **Test file(s):** `tests/slice5_watch_heads.rs`

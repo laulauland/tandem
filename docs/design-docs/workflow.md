@@ -76,9 +76,9 @@ jj git fetch
 # (or immediately via watchHeads notification)
 ```
 
-## Git operations: server only (v1)
+## Git operations: server only
 
-In v1, git commands run exclusively on the server:
+Git commands run exclusively on the server:
 - `jj git push` — server pushes to GitHub
 - `jj git fetch` — server pulls from GitHub
 - `gh pr create` — server creates PRs

@@ -1,4 +1,8 @@
-# V0 Prototype Slices (completed, superseded)
+# Prototype Slices (historical context only)
+
+> **Note:** This file documents the early prototype phase. All items listed as
+> deferred have since been implemented. See `docs/exec-plans/completed/` for
+> current slice completion notes.
 
 Slices 1-7 were implemented as a **description-only prototype** using a custom
 CLI (`tandem new/log/describe/diff`) instead of jj-lib Backend trait
@@ -11,10 +15,8 @@ callbacks, and git round-trip plumbing all work correctly.
 - WatchHeads callback capabilities deliver sub-second notifications
 - Server-side jj repo can push/fetch to bare git remotes
 
-**What was deferred (now addressed in v1 slices):**
+**What was deferred (now implemented):**
 - jj-lib Backend/OpStore/OpHeadsStore trait integration (client is stock jj)
 - Real commit/tree/file/symlink object storage (not description-only JSON)
 - Bookmark management through tandem RPC
 - CLI help text and error suggestions
-
-See `docs/exec-plans/active/slice-roadmap.md` for the v1 rewrite plan.

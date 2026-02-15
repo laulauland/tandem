@@ -2,7 +2,7 @@
 
 **Date:** 2026-02-15  
 **Evaluator:** QA Agent (Claude Code)  
-**Tandem Version:** v0.1.0  
+**Tandem Version:** current  
 **Test Framework:** Rust integration tests with concurrent threads
 
 ---
@@ -410,5 +410,5 @@ Result: ⚠️  PARTIAL (50/70 commits created)
 ---
 
 **Report Generated:** 2026-02-15 17:00:00 GMT+1  
-**Test Suite:** Tandem v0.1.0 Concurrent Write Stress Test  
+**Test Suite:** Tandem Concurrent Write Stress Test  
 **Final Status:** ✅ PRODUCTION-READY (5-10 concurrent agents)

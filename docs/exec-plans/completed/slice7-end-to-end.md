@@ -1,4 +1,4 @@
-# Slice 7 — End-to-end multi-agent (v1)
+# Slice 7 — End-to-end multi-agent
 
 - **Date completed:** 2026-02-15
 - **Test file(s):** `tests/slice7_end_to_end.rs`

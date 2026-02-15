@@ -16,7 +16,7 @@
 - safe concurrent writes (no lost updates)
 - server remains plain jj+git compatible
 
-## Out of scope (v0.1)
+## Out of scope
 
 - authentication and tenant isolation
 - UI layer

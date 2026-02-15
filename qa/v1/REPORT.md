@@ -1,40 +1,41 @@
-# Tandem v1 QA Report — Agent Usability Evaluation
+# Tandem QA Report — Agent Usability Evaluation
 
 **Date:** 2026-02-15
 **Tester:** Automated agent (Claude opus)
 **Binary:** `target/debug/tandem` (cargo build, clean)
 **Method:** Manual agent-perspective testing of all documented workflows
-**Server:** `tandem serve --listen 127.0.0.1:13099 --repo /tmp/tandem-qa-v1-repo`
+**Server:** `tandem serve --listen 127.0.0.1:13099 --repo /tmp/tandem-qa-repo`
 
 ---
 
 ## Executive Summary
 
-**Tandem v1 is a massive improvement over v0.** The v0 QA found agents spending 50% of time guessing commands with no `--help`, no file content storage, and no code review capability. All three P0 blockers from v0 are resolved:
+Tandem embeds full jj — every jj command works transparently. An agent can
+write files, commit, read other agents' files, see diffs, manage bookmarks,
+and view operation history. **This is a usable multi-agent collaboration tool.**
 
+Key capabilities verified:
 1. ✅ `--help` works without server connection
 2. ✅ File content is stored and readable via `jj file show` / `jj diff` / `jj show`
 3. ✅ `TANDEM_SERVER` env var works as fallback
 
-The tool now embeds full jj — every jj command works transparently. An agent can write files, commit, read other agents' files, see diffs, manage bookmarks, and view operation history. **This is a usable multi-agent collaboration tool.**
-
-**Verdict: Tandem v1 is agent-ready for core workflows. Two minor UX issues remain.**
+**Verdict: Tandem is agent-ready for core workflows. Two minor UX issues remain.**
 
 ---
 
-## v0 → v1 P0 Issue Resolution
+## P0 Capability Status
 
-| v0 Issue | v0 Status | v1 Status | Evidence |
-|----------|-----------|-----------|----------|
-| `--help` works without server | 🔴 RED | ✅ GREEN | Prints full usage with commands, env vars, examples |
-| File content storage + readback | 🔴 RED | ✅ GREEN | `jj file show`, `jj diff`, `jj show` all work |
-| `TANDEM_SERVER` env var | 🔴 RED | ✅ GREEN | `TANDEM_SERVER=host:port tandem init .` works |
-| Command suggestions on error | 🔴 RED | ✅ GREEN | jj provides "tip: a similar subcommand exists" |
-| Code review capability | 🔴 RED | ✅ GREEN | Full diffs, file listing, show command all work |
-| Bookmark management | 🔴 RED | ✅ GREEN | `tandem bookmark create/list` work transparently |
-| Commit stores only descriptions | 🔴 RED | ✅ GREEN | Real jj commits with file trees |
+| Capability | Status | Evidence |
+|------------|--------|----------|
+| `--help` works without server | ✅ GREEN | Prints full usage with commands, env vars, examples |
+| File content storage + readback | ✅ GREEN | `jj file show`, `jj diff`, `jj show` all work |
+| `TANDEM_SERVER` env var | ✅ GREEN | `TANDEM_SERVER=host:port tandem init .` works |
+| Command suggestions on error | ✅ GREEN | jj provides "tip: a similar subcommand exists" |
+| Code review capability | ✅ GREEN | Full diffs, file listing, show command all work |
+| Bookmark management | ✅ GREEN | `tandem bookmark create/list` work transparently |
+| Real jj commits with file trees | ✅ GREEN | Full commit/tree/file object storage |
 
-**All 7 P0 issues from v0 are resolved.**
+**All 7 P0 capabilities verified.**
 
 ---
 
@@ -51,7 +52,7 @@ The tool now embeds full jj — every jj command works transparently. An agent c
 | `tandem serve --help` | Shows `--listen` and `--repo` flags with examples | Yes |
 | `tandem init --help` | Shows `--tandem-server`, `--workspace`, env vars, examples | Yes |
 
-**Key improvement over v0:** Help text works *without* a server connection. An agent's first instinct (`tool --help`) immediately works. The output includes environment variables, all commands, and working examples.
+Help text works *without* a server connection. An agent's first instinct (`tool --help`) immediately works. The output includes environment variables, all commands, and working examples.
 
 **Actual output of `tandem --help`:**
 ```
@@ -140,7 +141,7 @@ tandem show @-                    # → full commit with diff
 | `tandem file list -r <rev>` | ✅ Lists all files in commit tree |
 | `tandem status` | ✅ Shows working copy state |
 
-**Key improvement over v0:** v0 stored only descriptions — no files, no diffs, no content. v1 stores real jj commits with full file trees. Every jj command that reads content works.
+Tandem stores real jj commits with full file trees. Every jj command that reads content works.
 
 ---
 
@@ -235,7 +236,7 @@ v1_slice3_two_agents_concurrent_file_writes_converge . ok
 v1_slice3_five_agents_concurrent_file_writes_all_survive ok (5.28s)
 ```
 
-All 4 integration tests pass. Tests assert on **file bytes** (not just descriptions), which was the critical v0 gap.
+All 4 integration tests pass. Tests assert on **file bytes**, not just descriptions.
 
 ---
 
@@ -326,20 +327,20 @@ Cannot query Watchman because jj was not compiled with the `watchman` feature
 
 ---
 
-## v0 vs v1 Comparison
+## Capability Summary
 
-| Metric | v0 | v1 | Change |
-|--------|----|----|--------|
-| Agent discoverability | 🔴 5/10 | ✅ 9/10 | +4 |
-| File content storage | ❌ None | ✅ Full jj trees | Fixed |
-| Code review capability | ❌ Blocked | ✅ Full diffs + file read | Fixed |
-| Help text | ❌ None | ✅ Comprehensive | Fixed |
-| Error messages | 🟡 Partial | ✅ Progressive + suggestions | Improved |
-| Bookmark management | ❌ None | ✅ Full jj bookmark | Fixed |
-| Command suggestions | ❌ None | ✅ jj provides "did you mean" | Fixed |
-| `TANDEM_SERVER` env var | ❌ None | ✅ Works | Fixed |
-| Concurrent writes | ✅ CAS works | ✅ CAS + file trees | Maintained |
-| Persistence | ✅ Works | ✅ Works | Maintained |
+| Metric | Status |
+|--------|--------|
+| Agent discoverability | ✅ 9/10 |
+| File content storage | ✅ Full jj trees |
+| Code review capability | ✅ Full diffs + file read |
+| Help text | ✅ Comprehensive |
+| Error messages | ✅ Progressive + suggestions |
+| Bookmark management | ✅ Full jj bookmark |
+| Command suggestions | ✅ jj provides "did you mean" |
+| `TANDEM_SERVER` env var | ✅ Works |
+| Concurrent writes | ✅ CAS + file trees |
+| Persistence | ✅ Works |
 
 ---
 
@@ -362,7 +363,7 @@ Cannot query Watchman because jj was not compiled with the `watchman` feature
 
 ## Conclusion
 
-**Tandem v1 is ready for agent use.** The core workflow — init workspace, write files, commit, read other agents' files, manage bookmarks — works end-to-end with clear help text and good error messages. Every P0 blocker from v0 is resolved.
+**Tandem is ready for agent use.** The core workflow — init workspace, write files, commit, read other agents' files, manage bookmarks — works end-to-end with clear help text and good error messages.
 
 The remaining issues (init without server flag, stale `cat` reference in help) are minor UX papercuts that can be fixed in a single slice. An agent encountering tandem for the first time can discover commands via `--help`, set up a workspace, and collaborate with other agents without reading any documentation.
 

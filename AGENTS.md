@@ -1,16 +1,15 @@
 # AGENTS
 
-Execution guide for building `tandem` from the docs in this repository.
+Execution guide for working on the `tandem` codebase.
 
 ## How to read these docs
 
-1. Read `ARCHITECTURE.md` for system boundaries.
-2. Read `docs/design-docs/workflow.md` for the concrete orchestrator→agents→git workflow.
+1. Read `ARCHITECTURE.md` for system boundaries and project structure.
+2. Read `docs/design-docs/workflow.md` for the orchestrator→agents→git workflow.
 3. Read `docs/design-docs/jj-lib-integration.md` for trait signatures and registration.
-4. Read `docs/exec-plans/active/slice-roadmap.md` and pick the next slice.
-5. Implement via failing integration test first.
-6. Keep any deferred cleanup in `docs/exec-plans/tech-debt-tracker.md`.
-7. When a slice is done, move a completion note into `docs/exec-plans/completed/`.
+4. Read `docs/exec-plans/tech-debt-tracker.md` for known issues to work on.
+5. Check `docs/exec-plans/completed/` for context on how each slice was built.
+6. Implement changes via failing integration test first.
 
 ## What tandem is
 
@@ -21,8 +20,8 @@ objects over Cap'n Proto RPC.
 
 The server is the **point of origin** — it's where git operations happen
 (`jj git push`, `jj git fetch`, `gh pr create`). The orchestrator/teamlead
-runs these on the server to ship code upstream. Eventually the tandem server
-becomes THE source of truth, with GitHub as a mirror.
+runs these on the server to ship code upstream. The tandem server is the source
+of truth, with GitHub as a mirror.
 
 ## Single binary, two modes
 
@@ -39,6 +38,43 @@ Server mode embeds jj-lib and uses the Git backend internally. When a client
 calls `putObject(file, bytes)`, the server stores the object. Objects are real
 jj-compatible blobs — `jj git push` on the server just works.
 
+## Source layout
+
+```
+src/
+  main.rs              CLI dispatch (clap) + CliRunner passthrough
+  server.rs            Server — jj Git backend + Cap'n Proto RPC
+  backend.rs           TandemBackend (jj-lib Backend trait)
+  op_store.rs          TandemOpStore (jj-lib OpStore trait)
+  op_heads_store.rs    TandemOpHeadsStore (jj-lib OpHeadsStore trait)
+  rpc.rs               Cap'n Proto RPC client wrapper
+  proto_convert.rs     jj protobuf ↔ Rust struct conversion
+  watch.rs             tandem watch command
+schema/
+  tandem.capnp         Cap'n Proto schema (Store + HeadWatcher)
+tests/
+  common/mod.rs        Test harness (server spawn, HOME isolation)
+  slice1-7 tests       Integration tests asserting on file bytes
+```
+
+## Docs layout
+
+```
+docs/
+  README.md                          Overview and pointers
+  design-docs/
+    workflow.md                      Orchestrator→agents→git workflow
+    jj-lib-integration.md            Trait signatures and store registration
+    rpc-protocol.md                  Cap'n Proto protocol details
+    rpc-error-model.md               Error handling conventions
+    core-beliefs.md                  Design principles
+  exec-plans/
+    completed/                       Completion notes for all 9 slices
+    tech-debt-tracker.md             Known issues (P1/P2/P3)
+  product-specs/
+    core-product.md                  Product intent and scope
+```
+
 ## Critical invariants
 
 1. **The client is stock `jj`.** Tandem implements jj-lib's `Backend`, `OpStore`,
@@ -47,7 +83,7 @@ jj-compatible blobs — `jj git push` on the server just works.
 
 2. **Tests assert on file bytes, not descriptions.** Every integration test
    must verify file content round-trips correctly via `jj cat`. Description-only
-   assertions are insufficient (this is how v0 went wrong).
+   assertions are insufficient.
 
 3. **Help text works without a server.** `tandem --help`, `tandem serve --help`,
    and `tandem` with no args must print usage locally. Error messages must
@@ -56,8 +92,8 @@ jj-compatible blobs — `jj git push` on the server just works.
 
 ## Help text and error handling (P0)
 
-These are required, not nice-to-haves. The v0 QA found agents spend 50% of
-their time guessing commands when help is missing.
+These are required, not nice-to-haves. QA found agents spend 50% of their time
+guessing commands when help is missing.
 
 - `tandem --help` — prints usage without server connection
 - `tandem serve --help` — explains `--listen` and `--repo` flags
@@ -66,7 +102,7 @@ their time guessing commands when help is missing.
 - Connection errors — include the address that was tried
 - Missing args — say what's needed ("serve requires `--listen <addr>`")
 - `TANDEM_SERVER` env var — fallback for `--server` flag on client commands
-- `TANDEM_WORKSPACE` env var — workspace name (already exists from v0)
+- `TANDEM_WORKSPACE` env var — workspace name for client
 
 ## Workflow
 
@@ -78,38 +114,26 @@ See `docs/design-docs/workflow.md` for the full picture. Summary:
 4. **Agents** see each other's files: `tandem cat -r <other-commit> src/auth.rs`
 5. **Orchestrator** ships from server: `jj bookmark create main -r <tip>`, `jj git push`
 
-Git operations are server-only in v1. Agents never touch git directly.
+Git operations are server-only. Agents never touch git directly.
 
-## V0 → V1 migration
+## What exists
 
-The v0 prototype built a custom CLI that stored description-only JSON blobs.
-It proved the transport (Cap'n Proto), coordination (CAS heads), and notification
-(watchHeads) layers work. See `docs/exec-plans/completed/v0-prototype-slices.md`.
+All core functionality is implemented across 9 slices:
 
-V1 replaces the custom CLI with jj-lib trait implementations. What carries over:
-- `schema/tandem.capnp` — unchanged
-- `build.rs` — unchanged
-- Server-side `store::Server` RPC handler — mostly unchanged
-- CAS head coordination — unchanged
-- WatchHeads callback system — unchanged
+| Capability | Test coverage |
+|------------|--------------|
+| Single-agent file round-trip | `tests/slice1_single_agent_round_trip.rs` |
+| Two-agent file visibility | `tests/slice2_two_agent_visibility.rs` |
+| Concurrent file writes converge | `tests/slice3_concurrent_convergence.rs` |
+| Promise pipelining for writes | `tests/slice4_promise_pipelining.rs` |
+| WatchHeads real-time notifications | `tests/slice5_watch_heads.rs` |
+| Git push/fetch round-trip | `tests/slice6_git_round_trip.rs` |
+| End-to-end multi-agent + git | `tests/slice7_end_to_end.rs` |
+| Bookmark management via RPC | Slice 8 (see `docs/exec-plans/completed/`) |
+| CLI help and discoverability | Slice 9 (see `docs/exec-plans/completed/`) |
 
-What gets replaced:
-- Client: custom `tandem new/log/describe/diff` → jj-lib `Backend`/`OpStore`/`OpHeadsStore`
-- Server: `CommitObject` JSON → real jj protobuf objects passed through as bytes
-- Server: `apply_mirror_update` (jj CLI shelling) → direct content-addressed storage
-- Tests: description assertions → file byte assertions via `jj cat`
-
-## Priority order
-
-1. Slice 1: Single-agent file round-trip (jj-lib Backend impl)
-2. Slice 2: Two-agent file visibility
-3. Slice 3: Concurrent file writes converge
-4. Slice 4: Promise pipelining for object writes
-5. Slice 5: WatchHeads with file awareness
-6. Slice 6: Git round-trip with real files
-7. Slice 7: End-to-end multi-agent with git shipping
-8. Slice 8: Bookmark management via RPC
-9. Slice 9: CLI help and agent discoverability
+See `docs/exec-plans/completed/` for detailed completion notes on each slice.
+See `docs/exec-plans/tech-debt-tracker.md` for known issues and next work.
 
 ## Testing policy
 
@@ -119,29 +143,30 @@ What gets replaced:
 - Local deterministic tests first; cross-machine tests second.
 - Use `sprites.dev` / `exe.dev` for distributed smoke tests.
 - Keep networked tests opt-in (ignored by default / env-gated).
+- Run: `cargo test`
 
 ## QA policy
 
-- After each major milestone, run agent-based QA (see `qa/`).
+- After major milestones, run agent-based QA (see `qa/`).
 - QA uses **subagent programs**, not shell scripts — agents evaluate usability.
 - Naive agent (zero-docs trial-and-error) tests discoverability.
 - Workflow agent tests realistic multi-agent file collaboration.
 - Stress agent tests concurrent write correctness.
-- Reports go to `qa/v1/REPORT.md` (compare against `qa/REPORT.md` for v0 baseline).
+- Reports go to `qa/REPORT.md`.
 - Use opus for all implementation and evaluation models.
 
 ## Debug policy
 
-Add structured tracing early so we do not sprinkle debug prints later.
+Structured tracing is built in. Do not add ad-hoc debug prints.
 
-Recommended flags:
+Flags:
 
 - `--tandem-debug`
 - `--tandem-debug-format pretty|json`
 - `--tandem-debug-file <path>`
 - `--tandem-debug-filter <filter>`
 
-Minimum events to emit:
+Minimum events emitted:
 
 - command lifecycle
 - RPC lifecycle

@@ -1,7 +1,7 @@
-# Slice 3 — Concurrent convergence (v1)
+# Slice 3 — Concurrent convergence
 
 - **Date completed:** 2026-02-15
-- **Test file(s):** `tests/v1_slice3_concurrent_convergence.rs`
+- **Test file(s):** `tests/slice3_concurrent_convergence.rs`
 
 ## What was implemented
 

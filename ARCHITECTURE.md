@@ -4,7 +4,7 @@
 
 ## Implementation Status
 
-**v1 complete as of 2026-02-15.** All slices 1-9 implemented and tested.
+**Complete as of 2026-02-15.** All slices 1-9 implemented and tested.
 See `docs/exec-plans/completed/` for details.
 
 ## Shape
@@ -76,7 +76,7 @@ See `src/server.rs` for server implementation, `src/rpc.rs` for client wrapper.
 
 No custom git layer in tandem. The server hosts a normal jj+git colocated repo.
 
-Git operations run **on the server only** (v1):
+Git operations run **on the server only**:
 
 - `jj git fetch` — pull upstream changes into the server's repo
 - `jj git push` — push agents' work to GitHub
@@ -95,8 +95,8 @@ See `docs/design-docs/workflow.md` for the full workflow.
 | Slice | Test File | Coverage |
 |-------|-----------|----------|
 | 1 | `tests/slice1_single_agent_round_trip.rs` | Single agent file round-trip |
-| 2 | `tests/v1_slice2_two_agent_visibility.rs` | Two-agent file visibility |
-| 3 | `tests/v1_slice3_concurrent_convergence.rs` | 2-agent and 5-agent concurrent writes |
+| 2 | `tests/slice2_two_agent_visibility.rs` | Two-agent file visibility |
+| 3 | `tests/slice3_concurrent_convergence.rs` | 2-agent and 5-agent concurrent writes |
 | 4 | `tests/slice4_promise_pipelining.rs` | Cap'n Proto pipelining efficiency |
 | 5 | `tests/slice5_watch_heads.rs` | Real-time head notifications |
 | 6 | `tests/slice6_git_round_trip.rs` | Git push/fetch round-trip |
@@ -135,7 +135,7 @@ tests/
   slice1-7 tests       Integration tests asserting on file bytes
 ```
 
-## Non-goals (v1.0)
+## Non-goals
 
 - Auth / ACL / multi-tenant isolation (single-repo, single-trust-domain model)
 - Workflow automation engines (out of scope)
