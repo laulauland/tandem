@@ -5,6 +5,8 @@ This folder holds stable technical decisions.
 ## Current docs
 
 - [Core beliefs](./core-beliefs.md)
+- [Workflow](./workflow.md)
+- [jj-lib integration](./jj-lib-integration.md)
 - [RPC protocol](./rpc-protocol.md)
 - [RPC error model](./rpc-error-model.md)
 

@@ -1,0 +1,49 @@
+[package]
+name = "tandem"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "tandem"
+path = "src/main.rs"
+
+[dependencies]
+# jj integration
+jj-lib = { version = "0.38.0", features = ["git"] }
+jj-cli = { version = "0.38.0", default-features = false, features = ["git"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# RPC
+capnp = "0.20"
+capnp-rpc = "0.20"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+
+# Trait / stream / proto support
+async-trait = "0.1"
+futures = "0.3"
+prost = "0.14"
+smallvec = "1"
+
+# Hashing
+blake2 = "0.10"
+digest = "0.10"
+
+# Sync bridge for async backend methods
+pollster = "0.4"
+
+# Server-side deps (from v0)
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dunce = "1"
+
+[build-dependencies]
+capnpc = "0.20"
+
+[dev-dependencies]
+tempfile = "3"
