@@ -9,48 +9,37 @@ jj workspaces over the network. One server, many agents on many machines, real f
 ## Install
 
 Published on [crates.io](https://crates.io/crates/jj-tandem) as `jj-tandem`.
+Requires a Rust toolchain and the [Cap'n Proto compiler](https://capnproto.org/install.html).
 
 ```bash
 cargo install jj-tandem
 ```
 
-This installs the `tandem` binary. Requires a Rust toolchain and
-[Cap'n Proto compiler](https://capnproto.org/install.html) (`capnp`).
-
-To build from source:
+Or build from source:
 
 ```bash
-git clone https://github.com/laulauland/tandem.git
-cd tandem
+git clone https://github.com/laulauland/tandem.git && cd tandem
 cargo build --release
-# binary at target/release/tandem
 ```
 
 ## Quickstart
 
 ```bash
-# Start a server (on your VPS, or locally for testing)
+# On your server (VPS, or localhost for testing)
 tandem up --repo ~/project --listen 0.0.0.0:13013
-
-# Check it's running
 tandem status
 
-# On agent machines: initialize a workspace
-tandem init --tandem-server=your-vps:13013 ~/work
+# On each agent's machine
+tandem init --tandem-server=your-server:13013 ~/work
 cd ~/work
 echo 'pub fn auth() {}' > auth.rs
 tandem new -m "feat: add auth"
-
-# View logs from the daemon
-tandem logs
-
-# Stop the server
-tandem down
 ```
 
-Every jj command works through `tandem` — `log`, `new`, `diff`, `file show`,
-`bookmark`, `describe` — because tandem implements jj-lib's store traits
-as RPC stubs. The server holds a real jj+git repo.
+That's it. The agent is now using jj against the remote store — `tandem log`,
+`tandem diff`, `tandem file show`, `tandem bookmark` all work because tandem
+implements jj-lib's store traits as RPC stubs. The server holds a real jj+git
+repo, so `jj git push` on the server ships to GitHub.
 
 ---
 
@@ -148,27 +137,6 @@ docker run --rm --network tandem-net \
 docker stop tandem-server && docker rm tandem-server
 docker network rm tandem-net
 ```
-
-### With systemd
-
-Use `tandem serve` (foreground mode) for process managers.
-
-```ini
-[Unit]
-Description=tandem server
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/tandem serve --listen 0.0.0.0:13013 --repo /srv/project
-Restart=on-failure
-User=tandem
-
-[Install]
-WantedBy=multi-user.target
-```
-
-`tandem serve` also creates a control socket, so `tandem status`, `tandem logs`,
-and `tandem down` work against it too.
 
 ### With Claude Code / AI agents
 
