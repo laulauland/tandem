@@ -23,6 +23,17 @@ The server is the **point of origin** — it's where git operations happen
 runs these on the server to ship code upstream. The tandem server is the source
 of truth, with GitHub as a mirror.
 
+## Installation
+
+Published on [crates.io](https://crates.io/crates/jj-tandem) as `jj-tandem`:
+
+```bash
+cargo install jj-tandem
+```
+
+Requires a Rust toolchain and Cap'n Proto compiler (`capnp`).
+Or build from source: `cargo build --release`.
+
 ## Single binary, two modes
 
 ```

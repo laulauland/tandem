@@ -77,11 +77,27 @@ Concurrent writes use compare-and-swap on operation heads with automatic
 retry. Two agents committing simultaneously both succeed — CAS contention
 resolves transparently.
 
-## Quickstart
+## Install
+
+Published on [crates.io](https://crates.io/crates/jj-tandem) as `jj-tandem`.
 
 ```bash
-cargo build --release
+cargo install jj-tandem
 ```
+
+This installs the `tandem` binary. Requires a Rust toolchain and
+[Cap'n Proto compiler](https://capnproto.org/install.html) (`capnp`).
+
+To build from source:
+
+```bash
+git clone https://github.com/laulauland/tandem.git
+cd tandem
+cargo build --release
+# binary at target/release/tandem
+```
+
+## Quickstart
 
 ### Start a server
 
