@@ -29,8 +29,10 @@
 - Add redaction rules for logs (paths, tokens, secrets)
 - Decide reconnect/backoff defaults for `watchHeads`
 - Verify object write idempotency contract and error codes
-- Clean shutdown for server (Ctrl+C signal handling)
+- Clean shutdown for server (Ctrl+C signal handling) — now part of server lifecycle feature, see `docs/exec-plans/active/server-lifecycle.md` slice 10
 - Add distributed smoke-test harness (`sprites.dev` / `exe.dev`) with env-gated CI step
+- Control socket protocol design — finalize HTTP-over-Unix-socket vs alternatives, see `docs/design-docs/server-lifecycle.md`
+- Capnp token auth handshake design — how to validate bearer token during capnp connection setup
 
 ### P3 (performance, not correctness)
 

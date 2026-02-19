@@ -9,6 +9,7 @@ This folder holds stable technical decisions.
 - [jj-lib integration](./jj-lib-integration.md)
 - [RPC protocol](./rpc-protocol.md)
 - [RPC error model](./rpc-error-model.md)
+- [Server lifecycle](./server-lifecycle.md) — `tandem up/down/status/logs`, daemon management
 
 ## Add a new design doc when
 
