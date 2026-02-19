@@ -4,20 +4,329 @@
 > protocol, on-disk format, and CLI surface may change. Don't use it for
 > data you can't regenerate. Back up your repos.
 
-jj workspaces over the network. One server, many agents in many vms, real files.
+jj workspaces over the network. One server, many agents on many machines, real files.
+
+## Install
+
+Published on [crates.io](https://crates.io/crates/jj-tandem) as `jj-tandem`.
+
+```bash
+cargo install jj-tandem
+```
+
+This installs the `tandem` binary. Requires a Rust toolchain and
+[Cap'n Proto compiler](https://capnproto.org/install.html) (`capnp`).
+
+To build from source:
+
+```bash
+git clone https://github.com/laulauland/tandem.git
+cd tandem
+cargo build --release
+# binary at target/release/tandem
+```
+
+## Quickstart
+
+```bash
+# Start a server (on your VPS, or locally for testing)
+tandem up --repo ~/project --listen 0.0.0.0:13013
+
+# Check it's running
+tandem status
+
+# On agent machines: initialize a workspace
+tandem init --tandem-server=your-vps:13013 ~/work
+cd ~/work
+echo 'pub fn auth() {}' > auth.rs
+tandem new -m "feat: add auth"
+
+# View logs from the daemon
+tandem logs
+
+# Stop the server
+tandem down
+```
+
+Every jj command works through `tandem` — `log`, `new`, `diff`, `file show`,
+`bookmark`, `describe` — because tandem implements jj-lib's store traits
+as RPC stubs. The server holds a real jj+git repo.
+
+---
+
+## Deployment
+
+### On a VPS (recommended)
+
+The default setup. Server on a VPS, agents connect from their machines.
+
+```bash
+# SSH to your VPS, install tandem
+cargo install jj-tandem
+
+# Start the server
+tandem up --repo /srv/project --listen 0.0.0.0:13013
+
+# Verify
+tandem status
+```
+
+On agent machines:
+
+```bash
+# Agent A
+tandem init --tandem-server=your-vps:13013 ~/work
+cd ~/work
+echo 'pub fn auth(token: &str) -> bool { !token.is_empty() }' > auth.rs
+tandem new -m "feat: add auth module"
+
+# Agent B (different machine)
+tandem init --tandem-server=your-vps:13013 --workspace=agent-b ~/work
+cd ~/work
+tandem log                                     # sees Agent A's commit
+tandem file show -r <change-id> auth.rs        # reads Agent A's file
+echo 'pub fn api() -> &str { "ok" }' > api.rs
+tandem new -m "feat: add API handler"
+```
+
+Ship via git from the server:
+
+```bash
+# On the VPS
+cd /srv/project
+jj bookmark create main -r <tip>
+jj git push --bookmark main
+```
+
+The server is a real jj+git repo. `jj git push` just works.
+
+### Local testing
+
+Server and agents on the same machine, different directories.
+
+```bash
+# Start server
+tandem up --repo /tmp/project --listen 127.0.0.1:13013
+
+# Agent A
+tandem init --tandem-server=127.0.0.1:13013 /tmp/agent-a
+cd /tmp/agent-a && echo 'hello' > file.txt && tandem new -m "agent A"
+
+# Agent B
+tandem init --tandem-server=127.0.0.1:13013 --workspace=agent-b /tmp/agent-b
+cd /tmp/agent-b && tandem log   # sees agent A's commit
+
+# Done
+tandem down
+```
+
+### Docker
+
+Containers connecting to a server. Use `tandem serve` (foreground mode) —
+appropriate for container entrypoints.
+
+```bash
+docker network create tandem-net
+
+# Server container
+docker run -d --name tandem-server --network tandem-net \
+  -v $(pwd)/target/release/tandem:/usr/local/bin/tandem \
+  debian:trixie-slim \
+  tandem serve --listen 0.0.0.0:13013 --repo /srv/project
+
+# Agent container
+docker run --rm --network tandem-net \
+  -v $(pwd)/target/release/tandem:/usr/local/bin/tandem \
+  debian:trixie-slim bash -c '
+    tandem init --tandem-server=tandem-server:13013 /work
+    cd /work
+    echo "from agent A" > hello.txt
+    tandem new -m "agent A commit"
+    tandem log --no-graph
+  '
+
+docker stop tandem-server && docker rm tandem-server
+docker network rm tandem-net
+```
+
+### With systemd
+
+Use `tandem serve` (foreground mode) for process managers.
+
+```ini
+[Unit]
+Description=tandem server
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/tandem serve --listen 0.0.0.0:13013 --repo /srv/project
+Restart=on-failure
+User=tandem
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`tandem serve` also creates a control socket, so `tandem status`, `tandem logs`,
+and `tandem down` work against it too.
+
+### With Claude Code / AI agents
+
+Each agent gets its own tandem workspace. They see each other's work in real
+time via the shared store.
+
+```bash
+# Server (your VPS)
+tandem up --repo /srv/project --listen 0.0.0.0:13013
+
+# Agent 1
+tandem init --tandem-server=your-vps:13013 --workspace=backend ~/work-backend
+cd ~/work-backend
+claude --prompt "Implement auth module in src/auth.rs. Use tandem for version control."
+
+# Agent 2
+tandem init --tandem-server=your-vps:13013 --workspace=frontend ~/work-frontend
+cd ~/work-frontend
+claude --prompt "Implement UI. Run tandem log to see other agents' work."
+```
+
+Add this to each agent's system prompt or CLAUDE.md:
 
 ```
-tandem serve --listen 0.0.0.0:13013 --repo ~/project   # server
-tandem init --tandem-server=host:13013 ~/work           # agent
-tandem new -m "feat: add auth"                          # it's just jj
+You're working in a tandem workspace (jj over the network).
+Use tandem instead of git for all version control:
+
+  tandem log                           # see all agents' commits
+  tandem new -m "description"          # commit your changes
+  tandem diff -r @-                    # see what you changed
+  tandem file show -r <rev> <path>     # read any agent's file
+  tandem bookmark create <name> -r @-  # mark for review
+
+Before starting work, run tandem log to see what others have done.
+Do NOT use git commands — this repo uses tandem.
 ```
 
-tandem is a single binary that embeds [jj](https://jj-vcs.com). The server
-hosts a jj+git repo — typically on a VM or VPS as a long-running service.
-Agents on remote machines get transparent read/write access over Cap'n Proto
-RPC. Every stock jj command works — `log`, `new`, `diff`, `file show`,
-`bookmark`, `describe` — because tandem implements jj-lib's `Backend`,
-`OpStore`, and `OpHeadsStore` traits as RPC stubs.
+---
+
+## Commands
+
+### Server lifecycle
+
+Start, stop, and monitor the tandem server.
+
+```
+tandem up --repo <path> --listen <addr>        Start background daemon
+tandem down                                     Stop the daemon
+tandem status                                   Check if daemon is running
+tandem logs                                     Stream logs from daemon
+tandem serve --listen <addr> --repo <path>      Start server (foreground)
+```
+
+**tandem up** — starts a background daemon and returns immediately.
+
+```
+tandem up --repo <path> --listen <addr> [--log-level <level>] [--log-file <path>]
+                                        [--control-socket <path>]
+```
+
+Forks `tandem serve --daemon` in the background. Waits for the control socket
+to become healthy, prints the PID, exits. If a daemon is already running,
+exits with an error.
+
+**tandem down** — stops the running daemon.
+
+```
+tandem down [--control-socket <path>]
+```
+
+Sends a shutdown request via the control socket, waits for the process to exit.
+
+**tandem status** — reports whether the daemon is running.
+
+```
+tandem status [--json] [--control-socket <path>]
+```
+
+Exit code 0 = running, 1 = not running.
+
+```
+$ tandem status
+tandem is running
+  PID:      1234
+  Uptime:   2h 15m
+  Repo:     /srv/project
+  Listen:   0.0.0.0:13013
+  Version:  0.3.0
+```
+
+```
+$ tandem status --json
+{"running":true,"pid":1234,"uptime_secs":8100,"repo":"/srv/project","listen":"0.0.0.0:13013","version":"0.3.0"}
+```
+
+**tandem logs** — streams log output from the daemon.
+
+```
+tandem logs [--level <level>] [--json] [--control-socket <path>]
+```
+
+Connects to the control socket and streams log events. `--level` filters
+server-side (trace, debug, info, warn, error). `--json` outputs raw JSON
+lines instead of formatted text.
+
+**tandem serve** — runs the server in the foreground. Use this for systemd,
+Docker, or debugging. Logs to stderr.
+
+```
+tandem serve --listen <addr> --repo <path> [--log-level <level>] [--log-format <fmt>]
+             [--control-socket <path>] [--log-file <path>]
+```
+
+### Workspace setup
+
+```
+tandem init --tandem-server <addr> [--workspace <name>] [path]
+```
+
+Initializes a tandem-backed workspace. Creates the directory, registers the
+tandem backend, and connects to the server. `--workspace` names the workspace
+(default: `default`). Each agent should use a unique workspace name.
+
+### Watch
+
+```
+tandem watch --server <addr>
+```
+
+Streams head change notifications from the server. Useful for triggering
+rebuilds or CI when any agent commits.
+
+### Everything else
+
+Every jj command works through tandem:
+
+```
+tandem log                              Show commit history
+tandem new -m "message"                 Create new change
+tandem diff -r @-                       Show changes
+tandem file show -r <rev> <path>        Read file at revision
+tandem bookmark create <name> -r <rev>  Create bookmark
+tandem describe -m "message"            Update description
+```
+
+The `tandem` binary embeds jj — these are stock jj commands running against
+the remote store.
+
+---
+
+## Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `TANDEM_SERVER` | Server address — fallback for `--tandem-server` |
+| `TANDEM_WORKSPACE` | Workspace name (default: `default`) |
+
+---
 
 ## Why
 
@@ -61,10 +370,14 @@ Each agent has a full working copy on its local disk (fast reads/writes).
 The commit store lives on the server. When Agent A commits, Agent B sees it
 instantly in `tandem log` — no fetch, no pull, no merge.
 
-The `tandem` binary has two modes:
+The `tandem` binary has two ways to run the server:
 
-- **`tandem serve`** — hosts the jj+git repo, accepts RPC connections
-- **`tandem <jj-command>`** — runs stock jj with tandem as the remote store
+- **`tandem up`** — starts a background daemon. No systemd needed.
+- **`tandem serve`** — runs in the foreground. For systemd, Docker, debugging.
+
+And one way to run as a client:
+
+- **`tandem <jj-command>`** — runs stock jj with tandem as the remote store.
 
 The client registers three jj-lib trait implementations:
 
@@ -77,257 +390,6 @@ The client registers three jj-lib trait implementations:
 Concurrent writes use compare-and-swap on operation heads with automatic
 retry. Two agents committing simultaneously both succeed — CAS contention
 resolves transparently.
-
-## Install
-
-Published on [crates.io](https://crates.io/crates/jj-tandem) as `jj-tandem`.
-
-```bash
-cargo install jj-tandem
-```
-
-This installs the `tandem` binary. Requires a Rust toolchain and
-[Cap'n Proto compiler](https://capnproto.org/install.html) (`capnp`).
-
-To build from source:
-
-```bash
-git clone https://github.com/laulauland/tandem.git
-cd tandem
-cargo build --release
-# binary at target/release/tandem
-```
-
-## Quickstart
-
-### Start a server
-
-```bash
-tandem serve --listen 0.0.0.0:13013 --repo ~/project
-```
-
-For production use, run this on a VM/VPS — see [Deployment setups](#deployment-setups) below.
-
-### Connect agents
-
-```bash
-# Agent A
-tandem init --tandem-server=server:13013 ~/work-a
-cd ~/work-a
-echo 'pub fn auth(token: &str) -> bool { !token.is_empty() }' > auth.rs
-tandem new -m "feat: add auth module"
-
-# Agent B (different machine, or different terminal)
-tandem init --tandem-server=server:13013 --workspace=agent-b ~/work-b
-cd ~/work-b
-echo 'pub fn api() -> String { "ok".into() }' > api.rs
-tandem new -m "feat: add API handler"
-```
-
-### What agents see
-
-Agent B runs `tandem log` and sees everyone's work:
-
-```
-@  w agent-b  agent-b@  f3f18a89
-│  (empty) feat: add API handler
-○  o agent-b  a918ed0d
-│  api.rs
-│ ○  k agent-a  default@  7acb3ff6
-│ │  (empty) feat: add auth module
-│ ○  u agent-a  78f31413
-├─╯  auth.rs
-◆  z root()  00000000
-```
-
-Agent B reads Agent A's file directly:
-
-```bash
-$ tandem file show -r k auth.rs
-pub fn auth(token: &str) -> bool { !token.is_empty() }
-```
-
-### Ship via git
-
-On the server:
-
-```bash
-jj bookmark create main -r <tip>
-jj git push --bookmark main
-```
-
-The server is a real jj+git repo. Standard git push just works.
-
----
-
-## Deployment setups
-
-### Local: multiple terminals (for testing)
-
-The simplest setup for trying tandem out. Server and agents on the same
-machine, different directories. Not how you'd run it for real work — see
-Remote machines below.
-
-```bash
-# Terminal 1 — server
-tandem serve --listen 127.0.0.1:13013 --repo /tmp/project
-
-# Terminal 2 — agent A
-tandem init --tandem-server=127.0.0.1:13013 /tmp/agent-a
-cd /tmp/agent-a && echo 'hello' > file.txt && tandem new -m "agent A"
-
-# Terminal 3 — agent B
-tandem init --tandem-server=127.0.0.1:13013 --workspace=agent-b /tmp/agent-b
-cd /tmp/agent-b && tandem log   # sees agent A's commit
-```
-
-### Remote machines: sprites.dev / exe.dev / SSH
-
-The typical production setup. Server on a VPS/VM, agents on separate machines.
-
-```bash
-# VPS — server
-tandem serve --listen 0.0.0.0:13013 --repo /srv/project
-
-# Machine A — agent A (e.g. sprites.dev sandbox)
-# Copy the binary over, or build on the remote machine
-scp target/release/tandem agent-a-host:/usr/local/bin/
-ssh agent-a-host
-  export TANDEM_SERVER=server-host:13013
-  tandem init ~/work
-  cd ~/work
-  # ... write code, commit with tandem new ...
-
-# Machine B — agent B (e.g. exe.dev VM)
-scp target/release/tandem agent-b-host:/usr/local/bin/
-ssh agent-b-host
-  export TANDEM_SERVER=server-host:13013
-  tandem init --workspace=agent-b ~/work
-  cd ~/work
-  tandem log                  # sees agent A's commits
-  tandem file show -r <change-id> src/auth.rs   # reads agent A's files
-```
-
-Requirements:
-- Server port (default 13013) must be reachable from agent machines
-- No TLS yet — use SSH tunnels or VPN for untrusted networks
-- The `tandem` binary is ~30MB, statically linkable, no runtime deps
-
-### Docker: 3 agents on a shared network
-
-Each agent runs in its own container. They connect to the server container
-by hostname over a Docker bridge network.
-
-```bash
-# Build Linux binary (if on macOS)
-docker run --rm -v $(pwd):/src -v tandem-cargo:/usr/local/cargo/registry \
-  -w /src rust:1.84-slim \
-  bash -c 'apt-get update -qq && apt-get install -y -qq capnproto >/dev/null 2>&1 && cargo build --release'
-
-# Create network
-docker network create tandem-net
-
-# Server
-docker run -d --name tandem-server --network tandem-net \
-  -v $(pwd)/target/release/tandem:/usr/local/bin/tandem \
-  debian:trixie-slim \
-  tandem serve --listen 0.0.0.0:13013 --repo /srv/project
-
-# Agent A
-docker run --rm --network tandem-net \
-  -v $(pwd)/target/release/tandem:/usr/local/bin/tandem \
-  debian:trixie-slim bash -c '
-    tandem init --tandem-server=tandem-server:13013 /work
-    cd /work
-    echo "from agent A" > hello.txt
-    tandem --config=fsmonitor.backend=none new -m "agent A commit"
-    tandem --config=fsmonitor.backend=none log --no-graph
-  '
-
-# Agent B
-docker run --rm --network tandem-net \
-  -v $(pwd)/target/release/tandem:/usr/local/bin/tandem \
-  debian:trixie-slim bash -c '
-    tandem init --tandem-server=tandem-server:13013 --workspace=agent-b /work
-    cd /work
-    tandem --config=fsmonitor.backend=none log --no-graph
-    tandem --config=fsmonitor.backend=none file show -r <agent-a-change> hello.txt
-  '
-
-# Cleanup
-docker stop tandem-server && docker rm tandem-server
-docker network rm tandem-net
-```
-
-This simulates cross-machine communication. Each container has its own
-filesystem, its own network identity, and connects to the server by DNS name.
-Tested — see `qa/v1/cross-machine-report.md`.
-
-### Claude Code: multi-agent with tandem
-
-Each Claude Code instance gets its own tandem workspace. They see each
-other's work in real time via the shared store.
-
-```bash
-# Server (your machine)
-tandem serve --listen 0.0.0.0:13013 --repo ~/project
-
-# Agent 1 — in one terminal
-tandem init --tandem-server=localhost:13013 --workspace=backend ~/work-backend
-cd ~/work-backend
-claude --prompt "Implement auth module in src/auth.rs. Use tandem for version control (not git). Run tandem log to see context."
-
-# Agent 2 — in another terminal
-tandem init --tandem-server=localhost:13013 --workspace=frontend ~/work-frontend
-cd ~/work-frontend
-claude --prompt "Implement UI in src/routes.rs. Run tandem log to see other agents' work. Read files with: tandem file show -r <change-id> <path>"
-
-# Agent 3 — in another terminal
-tandem init --tandem-server=localhost:13013 --workspace=tests ~/work-tests
-cd ~/work-tests
-claude --prompt "Write tests for the code other agents wrote. Run tandem log, then tandem file show to read their implementations."
-```
-
-Add this to each agent's system prompt or CLAUDE.md:
-
-```
-You're working in a tandem workspace (jj over the network).
-Use tandem instead of git for all version control:
-
-  tandem log                           # see all agents' commits
-  tandem new -m "description"          # commit your changes
-  tandem diff -r @-                    # see what you changed
-  tandem file show -r <rev> <path>     # read any agent's file
-  tandem bookmark create <name> -r @-  # mark for review
-
-Before starting work, run tandem log to see what others have done.
-Do NOT use git commands — this repo uses tandem.
-```
-
-### Orchestrator pattern
-
-One orchestrator manages the server and ships code. Multiple agents work
-independently.
-
-```bash
-# Orchestrator machine
-tandem serve --listen 0.0.0.0:13013 --repo ~/project
-
-# ... agents do their work on remote machines ...
-
-# When ready to ship:
-cd ~/project
-jj log                                    # see all agents' work
-jj new --no-edit -m "merge: auth + api"   # create merge point
-jj bookmark create main -r <tip>
-jj git push --bookmark main               # ship to GitHub
-```
-
-The orchestrator never writes code. They review with `jj log`, `jj diff`,
-`jj show`, and ship with `jj git push`. The server repo IS the jj+git repo,
-so standard git tooling works.
-
----
 
 ## vs git worktrees
 
@@ -351,35 +413,13 @@ agents to see each other's work without merging, tandem is what you want.
 
 ---
 
-## Commands
-
-```
-tandem serve --listen <addr> --repo <path>     Start server
-tandem init --tandem-server <addr> [path]      Init workspace
-tandem watch --server <addr>                   Stream head notifications
-tandem log                                     Show commit history
-tandem new -m "message"                        Create new change
-tandem diff -r @-                              Show changes
-tandem file show -r <rev> <path>               Read file at revision
-tandem bookmark create <name> -r <rev>         Create bookmark
-tandem describe -m "message"                   Update description
-tandem ...                                     Any jj command
-```
-
-## Environment variables
-
-| Variable | Purpose |
-|----------|---------|
-| `TANDEM_SERVER` | Server address — fallback for `--tandem-server` |
-| `TANDEM_WORKSPACE` | Workspace name (default: `default`) |
-
 ## Tests
 
 ```bash
 cargo test
 ```
 
-16 integration tests covering:
+34 integration tests covering:
 
 - Single-agent file round-trip (write → commit → read back exact bytes)
 - Two-agent cross-workspace file visibility
@@ -388,26 +428,28 @@ cargo test
 - WatchHeads real-time notifications
 - Git round-trip (tandem → jj git objects)
 - End-to-end multi-agent with bookmarks
+- Signal handling and graceful shutdown
+- Control socket status reporting
+- Daemon lifecycle (up/down)
+- Log streaming
 
 Cross-machine tested with Docker containers — see `qa/v1/cross-machine-report.md`.
 
 ## Known limitations
 
-- **No TLS** — connections are plaintext. For production on a VPS, use SSH tunnels (`ssh -L`) or a VPN.
-- **No auth** — anyone who can reach the port can read/write the repo. On a VPS, firewall the port and use SSH tunnels for access.
+- **No TLS** — connections are plaintext. Use SSH tunnels or a VPN for untrusted networks.
+- **No auth** — anyone who can reach the port can read/write the repo. Firewall the port and use SSH tunnels for access.
+- **Unix only for daemon management** — `tandem up`, `tandem down`, `tandem status`, and `tandem logs` use Unix domain sockets. macOS and Linux only, not Windows. (`tandem serve` works everywhere.)
 - **No static binary yet** — requires glibc 2.39+. Use matching distro or build locally.
 - **fsmonitor conflict** — if your jj config has `fsmonitor.backend = "watchman"`,
   pass `--config=fsmonitor.backend=none` to tandem commands.
-- **Description-based revsets** — `description(exact:"...")` may not work for
-  cross-workspace queries. Use change IDs from `tandem log` instead.
 
 ## Running in production
 
-- **Back up the server repo directory** — it's the source of truth. If lost without backups, data is gone (unless mirrored to GitHub via `jj git push`).
-- **Use a process manager** (systemd, supervisord, etc.) to keep `tandem serve` running.
-- **Git credentials on the server** — the server needs SSH keys or tokens for `jj git push` / `jj git fetch` to GitHub.
-- **Monitor disk space** — all agent objects (files, trees, commits) land on the server.
-- **Firewall the port** — no auth means network-level access control is your only defense. SSH tunnels or VPN.
+- **Back up the server repo directory** — it's the source of truth.
+- **Git credentials on the server** — the server needs SSH keys or tokens for `jj git push` / `jj git fetch`.
+- **Monitor disk space** — all agent objects land on the server.
+- **Firewall the port** — no auth means network-level access control is your only defense.
 
 ## Project structure
 
@@ -415,6 +457,7 @@ Cross-machine tested with Docker containers — see `qa/v1/cross-machine-report.
 src/
   main.rs              CLI dispatch (clap) + jj CliRunner passthrough
   server.rs            Server — jj Git backend + Cap'n Proto RPC
+  control.rs           Control socket — daemon management protocol (Unix socket, JSON lines)
   backend.rs           TandemBackend (jj-lib Backend trait over RPC)
   op_store.rs          TandemOpStore (jj-lib OpStore trait over RPC)
   op_heads_store.rs    TandemOpHeadsStore (CAS head management over RPC)
@@ -425,7 +468,8 @@ schema/
   tandem.capnp         Cap'n Proto schema (13 Store methods + HeadWatcher)
 tests/
   common/mod.rs        Test harness (server spawn, HOME isolation)
-  slice1-7 tests       Integration tests asserting on file bytes
+  slice1-7 tests       Core integration tests (file round-trip, visibility, CAS, git)
+  slice10-13 tests     Server lifecycle tests (shutdown, control socket, up/down, logs)
 ```
 
 ## License

@@ -81,7 +81,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start the tandem server
+    /// Start the tandem server (foreground)
     #[command(after_help = SERVE_AFTER_HELP)]
     Serve {
         /// Address to listen on (e.g. 0.0.0.0:13013)
@@ -90,6 +90,21 @@ enum Commands {
         /// Path to the repository directory
         #[arg(long)]
         repo: String,
+        /// Log level (trace, debug, info, warn, error)
+        #[arg(long, default_value = "info")]
+        log_level: String,
+        /// Log format (text, json)
+        #[arg(long, default_value = "text")]
+        log_format: String,
+        /// Path to control socket
+        #[arg(long)]
+        control_socket: Option<String>,
+        /// Run as daemon (internal, set by `tandem up`)
+        #[arg(long, hide = true)]
+        daemon: bool,
+        /// Log file path (used in daemon mode)
+        #[arg(long)]
+        log_file: Option<String>,
     },
 
     /// Initialize a tandem-backed workspace
@@ -112,6 +127,55 @@ enum Commands {
         #[arg(long, env = "TANDEM_SERVER")]
         server: String,
     },
+
+    /// Start tandem server as a background daemon
+    Up {
+        /// Path to the repository directory
+        #[arg(long)]
+        repo: String,
+        /// Address to listen on (e.g. 0.0.0.0:13013)
+        #[arg(long)]
+        listen: String,
+        /// Log level for the daemon (trace, debug, info, warn, error)
+        #[arg(long, default_value = "info")]
+        log_level: String,
+        /// Daemon log file path
+        #[arg(long)]
+        log_file: Option<String>,
+        /// Path to control socket
+        #[arg(long)]
+        control_socket: Option<String>,
+    },
+
+    /// Stop the tandem daemon
+    Down {
+        /// Path to control socket
+        #[arg(long)]
+        control_socket: Option<String>,
+    },
+
+    /// Show tandem daemon status
+    Status {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Path to control socket
+        #[arg(long)]
+        control_socket: Option<String>,
+    },
+
+    /// Stream logs from a running tandem daemon
+    Logs {
+        /// Log level filter (trace, debug, info, warn, error)
+        #[arg(long, default_value = "info")]
+        level: String,
+        /// Output raw JSON log lines
+        #[arg(long)]
+        json: bool,
+        /// Path to control socket
+        #[arg(long)]
+        control_socket: Option<String>,
+    },
 }
 
 // ─── Dispatch ─────────────────────────────────────────────────────────────────
@@ -124,7 +188,7 @@ fn main() -> ExitCode {
     // argument parsing — this avoids conflicts with jj global flags like
     // --no-pager, --color, -R that appear before the subcommand.
     match args.get(1).map(|s| s.as_str()) {
-        None | Some("serve" | "init" | "watch" | "--help" | "-h") => {}
+        None | Some("serve" | "init" | "watch" | "up" | "down" | "status" | "logs" | "--help" | "-h") => {}
         _ => return run_jj(),
     }
 
@@ -135,13 +199,38 @@ fn main() -> ExitCode {
             println!();
             ExitCode::SUCCESS
         }
-        Some(Commands::Serve { listen, repo }) => run_serve(&listen, &repo),
+        Some(Commands::Serve {
+            listen,
+            repo,
+            log_level,
+            log_format,
+            control_socket,
+            daemon,
+            log_file,
+        }) => run_serve(&listen, &repo, &log_level, &log_format, control_socket.as_deref(), daemon, log_file.as_deref()),
         Some(Commands::Init {
             tandem_server,
             workspace,
             path,
         }) => run_tandem_init(&tandem_server, &workspace, &path),
         Some(Commands::Watch { server }) => run_watch(&server),
+        Some(Commands::Up {
+            repo,
+            listen,
+            log_level,
+            log_file,
+            control_socket,
+        }) => run_up(&repo, &listen, &log_level, log_file.as_deref(), control_socket.as_deref()),
+        Some(Commands::Down { control_socket }) => run_down(control_socket.as_deref()),
+        Some(Commands::Status {
+            json,
+            control_socket,
+        }) => run_status(json, control_socket.as_deref()),
+        Some(Commands::Logs {
+            level,
+            json,
+            control_socket,
+        }) => run_logs(&level, json, control_socket.as_deref()),
     }
 }
 
@@ -157,18 +246,267 @@ fn run_watch(server_addr: &str) -> ExitCode {
 
 // ─── Server mode ──────────────────────────────────────────────────────────────
 
-fn run_serve(listen_addr: &str, repo_path: &str) -> ExitCode {
+fn run_serve(
+    listen_addr: &str,
+    repo_path: &str,
+    _log_level: &str,
+    _log_format: &str,
+    control_socket: Option<&str>,
+    daemon: bool,
+    log_file: Option<&str>,
+) -> ExitCode {
+    // In daemon mode, stdout/stderr are already redirected to the log file
+    // by `run_up` before spawning this process. Nothing extra needed here.
+
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
     let local = tokio::task::LocalSet::new();
 
-    if let Err(err) = local.block_on(&rt, server::run_serve(listen_addr, repo_path)) {
+    let opts = server::ServeOptions {
+        listen_addr: listen_addr.to_string(),
+        repo_path: repo_path.to_string(),
+        control_socket: control_socket.map(|s| s.to_string()),
+        daemon,
+        log_file: log_file.map(|s| s.to_string()),
+    };
+
+    if let Err(err) = local.block_on(&rt, server::run_serve(opts)) {
         eprintln!("error: {err:#}");
         return ExitCode::FAILURE;
     }
 
+    ExitCode::SUCCESS
+}
+
+// ─── Up / Down / Status / Logs ────────────────────────────────────────────────
+
+mod control;
+
+fn default_control_socket() -> String {
+    let dir = std::env::temp_dir().join("tandem");
+    std::fs::create_dir_all(&dir).ok();
+    dir.join("control.sock").to_string_lossy().to_string()
+}
+
+fn resolve_control_socket(explicit: Option<&str>) -> String {
+    explicit
+        .map(|s| s.to_string())
+        .unwrap_or_else(default_control_socket)
+}
+
+fn run_up(
+    repo: &str,
+    listen: &str,
+    log_level: &str,
+    log_file: Option<&str>,
+    control_socket: Option<&str>,
+) -> ExitCode {
+    let sock_path = resolve_control_socket(control_socket);
+
+    // Check if already running by trying to connect to control socket
+    if let Ok(status) = control::client_status(&sock_path) {
+        if status.running {
+            eprintln!(
+                "tandem is already running (PID {}). Use `tandem down` first.",
+                status.pid
+            );
+            return ExitCode::FAILURE;
+        }
+    }
+
+    // Determine log file
+    let log_file_path = log_file.map(|s| s.to_string()).unwrap_or_else(|| {
+        let dir = std::env::temp_dir().join("tandem");
+        std::fs::create_dir_all(&dir).ok();
+        dir.join("daemon.log").to_string_lossy().to_string()
+    });
+
+    // Spawn tandem serve --daemon
+    let exe = match std::env::current_exe() {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("error: cannot determine executable path: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args([
+        "serve",
+        "--listen",
+        listen,
+        "--repo",
+        repo,
+        "--log-level",
+        log_level,
+        "--control-socket",
+        &sock_path,
+        "--log-file",
+        &log_file_path,
+        "--daemon",
+    ]);
+
+    // Redirect stdout/stderr to log file for daemon
+    let log_file_handle = match std::fs::File::create(&log_file_path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("error: cannot create log file {log_file_path}: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let stderr_file = match log_file_handle.try_clone() {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("error: cannot clone log file handle: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    cmd.stdout(std::process::Stdio::from(log_file_handle));
+    cmd.stderr(std::process::Stdio::from(stderr_file));
+    cmd.stdin(std::process::Stdio::null());
+
+    // Inherit HOME/XDG env from current process for isolation in tests
+    let child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: failed to start daemon: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let pid = child.id();
+
+    // Wait for control socket to become available
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let sock = std::path::Path::new(&sock_path);
+        if sock.exists() {
+            #[cfg(unix)]
+            if std::os::unix::net::UnixStream::connect(sock).is_ok() {
+                // Verify healthy via status
+                if let Ok(status) = control::client_status(&sock_path) {
+                    if status.running {
+                        println!("tandem running, PID {pid}");
+                        return ExitCode::SUCCESS;
+                    }
+                }
+            }
+        }
+        if std::time::Instant::now() > deadline {
+            eprintln!("error: daemon failed to start within timeout");
+            return ExitCode::FAILURE;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+fn run_down(control_socket: Option<&str>) -> ExitCode {
+    let sock_path = resolve_control_socket(control_socket);
+
+    // Try to get status first
+    let status = match control::client_status(&sock_path) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("tandem is not running");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if !status.running {
+        eprintln!("tandem is not running");
+        return ExitCode::FAILURE;
+    }
+
+    let pid = status.pid;
+
+    // Send shutdown
+    if let Err(e) = control::client_shutdown(&sock_path) {
+        eprintln!("error: shutdown request failed: {e}");
+        return ExitCode::FAILURE;
+    }
+
+    // Wait for process to exit
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        // Check if process is still alive
+        #[cfg(unix)]
+        {
+            let alive = unsafe { libc::kill(pid as libc::pid_t, 0) } == 0;
+            if !alive {
+                println!("tandem stopped");
+                return ExitCode::SUCCESS;
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            println!("tandem stopped");
+            return ExitCode::SUCCESS;
+        }
+        if std::time::Instant::now() > deadline {
+            eprintln!("warning: daemon did not exit within timeout");
+            return ExitCode::FAILURE;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+fn run_status(json: bool, control_socket: Option<&str>) -> ExitCode {
+    let sock_path = resolve_control_socket(control_socket);
+
+    match control::client_status(&sock_path) {
+        Ok(status) if status.running => {
+            if json {
+                println!("{}", serde_json::to_string_pretty(&status).unwrap());
+            } else {
+                println!("tandem is running");
+                println!("  PID:      {}", status.pid);
+                let uptime = status.uptime_secs;
+                if uptime >= 3600 {
+                    println!("  Uptime:   {}h {}m", uptime / 3600, (uptime % 3600) / 60);
+                } else if uptime >= 60 {
+                    println!("  Uptime:   {}m {}s", uptime / 60, uptime % 60);
+                } else {
+                    println!("  Uptime:   {}s", uptime);
+                }
+                println!("  Repo:     {}", status.repo);
+                println!("  Listen:   {}", status.listen);
+                println!("  Version:  {}", status.version);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            if json {
+                println!("{{\"running\":false}}");
+            } else {
+                eprintln!("tandem is not running");
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_logs(level: &str, json: bool, control_socket: Option<&str>) -> ExitCode {
+    let sock_path = resolve_control_socket(control_socket);
+
+    if control::client_status(&sock_path).is_err() {
+        eprintln!("no tandem daemon running. Start one with `tandem up`.");
+        return ExitCode::FAILURE;
+    }
+
+    if let Err(e) = control::client_logs(&sock_path, level, json) {
+        // Connection closed = server shut down, not an error
+        let msg = format!("{e}");
+        if msg.contains("broken pipe")
+            || msg.contains("connection reset")
+            || msg.contains("end of file")
+            || msg.contains("Connection reset")
+        {
+            return ExitCode::SUCCESS;
+        }
+        eprintln!("error: {e}");
+        return ExitCode::FAILURE;
+    }
     ExitCode::SUCCESS
 }
 

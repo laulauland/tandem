@@ -22,29 +22,162 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast;
 
+use crate::control;
 use crate::proto_convert;
 use crate::tandem_capnp::{cancel, head_watcher, store};
 
+fn emit_log(tx: &broadcast::Sender<control::LogEvent>, level: &str, msg: &str) {
+    let _ = tx.send(control::LogEvent {
+        ts: format!(
+            "{}Z",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+        ),
+        level: level.to_string(),
+        msg: msg.to_string(),
+    });
+}
+
 // ─── Public entry point ───────────────────────────────────────────────────────
 
-pub async fn run_serve(listen_addr: &str, repo_path: &str) -> Result<()> {
-    let repo = PathBuf::from(repo_path);
-    let server = Rc::new(Server::new(repo)?);
-    let listener = tokio::net::TcpListener::bind(listen_addr)
-        .await
-        .with_context(|| format!("failed to bind {listen_addr}"))?;
-    eprintln!("tandem server listening on {}", listener.local_addr()?);
+#[allow(dead_code)]
+pub struct ServeOptions {
+    pub listen_addr: String,
+    pub repo_path: String,
+    pub control_socket: Option<String>,
+    pub daemon: bool,
+    pub log_file: Option<String>,
+}
 
-    loop {
-        let (stream, _) = listener.accept().await?;
-        let server = Rc::clone(&server);
-        tokio::task::spawn_local(async move {
-            if let Err(err) = handle_capnp_connection(server, stream).await {
-                eprintln!("rpc connection error: {err:#}");
+pub async fn run_serve(opts: ServeOptions) -> Result<()> {
+    let repo = PathBuf::from(&opts.repo_path);
+    let server = Rc::new(Server::new(repo)?);
+    let listener = tokio::net::TcpListener::bind(&opts.listen_addr)
+        .await
+        .with_context(|| format!("failed to bind {}", opts.listen_addr))?;
+    let local_addr = listener.local_addr()?;
+    eprintln!("tandem server listening on {local_addr}");
+
+    // Set up shutdown signaling
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
+
+    // Log broadcast channel
+    let (log_tx, _) = broadcast::channel::<control::LogEvent>(1024);
+
+    // Set up control socket if requested
+    let control_socket_path = opts.control_socket.clone();
+    if let Some(ref sock_path) = control_socket_path {
+        let control_state = Arc::new(control::ControlState {
+            pid: std::process::id(),
+            start_time: std::time::Instant::now(),
+            repo: opts.repo_path.clone(),
+            listen: local_addr.to_string(),
+            shutdown_tx: shutdown_tx.clone(),
+            log_tx: log_tx.clone(),
+        });
+
+        let sock = sock_path.clone();
+        tokio::spawn(async move {
+            if let Err(e) = control::run_control_socket(sock, control_state).await {
+                eprintln!("control socket error: {e:#}");
             }
         });
     }
+
+    // Emit initial log event
+    emit_log(&log_tx, "info", &format!("tandem server listening on {local_addr}"));
+
+    // Signal handling
+    let (signal_tx, mut signal_rx) = tokio::sync::mpsc::channel::<()>(2);
+
+    // Spawn signal handler (multi-threaded tokio task for signal handling)
+    let signal_tx_clone = signal_tx.clone();
+    tokio::spawn(async move {
+        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+            .expect("install SIGINT handler");
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("install SIGTERM handler");
+
+        let mut first_signal = true;
+        loop {
+            tokio::select! {
+                _ = sigint.recv() => {},
+                _ = sigterm.recv() => {},
+            }
+            if first_signal {
+                first_signal = false;
+                eprintln!("\nshutting down gracefully...");
+                let _ = signal_tx_clone.send(()).await;
+            } else {
+                eprintln!("\nforced shutdown");
+                std::process::exit(0);
+            }
+        }
+    });
+
+    // Track in-flight connections
+    let inflight = Rc::new(std::cell::Cell::new(0u32));
+
+    // Share log_tx with connection handlers
+    let log_tx = Rc::new(log_tx);
+
+    // Accept loop with shutdown
+    loop {
+        tokio::select! {
+            result = listener.accept() => {
+                let (stream, addr) = result?;
+                let server = Rc::clone(&server);
+                let inflight = Rc::clone(&inflight);
+                let log_tx = Rc::clone(&log_tx);
+                inflight.set(inflight.get() + 1);
+
+                emit_log(&log_tx, "info", &format!("client connected: {addr}"));
+
+                tokio::task::spawn_local(async move {
+                    if let Err(err) = handle_capnp_connection(server, stream, &log_tx).await {
+                        eprintln!("rpc connection error: {err:#}");
+                    }
+                    emit_log(&log_tx, "info", &format!("client disconnected: {addr}"));
+                    inflight.set(inflight.get().saturating_sub(1));
+                });
+            }
+            _ = signal_rx.recv() => {
+                emit_log(&log_tx, "info", "signal received, draining connections...");
+                eprintln!("signal received, draining connections...");
+                break;
+            }
+            _ = shutdown_rx.recv() => {
+                emit_log(&log_tx, "info", "shutdown requested via control socket");
+                eprintln!("shutdown requested via control socket...");
+                break;
+            }
+        }
+    }
+
+    // Drain in-flight connections (5s timeout)
+    if inflight.get() > 0 {
+        eprintln!("waiting for {} in-flight connection(s)...", inflight.get());
+        let drain_deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+        while inflight.get() > 0 {
+            if tokio::time::Instant::now() > drain_deadline {
+                eprintln!("drain timeout, {} connections remaining", inflight.get());
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        }
+    }
+
+    // Clean up control socket
+    if let Some(ref sock_path) = control_socket_path {
+        let _ = std::fs::remove_file(sock_path);
+    }
+
+    eprintln!("tandem server stopped");
+    Ok(())
 }
 
 // ─── Connection handler ───────────────────────────────────────────────────────
@@ -52,6 +185,7 @@ pub async fn run_serve(listen_addr: &str, repo_path: &str) -> Result<()> {
 async fn handle_capnp_connection(
     server: Rc<Server>,
     stream: tokio::net::TcpStream,
+    log_tx: &broadcast::Sender<control::LogEvent>,
 ) -> Result<()> {
     use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -64,6 +198,7 @@ async fn handle_capnp_connection(
     );
     let store_impl = StoreImpl {
         server: server.clone(),
+        log_tx: log_tx.clone(),
     };
     let store_client: store::Client = capnp_rpc::new_client(store_impl);
     let rpc_system = RpcSystem::new(Box::new(network), Some(store_client.client));
@@ -209,10 +344,8 @@ impl Server {
     fn sync_op_heads_to_jj(&self, heads: &[String]) -> Result<()> {
         // Clear existing head files
         if let Ok(entries) = fs::read_dir(&self.op_heads_dir) {
-            for entry in entries {
-                if let Ok(entry) = entry {
-                    let _ = fs::remove_file(entry.path());
-                }
+            for entry in entries.flatten() {
+                let _ = fs::remove_file(entry.path());
             }
         }
         // Write new head files (empty files named by hex ID)
@@ -547,6 +680,7 @@ struct HeadsState {
 
 struct StoreImpl {
     server: Rc<Server>,
+    log_tx: broadcast::Sender<control::LogEvent>,
 }
 
 fn capnp_err(e: anyhow::Error) -> capnp::Error {
@@ -601,6 +735,7 @@ impl store::Server for StoreImpl {
 
         match self.server.get_object_sync(kind_str, id_bytes) {
             Ok(data) => {
+                emit_log(&self.log_tx, "debug", &format!("getObject {kind_str} size={}", data.len()));
                 results.get().set_data(&data);
                 Promise::ok(())
             }
@@ -620,6 +755,7 @@ impl store::Server for StoreImpl {
 
         match self.server.put_object_sync(kind_str, &data) {
             Ok((id, normalized)) => {
+                emit_log(&self.log_tx, "info", &format!("putObject {kind_str} size={}", data.len()));
                 let mut r = results.get();
                 r.set_id(&id);
                 r.set_normalized_data(&normalized);
@@ -792,6 +928,7 @@ impl store::Server for StoreImpl {
             .update_op_heads_sync(old_ids, new_id, expected_version, workspace_id)
         {
             Ok(result) => {
+                emit_log(&self.log_tx, "info", &format!("updateOpHeads ok={} version={}", result.ok, result.version));
                 let mut r = results.get();
                 r.set_ok(result.ok);
                 {

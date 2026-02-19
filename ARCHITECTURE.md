@@ -4,15 +4,22 @@
 
 ## Implementation Status
 
-**Complete as of 2026-02-15.** All slices 1-9 implemented and tested.
+**Complete as of 2026-02-19.** All slices 1-13 implemented and tested (34 tests).
 See `docs/exec-plans/completed/` for details.
 
 ## Shape
 
-Single binary, two modes:
+Single binary, multiple modes:
 
-- `tandem serve --listen <addr> --repo <path>` — server mode
+- `tandem up --repo <path> --listen <addr>` — start background daemon
+- `tandem down` / `tandem status` / `tandem logs` — manage the daemon
+- `tandem serve --listen <addr> --repo <path>` — foreground server (systemd/docker)
 - `tandem <jj-command>` — client mode (stock jj via CliRunner)
+
+`tandem up` is the easy way. It forks `tandem serve --daemon`, waits for
+the control socket to become healthy, prints the PID, and exits. `tandem serve`
+is the foreground mode for systemd, Docker, or debugging. Both modes create
+a control socket so `tandem down/status/logs` work against either.
 
 ## Core model
 
@@ -93,7 +100,7 @@ See `docs/design-docs/workflow.md` for the full workflow.
 
 ## Test Coverage
 
-16 integration tests across slices 1-7:
+34 integration tests across slices 1-13:
 
 | Slice | Test File | Coverage |
 |-------|-----------|----------|
@@ -104,6 +111,10 @@ See `docs/design-docs/workflow.md` for the full workflow.
 | 5 | `tests/slice5_watch_heads.rs` | Real-time head notifications |
 | 6 | `tests/slice6_git_round_trip.rs` | Git push/fetch round-trip |
 | 7 | `tests/slice7_end_to_end.rs` | Multi-agent + git + external contributor |
+| 10 | `tests/slice10_graceful_shutdown.rs` | Signal handling, clean exit, log flags |
+| 11 | `tests/slice11_control_socket.rs` | Control socket, status reporting |
+| 12 | `tests/slice12_up_down.rs` | Daemon lifecycle (up/down), duplicate detection |
+| 13 | `tests/slice13_log_streaming.rs` | Log streaming, level filtering, JSON output |
 
 All tests assert on **file byte content**, not just commit descriptions.
 
@@ -125,6 +136,7 @@ Run: `cargo test`
 src/
   main.rs              CLI dispatch (clap) + CliRunner passthrough
   server.rs            Server — jj Git backend + Cap'n Proto RPC
+  control.rs           Control socket — daemon management (Unix socket, JSON lines)
   backend.rs           TandemBackend (jj-lib Backend trait)
   op_store.rs          TandemOpStore (jj-lib OpStore trait)
   op_heads_store.rs    TandemOpHeadsStore (jj-lib OpHeadsStore trait)
@@ -135,7 +147,8 @@ schema/
   tandem.capnp         Cap'n Proto schema (Store + HeadWatcher)
 tests/
   common/mod.rs        Test harness (server spawn, HOME isolation)
-  slice1-7 tests       Integration tests asserting on file bytes
+  slice1-7 tests       Core integration tests (file round-trip, visibility, CAS, git)
+  slice10-13 tests     Server lifecycle tests (shutdown, control socket, up/down, logs)
 ```
 
 ## Non-goals

@@ -35,20 +35,34 @@ cargo install jj-tandem
 Requires a Rust toolchain and Cap'n Proto compiler (`capnp`).
 Or build from source: `cargo build --release`.
 
-## Single binary, two modes
+## Single binary, three modes
 
 ```
-tandem serve --listen <addr> --repo <path>    # server mode
+tandem up --repo <path> --listen <addr>       # start background daemon
+tandem serve --listen <addr> --repo <path>    # foreground server (systemd/docker)
 tandem [jj args...]                           # client mode (stock jj via CliRunner)
+```
+
+Plus lifecycle commands that talk to a running server:
+
+```
+tandem down                                   # stop daemon
+tandem status [--json]                        # health check
+tandem logs [--level <level>] [--json]        # stream logs from daemon
 ```
 
 The client mode is `CliRunner::init().add_store_factories(tandem_factories()).run()`.
 All stock jj commands work transparently: `tandem new`, `tandem log`, `tandem diff`,
-`tandem cat`, `tandem bookmark create` are all jj commands running through our binary.
+`tandem file show`, `tandem bookmark create` are all jj commands running through our binary.
 
 Server mode embeds jj-lib and uses the Git backend internally. When a client
 calls `putObject(file, bytes)`, the server stores the object. Objects are real
 jj-compatible blobs — `jj git push` on the server just works.
+
+`tandem up` is the easy way to start the server — it forks `tandem serve --daemon`
+in the background, waits for the control socket to become healthy, prints the PID,
+and exits. `tandem serve` is the foreground mode for systemd, Docker, or debugging.
+Both create a control socket so `tandem down/status/logs` work against either.
 
 ## Source layout
 
@@ -56,6 +70,7 @@ jj-compatible blobs — `jj git push` on the server just works.
 src/
   main.rs              CLI dispatch (clap) + CliRunner passthrough
   server.rs            Server — jj Git backend + Cap'n Proto RPC
+  control.rs           Control socket — daemon management (Unix socket, JSON lines)
   backend.rs           TandemBackend (jj-lib Backend trait)
   op_store.rs          TandemOpStore (jj-lib OpStore trait)
   op_heads_store.rs    TandemOpHeadsStore (jj-lib OpHeadsStore trait)
@@ -66,7 +81,8 @@ schema/
   tandem.capnp         Cap'n Proto schema (Store + HeadWatcher)
 tests/
   common/mod.rs        Test harness (server spawn, HOME isolation)
-  slice1-7 tests       Integration tests asserting on file bytes
+  slice1-7 tests       Core integration tests (file round-trip, visibility, CAS, git)
+  slice10-13 tests     Server lifecycle tests (shutdown, control socket, up/down, logs)
 ```
 
 ## Docs layout
@@ -79,9 +95,10 @@ docs/
     jj-lib-integration.md            Trait signatures and store registration
     rpc-protocol.md                  Cap'n Proto protocol details
     rpc-error-model.md               Error handling conventions
+    server-lifecycle.md              tandem up/down/status/logs design
     core-beliefs.md                  Design principles
   exec-plans/
-    completed/                       Completion notes for all 9 slices
+    completed/                       Completion notes for all 13 slices
     tech-debt-tracker.md             Known issues (P1/P2/P3)
   product-specs/
     core-product.md                  Product intent and scope
@@ -120,17 +137,17 @@ guessing commands when help is missing.
 
 See `docs/design-docs/workflow.md` for the full picture. Summary:
 
-1. **Orchestrator** sets up server on a VM/VPS: `tandem serve --listen 0.0.0.0:13013 --repo /srv/project`
+1. **Orchestrator** sets up server on a VM/VPS: `tandem up --repo /srv/project --listen 0.0.0.0:13013`
 2. **Agents** init workspaces: `tandem init --tandem-server=host:13013 ~/work/project`
 3. **Agents** use stock jj commands: write files, `tandem new -m "feat: add auth"`, etc.
-4. **Agents** see each other's files: `tandem cat -r <other-commit> src/auth.rs`
+4. **Agents** see each other's files: `tandem file show -r <other-commit> src/auth.rs`
 5. **Orchestrator** ships from server: `jj bookmark create main -r <tip>`, `jj git push`
 
 Git operations are server-only. Agents never touch git directly.
 
 ## What exists
 
-All core functionality is implemented across 9 slices:
+All core functionality is implemented across 13 slices:
 
 | Capability | Test coverage |
 |------------|--------------|
@@ -143,6 +160,10 @@ All core functionality is implemented across 9 slices:
 | End-to-end multi-agent + git | `tests/slice7_end_to_end.rs` |
 | Bookmark management via RPC | Slice 8 (see `docs/exec-plans/completed/`) |
 | CLI help and discoverability | Slice 9 (see `docs/exec-plans/completed/`) |
+| Signal handling + graceful shutdown | `tests/slice10_graceful_shutdown.rs` |
+| Control socket + tandem status | `tests/slice11_control_socket.rs` |
+| tandem up + tandem down | `tests/slice12_up_down.rs` |
+| tandem logs (streaming) | `tests/slice13_log_streaming.rs` |
 
 See `docs/exec-plans/completed/` for detailed completion notes on each slice.
 See `docs/exec-plans/tech-debt-tracker.md` for known issues and next work.

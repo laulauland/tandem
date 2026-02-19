@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::thread;
@@ -116,6 +118,80 @@ pub fn run_jj_in(repo: &Path, args: &[&str]) -> Output {
         cmd.arg(arg);
     }
     cmd.output().expect("run jj command")
+}
+
+/// Spawn a server with extra args and HOME isolation.
+pub fn spawn_server_with_args(repo: &Path, addr: &str, extra_args: &[&str], home: &Path) -> Child {
+    let mut cmd = Command::new(tandem_bin());
+    cmd.args(["serve", "--listen", addr, "--repo", repo.to_str().unwrap()]);
+    for arg in extra_args {
+        cmd.arg(arg);
+    }
+    isolate_env(&mut cmd, home);
+    cmd.stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn tandem serve")
+}
+
+/// Generate a unique control socket path inside a temp directory.
+pub fn control_socket_path(tmp: &Path) -> PathBuf {
+    tmp.join("control.sock")
+}
+
+/// Wait for a Unix socket to appear on disk.
+#[cfg(unix)]
+pub fn wait_for_socket(path: &Path, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if path.exists() {
+            // Try connecting to verify it's listening
+            if std::os::unix::net::UnixStream::connect(path).is_ok() {
+                return;
+            }
+        }
+        if Instant::now() > deadline {
+            panic!(
+                "socket {} did not appear within {:?}",
+                path.display(),
+                timeout
+            );
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Wait for a TCP address to become connectable (no child process to manage).
+pub fn wait_for_addr(addr: &str, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if std::net::TcpStream::connect(addr).is_ok() {
+            return;
+        }
+        if Instant::now() > deadline {
+            panic!("address {addr} not connectable within {timeout:?}");
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Send a JSON request to the control socket and read the response line.
+#[cfg(unix)]
+pub fn control_request(socket_path: &Path, request: &str) -> String {
+    use std::io::{BufRead, BufReader, Write};
+    let mut stream =
+        std::os::unix::net::UnixStream::connect(socket_path).expect("connect to control socket");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .ok();
+    stream
+        .write_all(request.as_bytes())
+        .expect("write request");
+    stream.write_all(b"\n").expect("write newline");
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    reader.read_line(&mut line).expect("read response");
+    line
 }
 
 /// Run a raw git command (bypassing jj's git wrapper).
