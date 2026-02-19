@@ -9,6 +9,7 @@ knows the store is remote.
 ## Roles
 
 **Server (point of origin):**
+- Runs on a VM/VPS as a persistent service
 - Hosts the canonical jj+git repo
 - Runs `tandem serve`
 - Is where git operations happen (`jj git push`, `jj git fetch`, `gh pr create`)
@@ -25,7 +26,7 @@ knows the store is remote.
 ### 1. Setup
 
 ```bash
-# On the server
+# On the server (typically a VM/VPS)
 mkdir /srv/project && cd /srv/project
 jj git init
 jj git remote add origin git@github.com:org/project.git
@@ -89,15 +90,14 @@ This is intentional: the server is the single point of contact with the
 outside world. It's where the orchestrator makes decisions about what
 ships and what doesn't.
 
-## Future: tandem as source of truth
+## Tandem as source of truth
 
-The architecture supports a future where the tandem server is THE canonical
-store, and GitHub is just a mirror:
+The tandem server is the canonical store. GitHub is a mirror.
 
-- Tandem server holds the complete history
+- The server holds the complete history — all agent objects live there
 - `jj git push` mirrors to GitHub for CI, code review, external visibility
 - Other teams interact via GitHub as usual
-- But the agents and orchestrator work entirely through tandem
+- Agents and the orchestrator work entirely through tandem
 
-No architecture change is needed — it's the same code, just a different
-trust model. The server already has everything.
+Back up the server repo directory. If it's lost without backups, the data
+is gone (unless you've been pushing to GitHub regularly).

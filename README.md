@@ -13,10 +13,11 @@ tandem new -m "feat: add auth"                          # it's just jj
 ```
 
 tandem is a single binary that embeds [jj](https://jj-vcs.com). The server
-hosts a jj+git repo. Agents on remote machines get transparent read/write
-access over Cap'n Proto RPC. Every stock jj command works — `log`, `new`,
-`diff`, `file show`, `bookmark`, `describe` — because tandem implements
-jj-lib's `Backend`, `OpStore`, and `OpHeadsStore` traits as RPC stubs.
+hosts a jj+git repo — typically on a VM or VPS as a long-running service.
+Agents on remote machines get transparent read/write access over Cap'n Proto
+RPC. Every stock jj command works — `log`, `new`, `diff`, `file show`,
+`bookmark`, `describe` — because tandem implements jj-lib's `Backend`,
+`OpStore`, and `OpHeadsStore` traits as RPC stubs.
 
 ## Why
 
@@ -105,6 +106,8 @@ cargo build --release
 tandem serve --listen 0.0.0.0:13013 --repo ~/project
 ```
 
+For production use, run this on a VM/VPS — see [Deployment setups](#deployment-setups) below.
+
 ### Connect agents
 
 ```bash
@@ -159,10 +162,11 @@ The server is a real jj+git repo. Standard git push just works.
 
 ## Deployment setups
 
-### Local: multiple terminals
+### Local: multiple terminals (for testing)
 
-The simplest setup. Server and agents on the same machine, different
-directories.
+The simplest setup for trying tandem out. Server and agents on the same
+machine, different directories. Not how you'd run it for real work — see
+Remote machines below.
 
 ```bash
 # Terminal 1 — server
@@ -177,7 +181,37 @@ tandem init --tandem-server=127.0.0.1:13013 --workspace=agent-b /tmp/agent-b
 cd /tmp/agent-b && tandem log   # sees agent A's commit
 ```
 
-Good for trying things out. No network setup, no containers.
+### Remote machines: sprites.dev / exe.dev / SSH
+
+The typical production setup. Server on a VPS/VM, agents on separate machines.
+
+```bash
+# VPS — server
+tandem serve --listen 0.0.0.0:13013 --repo /srv/project
+
+# Machine A — agent A (e.g. sprites.dev sandbox)
+# Copy the binary over, or build on the remote machine
+scp target/release/tandem agent-a-host:/usr/local/bin/
+ssh agent-a-host
+  export TANDEM_SERVER=server-host:13013
+  tandem init ~/work
+  cd ~/work
+  # ... write code, commit with tandem new ...
+
+# Machine B — agent B (e.g. exe.dev VM)
+scp target/release/tandem agent-b-host:/usr/local/bin/
+ssh agent-b-host
+  export TANDEM_SERVER=server-host:13013
+  tandem init --workspace=agent-b ~/work
+  cd ~/work
+  tandem log                  # sees agent A's commits
+  tandem file show -r <change-id> src/auth.rs   # reads agent A's files
+```
+
+Requirements:
+- Server port (default 13013) must be reachable from agent machines
+- No TLS yet — use SSH tunnels or VPN for untrusted networks
+- The `tandem` binary is ~30MB, statically linkable, no runtime deps
 
 ### Docker: 3 agents on a shared network
 
@@ -228,38 +262,6 @@ docker network rm tandem-net
 This simulates cross-machine communication. Each container has its own
 filesystem, its own network identity, and connects to the server by DNS name.
 Tested — see `qa/v1/cross-machine-report.md`.
-
-### Remote machines: sprites.dev / exe.dev / SSH
-
-Server on one machine, agents on others.
-
-```bash
-# Machine 1 — server (your laptop, a VPS, etc.)
-tandem serve --listen 0.0.0.0:13013 --repo ~/project
-
-# Machine 2 — agent A (e.g. sprites.dev sandbox)
-# Copy the binary over, or build on the remote machine
-scp target/release/tandem agent-a-host:/usr/local/bin/
-ssh agent-a-host
-  export TANDEM_SERVER=server-host:13013
-  tandem init ~/work
-  cd ~/work
-  # ... write code, commit with tandem new ...
-
-# Machine 3 — agent B (e.g. exe.dev VM)
-scp target/release/tandem agent-b-host:/usr/local/bin/
-ssh agent-b-host
-  export TANDEM_SERVER=server-host:13013
-  tandem init --workspace=agent-b ~/work
-  cd ~/work
-  tandem log                  # sees agent A's commits
-  tandem file show -r <change-id> src/auth.rs   # reads agent A's files
-```
-
-Requirements:
-- Server port (default 13013) must be reachable from agent machines
-- No TLS yet — use a tunnel (e.g. `ssh -L`) for untrusted networks
-- The `tandem` binary is ~30MB, statically linkable, no runtime deps
 
 ### Claude Code: multi-agent with tandem
 
@@ -391,13 +393,21 @@ Cross-machine tested with Docker containers — see `qa/v1/cross-machine-report.
 
 ## Known limitations
 
-- **No TLS** — connections are plaintext. Use SSH tunnels for untrusted networks.
-- **No auth** — anyone who can reach the port can read/write the repo.
+- **No TLS** — connections are plaintext. For production on a VPS, use SSH tunnels (`ssh -L`) or a VPN.
+- **No auth** — anyone who can reach the port can read/write the repo. On a VPS, firewall the port and use SSH tunnels for access.
 - **No static binary yet** — requires glibc 2.39+. Use matching distro or build locally.
 - **fsmonitor conflict** — if your jj config has `fsmonitor.backend = "watchman"`,
   pass `--config=fsmonitor.backend=none` to tandem commands.
 - **Description-based revsets** — `description(exact:"...")` may not work for
   cross-workspace queries. Use change IDs from `tandem log` instead.
+
+## Running in production
+
+- **Back up the server repo directory** — it's the source of truth. If lost without backups, data is gone (unless mirrored to GitHub via `jj git push`).
+- **Use a process manager** (systemd, supervisord, etc.) to keep `tandem serve` running.
+- **Git credentials on the server** — the server needs SSH keys or tokens for `jj git push` / `jj git fetch` to GitHub.
+- **Monitor disk space** — all agent objects (files, trees, commits) land on the server.
+- **Firewall the port** — no auth means network-level access control is your only defense. SSH tunnels or VPN.
 
 ## Project structure
 

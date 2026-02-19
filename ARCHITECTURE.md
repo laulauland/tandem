@@ -17,6 +17,7 @@ Single binary, two modes:
 ## Core model
 
 - Server hosts a **normal jj+git colocated repo** (uses jj's Git backend)
+- Server is a **long-running service**, typically on a VM/VPS — it holds the canonical repo. If lost without backups, the data is gone (unless mirrored to GitHub via `jj git push`).
 - Client keeps **working copy local** (real files on disk)
 - Client store calls are remote via Cap'n Proto RPC
 - Backend/OpStore/OpHeadsStore trait implementations route to server
@@ -81,6 +82,8 @@ Git operations run **on the server only**:
 - `jj git fetch` — pull upstream changes into the server's repo
 - `jj git push` — push agents' work to GitHub
 - `gh pr create` — create PRs from the server
+
+The server needs git credentials (SSH keys or tokens) for GitHub access.
 
 Agents never touch git. The server is the single point of contact with
 the outside world. The orchestrator SSHes to the server (or runs commands

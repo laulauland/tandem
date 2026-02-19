@@ -18,10 +18,11 @@ a normal jj+git colocated repo. Agents on remote machines use the `tandem`
 binary (which embeds jj-cli with a custom tandem backend) to read and write
 objects over Cap'n Proto RPC.
 
-The server is the **point of origin** — it's where git operations happen
-(`jj git push`, `jj git fetch`, `gh pr create`). The orchestrator/teamlead
-runs these on the server to ship code upstream. The tandem server is the source
-of truth, with GitHub as a mirror.
+The server is the **point of origin** — it typically runs on a VM/VPS as a
+long-running service. It's where git operations happen (`jj git push`,
+`jj git fetch`, `gh pr create`). The orchestrator/teamlead runs these on the
+server to ship code upstream. The tandem server is the source of truth, with
+GitHub as a mirror.
 
 ## Installation
 
@@ -119,7 +120,7 @@ guessing commands when help is missing.
 
 See `docs/design-docs/workflow.md` for the full picture. Summary:
 
-1. **Orchestrator** sets up server: `tandem serve --listen 0.0.0.0:13013 --repo /srv/project`
+1. **Orchestrator** sets up server on a VM/VPS: `tandem serve --listen 0.0.0.0:13013 --repo /srv/project`
 2. **Agents** init workspaces: `tandem init --tandem-server=host:13013 ~/work/project`
 3. **Agents** use stock jj commands: write files, `tandem new -m "feat: add auth"`, etc.
 4. **Agents** see each other's files: `tandem cat -r <other-commit> src/auth.rs`
