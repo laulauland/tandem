@@ -6,6 +6,13 @@
 
 jj workspaces over the network. One server, many agents on many machines, real files.
 
+## What does tandem do?
+
+- Runs a central server that hosts a real `jj`+`git` repo.
+- Lets each agent/machine use its own local workspace backed by that server.
+- Makes all work visible across agents via normal `jj` commands (`log`, `diff`, `file show`, `new`, etc.).
+- Keeps shipping simple: push to GitHub from the server with `jj git push`.
+
 ## Install
 
 Published on [crates.io](https://crates.io/crates/jj-tandem) as `jj-tandem`.
@@ -20,21 +27,6 @@ Or build from source:
 ```bash
 git clone https://github.com/laulauland/tandem.git && cd tandem
 cargo build --release
-```
-
-### Maintainers: regenerate schema bindings
-
-`tandem` checks in generated Cap'n Proto Rust bindings at `src/tandem_capnp.rs`.
-`build.rs` compiles from `schema/tandem.capnp` when `capnp` is available, and
-falls back to the checked-in file when it is not.
-
-You only need `capnp` installed when changing `schema/tandem.capnp` and
-refreshing `src/tandem_capnp.rs`.
-
-Use the build script regeneration mode:
-
-```bash
-TANDEM_REGENERATE_BINDINGS=1 cargo build
 ```
 
 ## Quickstart
@@ -433,6 +425,18 @@ Cross-machine tested with Docker containers — see `qa/v1/cross-machine-report.
 - **Git credentials on the server** — the server needs SSH keys or tokens for `jj git push` / `jj git fetch`.
 - **Monitor disk space** — all agent objects land on the server.
 - **Firewall the port** — no auth means network-level access control is your only defense.
+
+## Maintainer note: schema regeneration
+
+`tandem` checks in generated bindings at `src/tandem_capnp.rs`.
+When you change `schema/tandem.capnp`, regenerate via:
+
+```bash
+TANDEM_REGENERATE_BINDINGS=1 cargo build
+```
+
+(`build.rs` compiles from schema when `capnp` is available, and falls back to
+checked-in bindings otherwise.)
 
 ## Project structure
 
