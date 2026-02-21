@@ -10,7 +10,7 @@ Cap'n Proto promise pipelining for efficient multi-object writes:
 1. **Cap'n Proto RPC transport**
    - RPC protocol defined in `schema/tandem.capnp`
    - Schema defined in `schema/tandem.capnp`
-   - Build integration via `build.rs` and `capnpc` crate
+   - Schema codegen integrated via `capnpc` in `build.rs` with checked-in fallback `src/tandem_capnp.rs`
 
 2. **Promise pipelining support**
    - Cap'n Proto automatically pipelines dependent RPC calls

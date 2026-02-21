@@ -135,6 +135,7 @@ Run: `cargo test`
 ```
 src/
   main.rs              CLI dispatch (clap) + CliRunner passthrough
+  tandem_capnp.rs      Generated Cap'n Proto bindings (checked in)
   server.rs            Server — jj Git backend + Cap'n Proto RPC
   control.rs           Control socket — daemon management (Unix socket, JSON lines)
   backend.rs           TandemBackend (jj-lib Backend trait)
@@ -145,6 +146,7 @@ src/
   watch.rs             tandem watch command
 schema/
   tandem.capnp         Cap'n Proto schema (Store + HeadWatcher)
+build.rs               Build-time schema generation with checked-in fallback
 tests/
   common/mod.rs        Test harness (server spawn, HOME isolation)
   slice1-7 tests       Core integration tests (file round-trip, visibility, CAS, git)

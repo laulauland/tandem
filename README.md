@@ -9,7 +9,7 @@ jj workspaces over the network. One server, many agents on many machines, real f
 ## Install
 
 Published on [crates.io](https://crates.io/crates/jj-tandem) as `jj-tandem`.
-Requires a Rust toolchain and the [Cap'n Proto compiler](https://capnproto.org/install.html).
+Requires a Rust toolchain. No system `capnp` binary is required for install/build.
 
 ```bash
 cargo install jj-tandem
@@ -20,6 +20,21 @@ Or build from source:
 ```bash
 git clone https://github.com/laulauland/tandem.git && cd tandem
 cargo build --release
+```
+
+### Maintainers: regenerate schema bindings
+
+`tandem` checks in generated Cap'n Proto Rust bindings at `src/tandem_capnp.rs`.
+`build.rs` compiles from `schema/tandem.capnp` when `capnp` is available, and
+falls back to the checked-in file when it is not.
+
+You only need `capnp` installed when changing `schema/tandem.capnp` and
+refreshing `src/tandem_capnp.rs`.
+
+Use the build script regeneration mode:
+
+```bash
+TANDEM_REGENERATE_BINDINGS=1 cargo build
 ```
 
 ## Quickstart
@@ -424,6 +439,7 @@ Cross-machine tested with Docker containers — see `qa/v1/cross-machine-report.
 ```
 src/
   main.rs              CLI dispatch (clap) + jj CliRunner passthrough
+  tandem_capnp.rs      Generated Cap'n Proto bindings (checked in)
   server.rs            Server — jj Git backend + Cap'n Proto RPC
   control.rs           Control socket — daemon management protocol (Unix socket, JSON lines)
   backend.rs           TandemBackend (jj-lib Backend trait over RPC)
@@ -434,6 +450,7 @@ src/
   watch.rs             tandem watch command
 schema/
   tandem.capnp         Cap'n Proto schema (13 Store methods + HeadWatcher)
+build.rs               Build-time schema generation with checked-in fallback
 tests/
   common/mod.rs        Test harness (server spawn, HOME isolation)
   slice1-7 tests       Core integration tests (file round-trip, visibility, CAS, git)

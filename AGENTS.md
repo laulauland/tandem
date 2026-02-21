@@ -32,8 +32,14 @@ Published on [crates.io](https://crates.io/crates/jj-tandem) as `jj-tandem`:
 cargo install jj-tandem
 ```
 
-Requires a Rust toolchain and Cap'n Proto compiler (`capnp`).
+Requires a Rust toolchain. No system `capnp` binary is required for normal installs/builds.
 Or build from source: `cargo build --release`.
+
+`build.rs` compiles schema bindings when `capnp` is available and falls back to
+checked-in `src/tandem_capnp.rs` when it is not.
+
+Maintainers only: when changing `schema/tandem.capnp`, regenerate checked-in bindings:
+`TANDEM_REGENERATE_BINDINGS=1 cargo build`.
 
 ## Single binary, three modes
 
@@ -69,6 +75,7 @@ Both create a control socket so `tandem down/status/logs` work against either.
 ```
 src/
   main.rs              CLI dispatch (clap) + CliRunner passthrough
+  tandem_capnp.rs      Generated Cap'n Proto bindings (checked in)
   server.rs            Server — jj Git backend + Cap'n Proto RPC
   control.rs           Control socket — daemon management (Unix socket, JSON lines)
   backend.rs           TandemBackend (jj-lib Backend trait)
@@ -79,6 +86,7 @@ src/
   watch.rs             tandem watch command
 schema/
   tandem.capnp         Cap'n Proto schema (Store + HeadWatcher)
+build.rs               Build-time schema generation with checked-in fallback
 tests/
   common/mod.rs        Test harness (server spawn, HOME isolation)
   slice1-7 tests       Core integration tests (file round-trip, visibility, CAS, git)
