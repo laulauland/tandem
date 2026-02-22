@@ -1,7 +1,8 @@
-# Active Execution Plan — Workspace default collision fix
+# Completed Execution Plan — Workspace default collision fix
 
-- **Status:** Implemented (core fix complete; optional preflight and full-suite run pending)
+- **Status:** Completed (core fix implemented)
 - **Created:** 2026-02-22
+- **Completed:** 2026-02-22
 - **Scope:** Fix default workspace collision behavior with minimal surface-area change.
 
 ## Problem statement
@@ -39,7 +40,7 @@ We need safe-by-default behavior: agents that omit `--workspace` should still ge
 
 ## Acceptance criteria
 
-1. `tandem init --tandem-server <addr> <path>` (no `--workspace`) no longer creates workspace `default`.
+1. `tandem init --server <addr> <path>` (no `--workspace`) no longer creates workspace `default`.
 2. Two implicit `tandem init` calls against the same server produce distinct workspace names.
 3. Normal two-agent flow with implicit names does not fail due to default-name collision (`working copy is stale` from shared-name collision path).
 4. `updateOpHeads` sends a non-empty workspace identifier for normal client operations.

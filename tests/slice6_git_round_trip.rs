@@ -35,11 +35,7 @@ fn slice6_git_round_trip_server_has_real_git_objects() {
     );
 
     // Initialize tandem workspace
-    let init = common::run_tandem_in(
-        &workspace_dir,
-        &["init", "--tandem-server", &addr, "."],
-        &home,
-    );
+    let init = common::run_tandem_in(&workspace_dir, &["init", "--server", &addr, "."], &home);
     common::assert_ok(&init, "tandem init");
 
     // Write a file with distinctive content
@@ -250,11 +246,7 @@ fn slice6_multiple_files_git_round_trip() {
     common::wait_for_server(&addr, &mut server);
 
     // Initialize workspace
-    let init = common::run_tandem_in(
-        &workspace_dir,
-        &["init", "--tandem-server", &addr, "."],
-        &home,
-    );
+    let init = common::run_tandem_in(&workspace_dir, &["init", "--server", &addr, "."], &home);
     common::assert_ok(&init, "tandem init");
 
     // Write multiple files

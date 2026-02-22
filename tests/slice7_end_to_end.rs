@@ -92,28 +92,14 @@ fn slice7_two_agents_files_bookmarks_git_round_trip() {
     // ── Initialize both agent workspaces ──────────────────────────────
     let init_a = common::run_tandem_in(
         &agent_a_dir,
-        &[
-            "init",
-            "--tandem-server",
-            &addr,
-            "--workspace",
-            "agent-a",
-            ".",
-        ],
+        &["init", "--server", &addr, "--workspace", "agent-a", "."],
         &home,
     );
     common::assert_ok(&init_a, "agent-a init");
 
     let init_b = common::run_tandem_in(
         &agent_b_dir,
-        &[
-            "init",
-            "--tandem-server",
-            &addr,
-            "--workspace",
-            "agent-b",
-            ".",
-        ],
+        &["init", "--server", &addr, "--workspace", "agent-b", "."],
         &home,
     );
     common::assert_ok(&init_b, "agent-b init");
@@ -446,14 +432,7 @@ fn slice7_byte_identity_all_perspectives() {
     common::assert_ok(
         &common::run_tandem_in(
             &agent_a_dir,
-            &[
-                "init",
-                "--tandem-server",
-                &addr,
-                "--workspace",
-                "agent-a",
-                ".",
-            ],
+            &["init", "--server", &addr, "--workspace", "agent-a", "."],
             &home,
         ),
         "agent-a init",
@@ -461,14 +440,7 @@ fn slice7_byte_identity_all_perspectives() {
     common::assert_ok(
         &common::run_tandem_in(
             &agent_b_dir,
-            &[
-                "init",
-                "--tandem-server",
-                &addr,
-                "--workspace",
-                "agent-b",
-                ".",
-            ],
+            &["init", "--server", &addr, "--workspace", "agent-b", "."],
             &home,
         ),
         "agent-b init",

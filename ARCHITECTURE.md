@@ -4,22 +4,23 @@
 
 ## Implementation Status
 
-**Complete as of 2026-02-22.** All slices 1-14 implemented and tested.
-See `docs/exec-plans/completed/` and `tests/slice14_auto_workspace_names.rs` for details.
+**Complete as of 2026-02-22.** Slices 1-15 implemented (slice 15 adds jj-lib head authority coverage).
+See `docs/exec-plans/completed/` and `tests/slice15_head_authority_jj_lib.rs` for details.
 
 ## Shape
 
 Single binary, multiple modes:
 
 - `tandem up --repo <path> --listen <addr>` — start background daemon
-- `tandem down` / `tandem status` / `tandem logs` — manage the daemon
+- `tandem down` / `tandem server status` / `tandem server logs` — manage the daemon
 - `tandem serve --listen <addr> --repo <path>` — foreground server (systemd/docker)
 - `tandem <jj-command>` — client mode (stock jj via CliRunner)
 
 `tandem up` is the easy way. It forks `tandem serve --daemon`, waits for
 the control socket to become healthy, prints the PID, and exits. `tandem serve`
 is the foreground mode for systemd, Docker, or debugging. Both modes create
-a control socket so `tandem down/status/logs` work against either.
+a control socket so `tandem down`, `tandem server status`, and
+`tandem server logs` work against either.
 
 ## Core model
 
@@ -28,6 +29,8 @@ a control socket so `tandem down/status/logs` work against either.
 - Client keeps **working copy local** (real files on disk)
 - Client store calls are remote via Cap'n Proto RPC
 - Backend/OpStore/OpHeadsStore trait implementations route to server
+- Server op-head authority is jj-lib's op-heads store (no manual op-head file sync)
+- `.jj/repo/tandem/heads.json` is metadata sidecar only (`version`, `workspace_heads`)
 - Clients read current heads from server on each command; however jj may still
   require `workspace update-stale` in high-concurrency/shared-workspace cases.
   Auto-generated unique workspace names reduce accidental collisions.
@@ -42,7 +45,7 @@ into the jj+git store. Objects are real git objects — `jj git push` on
 the server just works.
 
 1. Read/write jj backend + op-store objects (commit/tree/file/symlink/copy/operation/view)
-2. Coordinate op heads with atomic compare-and-swap
+2. Coordinate op heads with atomic compare-and-swap (CAS metadata) while mutating heads via jj-lib op-heads APIs
 3. Notify watchers on head changes (`watchHeads`)
 4. Host the jj+git colocated repo for git interop
 
@@ -61,8 +64,9 @@ Tandem-provided trait implementations:
 
 On CAS failure, jj's existing transaction retry flow handles convergence automatically.
 
-The agent runs **normal `jj` commands** (`tandem new`, `tandem log`, `tandem diff`,
-`tandem file show`, `tandem bookmark create`, etc.) — tandem is invisible.
+The agent runs **normal `jj` commands** (`tandem status`, `tandem new`,
+`tandem log`, `tandem diff`, `tandem file show`, `tandem bookmark create`,
+etc.) — tandem is invisible.
 
 ## Protocol
 
@@ -115,10 +119,11 @@ Integration tests across slices 1-14:
 | 6 | `tests/slice6_git_round_trip.rs` | Git push/fetch round-trip |
 | 7 | `tests/slice7_end_to_end.rs` | Multi-agent + git + external contributor |
 | 10 | `tests/slice10_graceful_shutdown.rs` | Signal handling, clean exit, log flags |
-| 11 | `tests/slice11_control_socket.rs` | Control socket, status reporting |
+| 11 | `tests/slice11_control_socket.rs` | Control socket, server status reporting |
 | 12 | `tests/slice12_up_down.rs` | Daemon lifecycle (up/down), duplicate detection |
 | 13 | `tests/slice13_log_streaming.rs` | Log streaming, level filtering, JSON output |
 | 14 | `tests/slice14_auto_workspace_names.rs` | Auto-generated workspace names + workspace head identity tracking |
+| 15 | `tests/slice15_head_authority_jj_lib.rs` | jj-lib op-head authority and sidecar metadata consistency |
 
 All tests assert on **file byte content**, not just commit descriptions.
 

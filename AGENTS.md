@@ -53,13 +53,14 @@ Plus lifecycle commands that talk to a running server:
 
 ```
 tandem down                                   # stop daemon
-tandem status [--json]                        # health check
-tandem logs [--level <level>] [--json]        # stream logs from daemon
+tandem server status [--json]                 # health check
+tandem server logs [--level <level>] [--json] # stream logs from daemon
 ```
 
 The client mode is `CliRunner::init().add_store_factories(tandem_factories()).run()`.
-All stock jj commands work transparently: `tandem new`, `tandem log`, `tandem diff`,
-`tandem file show`, `tandem bookmark create` are all jj commands running through our binary.
+All stock jj commands work transparently: `tandem status`, `tandem new`,
+`tandem log`, `tandem diff`, `tandem file show`, `tandem bookmark create`
+are all jj commands running through our binary.
 
 Server mode embeds jj-lib and uses the Git backend internally. When a client
 calls `putObject(file, bytes)`, the server stores the object. Objects are real
@@ -68,7 +69,8 @@ jj-compatible blobs — `jj git push` on the server just works.
 `tandem up` is the easy way to start the server — it forks `tandem serve --daemon`
 in the background, waits for the control socket to become healthy, prints the PID,
 and exits. `tandem serve` is the foreground mode for systemd, Docker, or debugging.
-Both create a control socket so `tandem down/status/logs` work against either.
+Both create a control socket so `tandem down`, `tandem server status`, and
+`tandem server logs` work against either.
 
 ## Source layout
 
@@ -103,7 +105,7 @@ docs/
     jj-lib-integration.md            Trait signatures and store registration
     rpc-protocol.md                  Cap'n Proto protocol details
     rpc-error-model.md               Error handling conventions
-    server-lifecycle.md              tandem up/down/status/logs design
+    server-lifecycle.md              tandem up/down + server status/logs design
     core-beliefs.md                  Design principles
   exec-plans/
     completed/                       Completion notes for all 13 slices
@@ -146,7 +148,7 @@ guessing commands when help is missing.
 See `docs/design-docs/workflow.md` for the full picture. Summary:
 
 1. **Orchestrator** sets up server on a VM/VPS: `tandem up --repo /srv/project --listen 0.0.0.0:13013`
-2. **Agents** init workspaces: `tandem init --tandem-server=host:13013 ~/work/project`
+2. **Agents** init workspaces: `tandem init --server=host:13013 ~/work/project`
 3. **Agents** use stock jj commands: write files, `tandem new -m "feat: add auth"`, etc.
 4. **Agents** see each other's files: `tandem file show -r <other-commit> src/auth.rs`
 5. **Orchestrator** ships from server: `jj bookmark create main -r <tip>`, `jj git push`
@@ -169,9 +171,9 @@ All core functionality is implemented across 13 slices:
 | Bookmark management via RPC | Slice 8 (see `docs/exec-plans/completed/`) |
 | CLI help and discoverability | Slice 9 (see `docs/exec-plans/completed/`) |
 | Signal handling + graceful shutdown | `tests/slice10_graceful_shutdown.rs` |
-| Control socket + tandem status | `tests/slice11_control_socket.rs` |
+| Control socket + tandem server status | `tests/slice11_control_socket.rs` |
 | tandem up + tandem down | `tests/slice12_up_down.rs` |
-| tandem logs (streaming) | `tests/slice13_log_streaming.rs` |
+| tandem server logs (streaming) | `tests/slice13_log_streaming.rs` |
 
 See `docs/exec-plans/completed/` for detailed completion notes on each slice.
 See `docs/exec-plans/tech-debt-tracker.md` for known issues and next work.

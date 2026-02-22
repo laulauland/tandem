@@ -35,11 +35,7 @@ fn slice4_ten_files_rapid_fire_round_trip() {
     common::wait_for_server(&addr, &mut server);
 
     // Initialize workspace
-    let init = common::run_tandem_in(
-        &workspace_dir,
-        &["init", "--tandem-server", &addr, "."],
-        &home,
-    );
+    let init = common::run_tandem_in(&workspace_dir, &["init", "--server", &addr, "."], &home);
     common::assert_ok(&init, "tandem init");
 
     // Prepare file contents — each file has unique, verifiable content
@@ -160,11 +156,7 @@ fn slice4_large_files_pipelining() {
     let mut server = common::spawn_server(&server_repo, &addr);
     common::wait_for_server(&addr, &mut server);
 
-    let init = common::run_tandem_in(
-        &workspace_dir,
-        &["init", "--tandem-server", &addr, "."],
-        &home,
-    );
+    let init = common::run_tandem_in(&workspace_dir, &["init", "--server", &addr, "."], &home);
     common::assert_ok(&init, "tandem init");
 
     let src_dir = workspace_dir.join("src");
@@ -235,11 +227,7 @@ fn slice4_cumulative_tree_growth() {
     let mut server = common::spawn_server(&server_repo, &addr);
     common::wait_for_server(&addr, &mut server);
 
-    let init = common::run_tandem_in(
-        &workspace_dir,
-        &["init", "--tandem-server", &addr, "."],
-        &home,
-    );
+    let init = common::run_tandem_in(&workspace_dir, &["init", "--server", &addr, "."], &home);
     common::assert_ok(&init, "tandem init");
 
     let src_dir = workspace_dir.join("src");

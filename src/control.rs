@@ -7,6 +7,7 @@
 //!   For logs: streaming response lines until client disconnects or server shuts down.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Instant;
 use tokio::sync::broadcast;
@@ -24,10 +25,15 @@ pub struct StatusResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LogEvent {
     pub ts: String,
     pub level: String,
+    #[serde(default)]
+    pub target: String,
     pub msg: String,
+    #[serde(default)]
+    pub fields: BTreeMap<String, String>,
 }
 
 /// Shared server state for the control socket.
@@ -38,29 +44,6 @@ pub struct ControlState {
     pub listen: String,
     pub shutdown_tx: tokio::sync::mpsc::Sender<()>,
     pub log_tx: broadcast::Sender<LogEvent>,
-}
-
-impl ControlState {
-    #[allow(dead_code)]
-    pub fn emit_log(&self, level: &str, msg: &str) {
-        let event = LogEvent {
-            ts: chrono_now(),
-            level: level.to_string(),
-            msg: msg.to_string(),
-        };
-        // Ignore send errors (no receivers)
-        let _ = self.log_tx.send(event);
-    }
-}
-
-#[allow(dead_code)]
-fn chrono_now() -> String {
-    // Simple ISO-ish timestamp without pulling in chrono
-    use std::time::SystemTime;
-    let d = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}Z", d.as_secs())
 }
 
 fn level_rank(level: &str) -> u8 {
@@ -88,13 +71,15 @@ pub async fn run_control_socket(
     }
 
     let listener = tokio::net::UnixListener::bind(&socket_path)?;
+    tracing::info!(socket_path = %socket_path, "control socket listening");
 
     loop {
         let (stream, _) = listener.accept().await?;
+        tracing::debug!("control connection accepted");
         let state = state.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_control_connection(stream, state).await {
-                eprintln!("control connection error: {e:#}");
+                tracing::error!(error = %e, "control connection error");
             }
         });
     }
@@ -121,10 +106,12 @@ async fn handle_control_connection(
         serde_json::from_str(line).map_err(|e| anyhow::anyhow!("invalid JSON: {e}"))?;
 
     let req_type = request["type"].as_str().unwrap_or("");
+    tracing::debug!(request_type = req_type, "control request received");
 
     match req_type {
         "status" => {
             let uptime = state.start_time.elapsed().as_secs();
+            tracing::trace!(uptime_secs = uptime, "serving status request");
             let resp = StatusResponse {
                 running: true,
                 pid: state.pid,
@@ -139,6 +126,7 @@ async fn handle_control_connection(
             writer.flush().await?;
         }
         "shutdown" => {
+            tracing::info!("shutdown requested via control socket");
             let resp = serde_json::json!({"type": "shutdown", "ok": true});
             writer.write_all(resp.to_string().as_bytes()).await?;
             writer.write_all(b"\n").await?;
@@ -149,6 +137,7 @@ async fn handle_control_connection(
         "logs" => {
             let level_filter = request["level"].as_str().unwrap_or("info").to_string();
             let min_rank = level_rank(&level_filter);
+            tracing::info!(level = %level_filter, "log stream subscribed");
 
             let mut rx = state.log_tx.subscribe();
 
@@ -178,6 +167,7 @@ async fn handle_control_connection(
             }
         }
         _ => {
+            tracing::warn!(request_type = req_type, "unknown control request type");
             let resp = serde_json::json!({"type": "error", "msg": format!("unknown request type: {req_type}")});
             writer.write_all(resp.to_string().as_bytes()).await?;
             writer.write_all(b"\n").await?;
@@ -258,7 +248,31 @@ pub fn client_logs(socket_path: &str, level: &str, json_output: bool) -> anyhow:
                 } else {
                     // Parse and format as human-readable
                     if let Ok(event) = serde_json::from_str::<LogEvent>(&l) {
-                        println!("[{}] {} {}", event.level, event.ts, event.msg);
+                        if event.fields.is_empty() {
+                            if event.target.is_empty() {
+                                println!("[{}] {} {}", event.level, event.ts, event.msg);
+                            } else {
+                                println!(
+                                    "[{}] {} {} {}",
+                                    event.level, event.ts, event.target, event.msg
+                                );
+                            }
+                        } else {
+                            let fields = event
+                                .fields
+                                .iter()
+                                .map(|(k, v)| format!("{k}={v}"))
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            if event.target.is_empty() {
+                                println!("[{}] {} {} {}", event.level, event.ts, event.msg, fields);
+                            } else {
+                                println!(
+                                    "[{}] {} {} {} {}",
+                                    event.level, event.ts, event.target, event.msg, fields
+                                );
+                            }
+                        }
                     } else {
                         println!("{l}");
                     }

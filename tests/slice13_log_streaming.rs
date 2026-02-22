@@ -22,7 +22,11 @@ fn slice13_logs_not_running() {
     let sock = tmp.path().join("nonexistent.sock");
     let sock_str = sock.to_str().unwrap();
 
-    let out = common::run_tandem_in(tmp.path(), &["logs", "--control-socket", sock_str], &home);
+    let out = common::run_tandem_in(
+        tmp.path(),
+        &["server", "logs", "--control-socket", sock_str],
+        &home,
+    );
     assert!(
         !out.status.success(),
         "tandem logs with no daemon should exit 1"
@@ -55,7 +59,7 @@ fn slice13_logs_json_streams_events() {
 
     // Start tandem logs --json in background
     let mut logs_cmd = Command::new(common::tandem_bin());
-    logs_cmd.args(["logs", "--json", "--control-socket", sock_str]);
+    logs_cmd.args(["server", "logs", "--json", "--control-socket", sock_str]);
     common::isolate_env(&mut logs_cmd, &home);
     logs_cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut logs_child = logs_cmd.spawn().expect("spawn tandem logs");
@@ -64,11 +68,7 @@ fn slice13_logs_json_streams_events() {
     std::thread::sleep(Duration::from_millis(500));
 
     // Create activity: init workspace and write a file
-    let init = common::run_tandem_in(
-        &workspace_dir,
-        &["init", "--tandem-server", &addr, "."],
-        &home,
-    );
+    let init = common::run_tandem_in(&workspace_dir, &["init", "--server", &addr, "."], &home);
     common::assert_ok(&init, "tandem init");
 
     std::fs::write(workspace_dir.join("log-test.txt"), b"log content\n").unwrap();
@@ -126,7 +126,7 @@ fn slice13_logs_exits_on_shutdown() {
 
     // Start logs process
     let mut logs_cmd = Command::new(common::tandem_bin());
-    logs_cmd.args(["logs", "--control-socket", sock_str]);
+    logs_cmd.args(["server", "logs", "--control-socket", sock_str]);
     common::isolate_env(&mut logs_cmd, &home);
     logs_cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut logs_child = logs_cmd.spawn().expect("spawn tandem logs");
@@ -177,6 +177,7 @@ fn slice13_logs_level_filtering() {
     // Start logs at debug level
     let mut debug_cmd = Command::new(common::tandem_bin());
     debug_cmd.args([
+        "server",
         "logs",
         "--json",
         "--level",
@@ -191,6 +192,7 @@ fn slice13_logs_level_filtering() {
     // Start logs at warn level
     let mut warn_cmd = Command::new(common::tandem_bin());
     warn_cmd.args([
+        "server",
         "logs",
         "--json",
         "--level",
@@ -205,11 +207,7 @@ fn slice13_logs_level_filtering() {
     std::thread::sleep(Duration::from_millis(500));
 
     // Generate activity
-    let init = common::run_tandem_in(
-        &workspace_dir,
-        &["init", "--tandem-server", &addr, "."],
-        &home,
-    );
+    let init = common::run_tandem_in(&workspace_dir, &["init", "--server", &addr, "."], &home);
     common::assert_ok(&init, "tandem init");
 
     std::fs::write(workspace_dir.join("level-test.txt"), b"level test\n").unwrap();

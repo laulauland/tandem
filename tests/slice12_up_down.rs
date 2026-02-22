@@ -55,7 +55,7 @@ fn slice12_up_status_down() {
     // tandem status should show running
     let status_out = common::run_tandem_in(
         tmp.path(),
-        &["status", "--json", "--control-socket", sock_str],
+        &["server", "status", "--json", "--control-socket", sock_str],
         &home,
     );
     common::assert_ok(&status_out, "tandem status after up");
@@ -82,8 +82,11 @@ fn slice12_up_status_down() {
     std::thread::sleep(Duration::from_millis(500));
 
     // tandem status should show not running
-    let status_after =
-        common::run_tandem_in(tmp.path(), &["status", "--control-socket", sock_str], &home);
+    let status_after = common::run_tandem_in(
+        tmp.path(),
+        &["server", "status", "--control-socket", sock_str],
+        &home,
+    );
     assert!(
         !status_after.status.success(),
         "status should exit 1 after down"
@@ -192,11 +195,7 @@ fn slice12_up_roundtrip_down() {
     common::assert_ok(&up_out, "tandem up");
 
     // Init workspace
-    let init = common::run_tandem_in(
-        &workspace_dir,
-        &["init", "--tandem-server", &addr, "."],
-        &home,
-    );
+    let init = common::run_tandem_in(&workspace_dir, &["init", "--server", &addr, "."], &home);
     common::assert_ok(&init, "tandem init");
 
     // Write a file
@@ -220,8 +219,11 @@ fn slice12_up_roundtrip_down() {
     std::thread::sleep(Duration::from_millis(500));
 
     // Verify stopped
-    let status =
-        common::run_tandem_in(tmp.path(), &["status", "--control-socket", sock_str], &home);
+    let status = common::run_tandem_in(
+        tmp.path(),
+        &["server", "status", "--control-socket", sock_str],
+        &home,
+    );
     assert!(!status.status.success(), "status should fail after down");
 }
 

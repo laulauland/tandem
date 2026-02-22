@@ -2,8 +2,9 @@
 //!
 //! The server stores objects through jj's Git backend so that `jj git push`
 //! on the server repo just works. Operations and views are stored in the
-//! standard jj op_store directory. Op heads are managed via CAS in
-//! `.jj/repo/tandem/heads.json` and synced to jj's op_heads directory.
+//! standard jj op_store directory. Op heads are managed through jj-lib's
+//! op-heads store; `.jj/repo/tandem/heads.json` stores tandem metadata only
+//! (CAS version + workspace head attribution).
 
 use anyhow::{anyhow, bail, Context, Result};
 // blake2 is available if needed for raw hashing, but we use jj_lib::content_hash
@@ -12,7 +13,6 @@ use capnp_rpc::pry;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use jj_lib::backend::{CommitId, TreeId};
 use jj_lib::object_id::ObjectId as _;
-use jj_lib::repo::Repo as _;
 use jj_lib::repo_path::RepoPath;
 use prost::Message as _;
 use serde::{Deserialize, Serialize};
@@ -21,26 +21,14 @@ use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
 use crate::control;
+use crate::logging;
 use crate::proto_convert;
 use crate::tandem_capnp::{cancel, head_watcher, store};
-
-fn emit_log(tx: &broadcast::Sender<control::LogEvent>, level: &str, msg: &str) {
-    let _ = tx.send(control::LogEvent {
-        ts: format!(
-            "{}Z",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs()
-        ),
-        level: level.to_string(),
-        msg: msg.to_string(),
-    });
-}
 
 // ─── Public entry point ───────────────────────────────────────────────────────
 
@@ -48,25 +36,39 @@ fn emit_log(tx: &broadcast::Sender<control::LogEvent>, level: &str, msg: &str) {
 pub struct ServeOptions {
     pub listen_addr: String,
     pub repo_path: String,
+    pub log_level: String,
+    pub log_format: String,
     pub control_socket: Option<String>,
     pub daemon: bool,
     pub log_file: Option<String>,
 }
 
 pub async fn run_serve(opts: ServeOptions) -> Result<()> {
+    let (log_tx, _) = broadcast::channel::<control::LogEvent>(1024);
+    logging::init_tracing(&opts.log_level, &opts.log_format, log_tx.clone())?;
+
+    tracing::info!(
+        listen_addr = %opts.listen_addr,
+        repo = %opts.repo_path,
+        daemon = opts.daemon,
+        log_level = %opts.log_level,
+        log_format = %opts.log_format,
+        "starting tandem server"
+    );
+    if let Some(path) = opts.log_file.as_deref() {
+        tracing::debug!(log_file = %path, "serve log file argument");
+    }
+
     let repo = PathBuf::from(&opts.repo_path);
     let server = Rc::new(Server::new(repo)?);
     let listener = tokio::net::TcpListener::bind(&opts.listen_addr)
         .await
         .with_context(|| format!("failed to bind {}", opts.listen_addr))?;
     let local_addr = listener.local_addr()?;
-    eprintln!("tandem server listening on {local_addr}");
+    tracing::info!(listen_addr = %local_addr, "tandem server listening on");
 
     // Set up shutdown signaling
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
-
-    // Log broadcast channel
-    let (log_tx, _) = broadcast::channel::<control::LogEvent>(1024);
 
     // Set up control socket if requested
     let control_socket_path = opts.control_socket.clone();
@@ -82,18 +84,11 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
 
         let sock = sock_path.clone();
         tokio::spawn(async move {
-            if let Err(e) = control::run_control_socket(sock, control_state).await {
-                eprintln!("control socket error: {e:#}");
+            if let Err(e) = control::run_control_socket(sock.clone(), control_state).await {
+                tracing::error!(socket_path = %sock, error = %e, "control socket error");
             }
         });
     }
-
-    // Emit initial log event
-    emit_log(
-        &log_tx,
-        "info",
-        &format!("tandem server listening on {local_addr}"),
-    );
 
     // Signal handling
     let (signal_tx, mut signal_rx) = tokio::sync::mpsc::channel::<()>(2);
@@ -114,10 +109,10 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
             }
             if first_signal {
                 first_signal = false;
-                eprintln!("\nshutting down gracefully...");
+                tracing::warn!("signal received, shutting down gracefully");
                 let _ = signal_tx_clone.send(()).await;
             } else {
-                eprintln!("\nforced shutdown");
+                tracing::error!("second signal received, forcing shutdown");
                 std::process::exit(0);
             }
         }
@@ -125,9 +120,7 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
 
     // Track in-flight connections
     let inflight = Rc::new(std::cell::Cell::new(0u32));
-
-    // Share log_tx with connection handlers
-    let log_tx = Rc::new(log_tx);
+    let connection_ids = Arc::new(AtomicU64::new(1));
 
     // Accept loop with shutdown
     loop {
@@ -136,27 +129,27 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
                 let (stream, addr) = result?;
                 let server = Rc::clone(&server);
                 let inflight = Rc::clone(&inflight);
-                let log_tx = Rc::clone(&log_tx);
-                inflight.set(inflight.get() + 1);
+                let conn_id = connection_ids.fetch_add(1, Ordering::Relaxed);
 
-                emit_log(&log_tx, "info", &format!("client connected: {addr}"));
+                let next = inflight.get() + 1;
+                inflight.set(next);
+                tracing::info!(conn_id, peer = %addr, inflight = next, "client connected");
 
                 tokio::task::spawn_local(async move {
-                    if let Err(err) = handle_capnp_connection(server, stream, &log_tx).await {
-                        eprintln!("rpc connection error: {err:#}");
+                    if let Err(err) = handle_capnp_connection(server, stream, conn_id).await {
+                        tracing::error!(conn_id, peer = %addr, error = %err, "rpc connection error");
                     }
-                    emit_log(&log_tx, "info", &format!("client disconnected: {addr}"));
-                    inflight.set(inflight.get().saturating_sub(1));
+                    let remaining = inflight.get().saturating_sub(1);
+                    inflight.set(remaining);
+                    tracing::info!(conn_id, peer = %addr, inflight = remaining, "client disconnected");
                 });
             }
             _ = signal_rx.recv() => {
-                emit_log(&log_tx, "info", "signal received, draining connections...");
-                eprintln!("signal received, draining connections...");
+                tracing::info!("signal received, draining connections");
                 break;
             }
             _ = shutdown_rx.recv() => {
-                emit_log(&log_tx, "info", "shutdown requested via control socket");
-                eprintln!("shutdown requested via control socket...");
+                tracing::info!("shutdown requested via control socket, draining connections");
                 break;
             }
         }
@@ -164,11 +157,14 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
 
     // Drain in-flight connections (5s timeout)
     if inflight.get() > 0 {
-        eprintln!("waiting for {} in-flight connection(s)...", inflight.get());
+        tracing::info!(
+            inflight = inflight.get(),
+            "waiting for in-flight connections to drain"
+        );
         let drain_deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
         while inflight.get() > 0 {
             if tokio::time::Instant::now() > drain_deadline {
-                eprintln!("drain timeout, {} connections remaining", inflight.get());
+                tracing::warn!(inflight = inflight.get(), "drain timeout reached");
                 break;
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -177,10 +173,14 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
 
     // Clean up control socket
     if let Some(ref sock_path) = control_socket_path {
-        let _ = std::fs::remove_file(sock_path);
+        if let Err(e) = std::fs::remove_file(sock_path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(socket_path = %sock_path, error = %e, "failed to remove control socket");
+            }
+        }
     }
 
-    eprintln!("tandem server stopped");
+    tracing::info!("tandem server stopped");
     Ok(())
 }
 
@@ -189,7 +189,7 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
 async fn handle_capnp_connection(
     server: Rc<Server>,
     stream: tokio::net::TcpStream,
-    log_tx: &broadcast::Sender<control::LogEvent>,
+    conn_id: u64,
 ) -> Result<()> {
     use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -202,11 +202,13 @@ async fn handle_capnp_connection(
     );
     let store_impl = StoreImpl {
         server: server.clone(),
-        log_tx: log_tx.clone(),
+        conn_id,
     };
     let store_client: store::Client = capnp_rpc::new_client(store_impl);
     let rpc_system = RpcSystem::new(Box::new(network), Some(store_client.client));
+    tracing::debug!(conn_id, "rpc session started");
     rpc_system.await?;
+    tracing::debug!(conn_id, "rpc session ended");
     Ok(())
 }
 
@@ -222,9 +224,9 @@ struct Server {
     store: Arc<jj_lib::store::Store>,
     /// Path to `.jj/repo/op_store/` for operations and views.
     op_store_path: PathBuf,
-    /// Path to `.jj/repo/op_heads/heads/` for syncing op heads.
-    op_heads_dir: PathBuf,
-    /// Path to `.jj/repo/tandem/` for CAS heads management.
+    /// jj-lib op heads store — single authority for operation heads.
+    op_heads_store: Arc<dyn jj_lib::op_heads_store::OpHeadsStore>,
+    /// Path to `.jj/repo/tandem/` for tandem metadata sidecar (CAS/workspace map).
     tandem_dir: PathBuf,
     lock: Mutex<()>,
     watchers: Mutex<Vec<WatcherEntry>>,
@@ -250,136 +252,61 @@ impl Server {
     fn new(repo: PathBuf) -> Result<Self> {
         fs::create_dir_all(&repo)?;
 
-        let jj_dir = repo.join(".jj");
-        let store = if jj_dir.exists() {
-            // Load existing jj+git repo
-            Self::load_store(&repo)?
-        } else {
-            // Initialize a new jj+git colocated repo
-            Self::init_jj_git_repo(&repo)?
-        };
+        if !repo.join(".jj").exists() {
+            Self::init_jj_git_repo(&repo)?;
+        }
 
         let repo_dir = dunce::canonicalize(repo.join(".jj/repo"))
             .with_context(|| format!("cannot canonicalize .jj/repo at {}", repo.display()))?;
         let op_store_path = repo_dir.join("op_store");
-        let op_heads_dir = repo_dir.join("op_heads").join("heads");
 
-        // Create tandem-specific directory for CAS heads management.
+        let settings = Self::user_settings()?;
+        let factories = jj_lib::repo::StoreFactories::default();
+        let loader = jj_lib::repo::RepoLoader::init_from_file_system(&settings, &repo_dir, &factories)
+            .context("load jj repo state")?;
+
+        // Create tandem-specific directory for CAS/version/workspace metadata.
         let tandem_dir = repo_dir.join("tandem");
         fs::create_dir_all(&tandem_dir)?;
 
-        let heads_path = tandem_dir.join("heads.json");
-        let legacy_heads_path = repo.join(".tandem").join("heads.json");
-
-        // One-time migration from legacy repo-root `.tandem/heads.json`.
-        if !heads_path.exists() && legacy_heads_path.exists() {
-            match fs::rename(&legacy_heads_path, &heads_path) {
-                Ok(()) => {}
-                Err(_rename_err) => {
-                    fs::copy(&legacy_heads_path, &heads_path).with_context(|| {
-                        format!(
-                            "failed to migrate legacy heads from {} to {}",
-                            legacy_heads_path.display(),
-                            heads_path.display()
-                        )
-                    })?;
-                    fs::remove_file(&legacy_heads_path).with_context(|| {
-                        format!(
-                            "failed to remove legacy heads file {}",
-                            legacy_heads_path.display()
-                        )
-                    })?;
-                }
-            }
-        }
-
-        if !heads_path.exists() {
-            // Initialize heads from jj's op_heads directory.
-            let initial_heads = Self::read_jj_op_heads(&op_heads_dir)?;
-            let initial = HeadsState {
+        let metadata_path = tandem_dir.join("heads.json");
+        if !metadata_path.exists() {
+            let initial = HeadsMetadata {
                 version: 0,
-                heads: initial_heads,
                 workspace_heads: BTreeMap::new(),
             };
-            fs::write(&heads_path, serde_json::to_vec_pretty(&initial)?)?;
+            fs::write(&metadata_path, serde_json::to_vec_pretty(&initial)?)?;
         }
 
         Ok(Self {
-            store,
+            store: loader.store().clone(),
             op_store_path,
-            op_heads_dir,
+            op_heads_store: loader.op_heads_store().clone(),
             tandem_dir,
             lock: Mutex::new(()),
             watchers: Mutex::new(Vec::new()),
         })
     }
 
-    /// Initialize a new jj+git colocated repo and return its Store.
-    fn init_jj_git_repo(repo_path: &Path) -> Result<Arc<jj_lib::store::Store>> {
+    fn user_settings() -> Result<jj_lib::settings::UserSettings> {
         let config = jj_lib::config::StackedConfig::with_defaults();
-        let settings =
-            jj_lib::settings::UserSettings::from_config(config).context("create jj settings")?;
-
-        let (_workspace, jj_repo) =
-            jj_lib::workspace::Workspace::init_colocated_git(&settings, repo_path)
-                .context("init colocated git repo")?;
-
-        Ok(jj_repo.store().clone())
+        jj_lib::settings::UserSettings::from_config(config).context("create jj settings")
     }
 
-    /// Load an existing jj+git repo's Store.
-    fn load_store(repo_path: &Path) -> Result<Arc<jj_lib::store::Store>> {
-        let config = jj_lib::config::StackedConfig::with_defaults();
-        let settings =
-            jj_lib::settings::UserSettings::from_config(config).context("create jj settings")?;
-
-        let store_path = dunce::canonicalize(repo_path.join(".jj/repo/store"))
-            .context("canonicalize store path")?;
-
-        let git_backend = jj_lib::git_backend::GitBackend::load(&settings, &store_path)
-            .map_err(|e| anyhow!("load git backend: {e}"))?;
-
-        let signer = jj_lib::signing::Signer::from_settings(&settings).context("create signer")?;
-        let merge_options = jj_lib::tree_merge::MergeOptions::from_settings(&settings)
-            .map_err(|e| anyhow!("merge options: {e}"))?;
-
-        Ok(jj_lib::store::Store::new(
-            Box::new(git_backend),
-            signer,
-            merge_options,
-        ))
-    }
-
-    /// Read op heads from jj's op_heads/heads/ directory.
-    fn read_jj_op_heads(op_heads_dir: &Path) -> Result<Vec<String>> {
-        let mut heads = Vec::new();
-        if let Ok(entries) = fs::read_dir(op_heads_dir) {
-            for entry in entries {
-                let entry = entry?;
-                let name = entry.file_name();
-                let name = name.to_string_lossy();
-                // Skip non-hex filenames
-                if name.chars().all(|c| c.is_ascii_hexdigit()) {
-                    heads.push(name.to_string());
-                }
-            }
-        }
-        Ok(heads)
-    }
-
-    /// Sync the tandem heads to jj's op_heads/heads/ directory.
-    fn sync_op_heads_to_jj(&self, heads: &[String]) -> Result<()> {
-        // Clear existing head files
-        if let Ok(entries) = fs::read_dir(&self.op_heads_dir) {
-            for entry in entries.flatten() {
-                let _ = fs::remove_file(entry.path());
-            }
-        }
-        // Write new head files (empty files named by hex ID)
-        for head_hex in heads {
-            fs::write(self.op_heads_dir.join(head_hex), "")?;
-        }
+    /// Initialize a new jj+git colocated repo.
+    fn init_jj_git_repo(repo_path: &Path) -> Result<()> {
+        let settings = Self::user_settings()?;
+        jj_lib::workspace::Workspace::init_colocated_git(&settings, repo_path)
+            .context("init colocated git repo")?;
         Ok(())
+    }
+
+    fn read_jj_op_heads(&self) -> Result<Vec<String>> {
+        let ids = pollster::block_on(self.op_heads_store.get_op_heads())
+            .map_err(|e| anyhow!("read op heads: {e}"))?;
+        let mut heads: Vec<String> = ids.into_iter().map(|id| id.hex()).collect();
+        heads.sort();
+        Ok(heads)
     }
 
     // ─── Object operations (through git backend) ─────────────────────
@@ -563,7 +490,13 @@ impl Server {
 
     fn get_heads_sync(&self) -> Result<HeadsState> {
         let _guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
-        self.read_heads_state()
+        let metadata = self.read_heads_metadata()?;
+        let heads = self.read_jj_op_heads()?;
+        Ok(HeadsState {
+            version: metadata.version,
+            heads,
+            workspace_heads: metadata.workspace_heads,
+        })
     }
 
     fn update_op_heads_sync(
@@ -574,53 +507,63 @@ impl Server {
         workspace_id: Option<String>,
     ) -> Result<UpdateResult> {
         let _guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
-        let state = self.read_heads_state()?;
+        let metadata = self.read_heads_metadata()?;
 
-        if state.version != expected_version {
+        if metadata.version != expected_version {
+            let current_heads = self.read_jj_op_heads()?;
+            tracing::debug!(
+                expected_version,
+                actual_version = metadata.version,
+                "update_op_heads version mismatch"
+            );
             return Ok(UpdateResult {
                 ok: false,
-                heads: state
-                    .heads
+                heads: current_heads
                     .iter()
                     .map(|h| from_hex(h).unwrap_or_default())
                     .collect(),
-                version: state.version,
-                workspace_heads: state.workspace_heads,
+                version: metadata.version,
+                workspace_heads: metadata.workspace_heads,
             });
         }
 
-        // Convert raw bytes to hex for storage
-        let old_hex: Vec<String> = old_ids.iter().map(|id| to_hex(id)).collect();
+        let mut old_op_ids: Vec<jj_lib::op_store::OperationId> =
+            old_ids.into_iter().map(jj_lib::op_store::OperationId::new).collect();
+        let new_op_id = jj_lib::op_store::OperationId::new(new_id.clone());
+        old_op_ids.retain(|id| id != &new_op_id);
+        pollster::block_on(self.op_heads_store.update_op_heads(&old_op_ids, &new_op_id))
+            .map_err(|e| anyhow!("update op heads via jj-lib: {e}"))?;
+
+        let next_heads = self.read_jj_op_heads()?;
         let new_hex = to_hex(&new_id);
-
-        let next_heads = updated_heads(&state.heads, &old_hex, &new_hex);
         let next_workspace_heads =
-            updated_workspace_heads(&state.workspace_heads, workspace_id.as_deref(), &new_hex);
+            updated_workspace_heads(&metadata.workspace_heads, workspace_id.as_deref(), &new_hex);
 
-        let next_state = HeadsState {
-            version: state.version + 1,
-            heads: next_heads.clone(),
+        let next_metadata = HeadsMetadata {
+            version: metadata.version + 1,
             workspace_heads: next_workspace_heads.clone(),
         };
-        self.write_heads_state(&next_state)?;
+        self.write_heads_metadata(&next_metadata)?;
 
-        // Sync to jj's op_heads directory so `jj` commands work on the server
-        if let Err(e) = self.sync_op_heads_to_jj(&next_heads) {
-            eprintln!("warning: failed to sync op heads to jj: {e:#}");
-        }
+        tracing::info!(
+            previous_version = metadata.version,
+            new_version = next_metadata.version,
+            heads = next_heads.len(),
+            workspace_heads = next_workspace_heads.len(),
+            "updated heads state"
+        );
 
-        // Convert hex back to raw bytes for the response
         let heads_bytes: Vec<Vec<u8>> = next_heads
             .iter()
             .map(|h| from_hex(h).unwrap_or_default())
             .collect();
 
-        self.notify_watchers(next_state.version, &heads_bytes);
+        self.notify_watchers(next_metadata.version, &heads_bytes);
 
         Ok(UpdateResult {
             ok: true,
             heads: heads_bytes,
-            version: next_state.version,
+            version: next_metadata.version,
             workspace_heads: next_workspace_heads,
         })
     }
@@ -631,10 +574,21 @@ impl Server {
             watcher,
             after_version,
         });
+        tracing::debug!(
+            watchers = watchers.len(),
+            after_version,
+            "watcher registered"
+        );
     }
 
     fn notify_watchers(&self, version: u64, heads: &[Vec<u8>]) {
         let mut watchers = self.watchers.lock().unwrap();
+        tracing::trace!(
+            watchers = watchers.len(),
+            version,
+            heads = heads.len(),
+            "notifying watchers"
+        );
         for entry in watchers.iter_mut() {
             if entry.after_version >= version {
                 continue;
@@ -658,16 +612,16 @@ impl Server {
         }
     }
 
-    fn read_heads_state(&self) -> Result<HeadsState> {
+    fn read_heads_metadata(&self) -> Result<HeadsMetadata> {
         let bytes = fs::read(self.tandem_dir.join("heads.json"))?;
-        let state = serde_json::from_slice(&bytes)?;
-        Ok(state)
+        let metadata = serde_json::from_slice(&bytes)?;
+        Ok(metadata)
     }
 
-    fn write_heads_state(&self, state: &HeadsState) -> Result<()> {
+    fn write_heads_metadata(&self, metadata: &HeadsMetadata) -> Result<()> {
         fs::write(
             self.tandem_dir.join("heads.json"),
-            serde_json::to_vec_pretty(state)?,
+            serde_json::to_vec_pretty(metadata)?,
         )?;
         Ok(())
     }
@@ -684,10 +638,15 @@ struct UpdateResult {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct HeadsMetadata {
+    version: u64,
+    #[serde(default)]
+    workspace_heads: BTreeMap<String, String>, // hex-encoded
+}
+
 struct HeadsState {
     version: u64,
-    heads: Vec<String>, // hex-encoded IDs
-    #[serde(default)]
+    heads: Vec<String>, // hex-encoded op IDs from jj-lib op-heads store
     workspace_heads: BTreeMap<String, String>, // hex-encoded
 }
 
@@ -695,7 +654,7 @@ struct HeadsState {
 
 struct StoreImpl {
     server: Rc<Server>,
-    log_tx: broadcast::Sender<control::LogEvent>,
+    conn_id: u64,
 }
 
 fn capnp_err(e: anyhow::Error) -> capnp::Error {
@@ -718,6 +677,7 @@ impl store::Server for StoreImpl {
         _params: store::GetRepoInfoParams,
         mut results: store::GetRepoInfoResults,
     ) -> Promise<(), capnp::Error> {
+        tracing::trace!(conn_id = self.conn_id, rpc = "getRepoInfo", "rpc request");
         let backend = self.server.store.backend();
         let mut info = results.get().init_info();
         info.set_protocol_major(0);
@@ -748,17 +708,38 @@ impl store::Server for StoreImpl {
         let id_bytes = pry!(reader.get_id());
         let kind_str = object_kind_str(kind);
 
+        tracing::debug!(
+            conn_id = self.conn_id,
+            rpc = "getObject",
+            kind = kind_str,
+            object_id = %to_hex(id_bytes),
+            "rpc request"
+        );
+
         match self.server.get_object_sync(kind_str, id_bytes) {
             Ok(data) => {
-                emit_log(
-                    &self.log_tx,
-                    "debug",
-                    &format!("getObject {kind_str} size={}", data.len()),
+                tracing::debug!(
+                    conn_id = self.conn_id,
+                    rpc = "getObject",
+                    kind = kind_str,
+                    object_id = %to_hex(id_bytes),
+                    bytes = data.len(),
+                    "rpc response"
                 );
                 results.get().set_data(&data);
                 Promise::ok(())
             }
-            Err(e) => Promise::err(capnp_err(e)),
+            Err(e) => {
+                tracing::error!(
+                    conn_id = self.conn_id,
+                    rpc = "getObject",
+                    kind = kind_str,
+                    object_id = %to_hex(id_bytes),
+                    error = %e,
+                    "rpc error"
+                );
+                Promise::err(capnp_err(e))
+            }
         }
     }
 
@@ -772,19 +753,41 @@ impl store::Server for StoreImpl {
         let data = pry!(reader.get_data()).to_vec();
         let kind_str = object_kind_str(kind);
 
+        tracing::info!(
+            conn_id = self.conn_id,
+            rpc = "putObject",
+            kind = kind_str,
+            bytes = data.len(),
+            "rpc request"
+        );
+
         match self.server.put_object_sync(kind_str, &data) {
             Ok((id, normalized)) => {
-                emit_log(
-                    &self.log_tx,
-                    "info",
-                    &format!("putObject {kind_str} size={}", data.len()),
+                tracing::info!(
+                    conn_id = self.conn_id,
+                    rpc = "putObject",
+                    kind = kind_str,
+                    object_id = %to_hex(&id),
+                    bytes = data.len(),
+                    normalized_bytes = normalized.len(),
+                    "rpc response"
                 );
                 let mut r = results.get();
                 r.set_id(&id);
                 r.set_normalized_data(&normalized);
                 Promise::ok(())
             }
-            Err(e) => Promise::err(capnp_err(e)),
+            Err(e) => {
+                tracing::error!(
+                    conn_id = self.conn_id,
+                    rpc = "putObject",
+                    kind = kind_str,
+                    bytes = data.len(),
+                    error = %e,
+                    "rpc error"
+                );
+                Promise::err(capnp_err(e))
+            }
         }
     }
 
@@ -796,12 +799,35 @@ impl store::Server for StoreImpl {
         let reader = pry!(params.get());
         let id_bytes = pry!(reader.get_id());
 
+        tracing::debug!(
+            conn_id = self.conn_id,
+            rpc = "getOperation",
+            operation_id = %to_hex(id_bytes),
+            "rpc request"
+        );
+
         match self.server.get_operation_sync(id_bytes) {
             Ok(data) => {
+                tracing::debug!(
+                    conn_id = self.conn_id,
+                    rpc = "getOperation",
+                    operation_id = %to_hex(id_bytes),
+                    bytes = data.len(),
+                    "rpc response"
+                );
                 results.get().set_data(&data);
                 Promise::ok(())
             }
-            Err(e) => Promise::err(capnp_err(e)),
+            Err(e) => {
+                tracing::error!(
+                    conn_id = self.conn_id,
+                    rpc = "getOperation",
+                    operation_id = %to_hex(id_bytes),
+                    error = %e,
+                    "rpc error"
+                );
+                Promise::err(capnp_err(e))
+            }
         }
     }
 
@@ -813,12 +839,35 @@ impl store::Server for StoreImpl {
         let reader = pry!(params.get());
         let data = pry!(reader.get_data()).to_vec();
 
+        tracing::info!(
+            conn_id = self.conn_id,
+            rpc = "putOperation",
+            bytes = data.len(),
+            "rpc request"
+        );
+
         match self.server.put_operation_sync(&data) {
             Ok(id) => {
+                tracing::info!(
+                    conn_id = self.conn_id,
+                    rpc = "putOperation",
+                    operation_id = %to_hex(&id),
+                    bytes = data.len(),
+                    "rpc response"
+                );
                 results.get().set_id(&id);
                 Promise::ok(())
             }
-            Err(e) => Promise::err(capnp_err(e)),
+            Err(e) => {
+                tracing::error!(
+                    conn_id = self.conn_id,
+                    rpc = "putOperation",
+                    bytes = data.len(),
+                    error = %e,
+                    "rpc error"
+                );
+                Promise::err(capnp_err(e))
+            }
         }
     }
 
@@ -830,12 +879,35 @@ impl store::Server for StoreImpl {
         let reader = pry!(params.get());
         let id_bytes = pry!(reader.get_id());
 
+        tracing::debug!(
+            conn_id = self.conn_id,
+            rpc = "getView",
+            view_id = %to_hex(id_bytes),
+            "rpc request"
+        );
+
         match self.server.get_view_sync(id_bytes) {
             Ok(data) => {
+                tracing::debug!(
+                    conn_id = self.conn_id,
+                    rpc = "getView",
+                    view_id = %to_hex(id_bytes),
+                    bytes = data.len(),
+                    "rpc response"
+                );
                 results.get().set_data(&data);
                 Promise::ok(())
             }
-            Err(e) => Promise::err(capnp_err(e)),
+            Err(e) => {
+                tracing::error!(
+                    conn_id = self.conn_id,
+                    rpc = "getView",
+                    view_id = %to_hex(id_bytes),
+                    error = %e,
+                    "rpc error"
+                );
+                Promise::err(capnp_err(e))
+            }
         }
     }
 
@@ -847,12 +919,35 @@ impl store::Server for StoreImpl {
         let reader = pry!(params.get());
         let data = pry!(reader.get_data()).to_vec();
 
+        tracing::info!(
+            conn_id = self.conn_id,
+            rpc = "putView",
+            bytes = data.len(),
+            "rpc request"
+        );
+
         match self.server.put_view_sync(&data) {
             Ok(id) => {
+                tracing::info!(
+                    conn_id = self.conn_id,
+                    rpc = "putView",
+                    view_id = %to_hex(&id),
+                    bytes = data.len(),
+                    "rpc response"
+                );
                 results.get().set_id(&id);
                 Promise::ok(())
             }
-            Err(e) => Promise::err(capnp_err(e)),
+            Err(e) => {
+                tracing::error!(
+                    conn_id = self.conn_id,
+                    rpc = "putView",
+                    bytes = data.len(),
+                    error = %e,
+                    "rpc error"
+                );
+                Promise::err(capnp_err(e))
+            }
         }
     }
 
@@ -863,9 +958,22 @@ impl store::Server for StoreImpl {
     ) -> Promise<(), capnp::Error> {
         let reader = pry!(params.get());
         let prefix = pry!(reader.get_hex_prefix()).to_string().unwrap();
+        tracing::debug!(
+            conn_id = self.conn_id,
+            rpc = "resolveOperationIdPrefix",
+            prefix = %prefix,
+            "rpc request"
+        );
 
         match self.server.resolve_operation_id_prefix_sync(&prefix) {
             Ok((resolution, matched)) => {
+                tracing::debug!(
+                    conn_id = self.conn_id,
+                    rpc = "resolveOperationIdPrefix",
+                    prefix = %prefix,
+                    resolution = %resolution,
+                    "rpc response"
+                );
                 let mut r = results.get();
                 match resolution.as_str() {
                     "noMatch" => r.set_resolution(crate::tandem_capnp::PrefixResolution::NoMatch),
@@ -882,7 +990,16 @@ impl store::Server for StoreImpl {
                 }
                 Promise::ok(())
             }
-            Err(e) => Promise::err(capnp_err(e)),
+            Err(e) => {
+                tracing::error!(
+                    conn_id = self.conn_id,
+                    rpc = "resolveOperationIdPrefix",
+                    prefix = %prefix,
+                    error = %e,
+                    "rpc error"
+                );
+                Promise::err(capnp_err(e))
+            }
         }
     }
 
@@ -891,8 +1008,17 @@ impl store::Server for StoreImpl {
         _params: store::GetHeadsParams,
         mut results: store::GetHeadsResults,
     ) -> Promise<(), capnp::Error> {
+        tracing::debug!(conn_id = self.conn_id, rpc = "getHeads", "rpc request");
         match self.server.get_heads_sync() {
             Ok(state) => {
+                tracing::debug!(
+                    conn_id = self.conn_id,
+                    rpc = "getHeads",
+                    version = state.version,
+                    heads = state.heads.len(),
+                    workspace_heads = state.workspace_heads.len(),
+                    "rpc response"
+                );
                 let mut r = results.get();
                 // Convert hex heads to raw bytes
                 let head_bytes: Vec<Vec<u8>> = state
@@ -919,7 +1045,15 @@ impl store::Server for StoreImpl {
                 }
                 Promise::ok(())
             }
-            Err(e) => Promise::err(capnp_err(e)),
+            Err(e) => {
+                tracing::error!(
+                    conn_id = self.conn_id,
+                    rpc = "getHeads",
+                    error = %e,
+                    "rpc error"
+                );
+                Promise::err(capnp_err(e))
+            }
         }
     }
 
@@ -946,15 +1080,29 @@ impl store::Server for StoreImpl {
             Some(workspace_id_str.to_string())
         };
 
+        tracing::info!(
+            conn_id = self.conn_id,
+            rpc = "updateOpHeads",
+            expected_version,
+            old_ids = old_ids.len(),
+            new_id = %to_hex(&new_id),
+            workspace_id = workspace_id.as_deref().unwrap_or(""),
+            "rpc request"
+        );
+
         match self
             .server
             .update_op_heads_sync(old_ids, new_id, expected_version, workspace_id)
         {
             Ok(result) => {
-                emit_log(
-                    &self.log_tx,
-                    "info",
-                    &format!("updateOpHeads ok={} version={}", result.ok, result.version),
+                tracing::info!(
+                    conn_id = self.conn_id,
+                    rpc = "updateOpHeads",
+                    ok = result.ok,
+                    version = result.version,
+                    heads = result.heads.len(),
+                    workspace_heads = result.workspace_heads.len(),
+                    "rpc response"
                 );
                 let mut r = results.get();
                 r.set_ok(result.ok);
@@ -977,7 +1125,16 @@ impl store::Server for StoreImpl {
                 }
                 Promise::ok(())
             }
-            Err(e) => Promise::err(capnp_err(e)),
+            Err(e) => {
+                tracing::error!(
+                    conn_id = self.conn_id,
+                    rpc = "updateOpHeads",
+                    expected_version,
+                    error = %e,
+                    "rpc error"
+                );
+                Promise::err(capnp_err(e))
+            }
         }
     }
 
@@ -990,12 +1147,34 @@ impl store::Server for StoreImpl {
         let watcher = pry!(reader.get_watcher());
         let after_version = reader.get_after_version();
 
+        tracing::info!(
+            conn_id = self.conn_id,
+            rpc = "watchHeads",
+            after_version,
+            "rpc request"
+        );
+
         let current_state = match self.server.get_heads_sync() {
             Ok(s) => s,
-            Err(e) => return Promise::err(capnp_err(e)),
+            Err(e) => {
+                tracing::error!(
+                    conn_id = self.conn_id,
+                    rpc = "watchHeads",
+                    error = %e,
+                    "rpc error"
+                );
+                return Promise::err(capnp_err(e));
+            }
         };
 
         if after_version < current_state.version {
+            tracing::debug!(
+                conn_id = self.conn_id,
+                rpc = "watchHeads",
+                after_version,
+                current_version = current_state.version,
+                "sending catch-up notification"
+            );
             let catch_up_watcher = watcher.clone();
             let heads: Vec<Vec<u8>> = current_state
                 .heads
@@ -1018,6 +1197,12 @@ impl store::Server for StoreImpl {
         }
 
         self.server.register_watcher(watcher, current_state.version);
+        tracing::info!(
+            conn_id = self.conn_id,
+            rpc = "watchHeads",
+            version = current_state.version,
+            "watcher registered"
+        );
 
         let cancel_impl = CancelImpl {
             server: self.server.clone(),
@@ -1062,29 +1247,14 @@ impl cancel::Server for CancelImpl {
         _results: cancel::CancelResults,
     ) -> Promise<(), capnp::Error> {
         let mut watchers = self.server.watchers.lock().unwrap();
+        let count = watchers.len();
         watchers.clear();
+        tracing::info!(cleared_watchers = count, "watchers cancelled");
         Promise::ok(())
     }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-use std::collections::HashSet;
-
-fn updated_heads(current_heads: &[String], old_ids: &[String], new_id: &str) -> Vec<String> {
-    let removed_heads: HashSet<&str> = old_ids.iter().map(String::as_str).collect();
-    let mut next_heads = current_heads
-        .iter()
-        .filter(|head| !removed_heads.contains(head.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
-
-    if !next_heads.iter().any(|head| head == new_id) {
-        next_heads.push(new_id.to_string());
-    }
-
-    next_heads
-}
 
 fn updated_workspace_heads(
     current: &BTreeMap<String, String>,

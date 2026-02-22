@@ -7,6 +7,7 @@
 - [x] ~~Full byte-compatible object/op/view storage semantics~~ → resolved
 - [x] ~~Remove test-only CAS delay knob (`TANDEM_TEST_DELAY_BEFORE_UPDATE_MS`)~~ → removed
 - [x] ~~Clean up `opensrc/` directory leftover~~ → removed 2026-02-15
+- [x] ~~Dual head authority in server state management~~ → resolved via Option C (`docs/exec-plans/completed/option-c-jj-lib-head-authority.md`) on 2026-02-22
 
 ## Known issues
 

@@ -2,8 +2,8 @@
 //!
 //! Single binary:
 //!   tandem serve --listen <addr> --repo <path>   → server mode
-//!   tandem init --tandem-server <addr> [path]    → initialize tandem workspace
-//!   tandem <jj args>                              → stock jj via CliRunner
+//!   tandem init --server <addr> [path]           → initialize tandem workspace
+//!   tandem <jj args>                             → stock jj via CliRunner
 
 #[allow(unused_parens, dead_code)]
 mod tandem_capnp {
@@ -11,6 +11,8 @@ mod tandem_capnp {
 }
 
 mod backend;
+mod control;
+mod logging;
 mod op_heads_store;
 mod op_store;
 mod proto_convert;
@@ -49,7 +51,7 @@ SETUP:
     tandem serve --listen 0.0.0.0:13013 --repo /path/to/repo
 
     # Initialize a workspace backed by the server
-    tandem init --tandem-server server:13013 my-workspace
+    tandem init --server server:13013 my-workspace
 
     # Use jj normally
     cd my-workspace
@@ -64,9 +66,15 @@ EXAMPLES:
 
 const INIT_AFTER_HELP: &str = "\
 EXAMPLES:
-    tandem init --tandem-server server:13013 my-workspace
-    tandem init --tandem-server server:13013 --workspace agent-a .
+    tandem init --server server:13013 my-workspace
+    tandem init --server server:13013 --workspace agent-a .
     TANDEM_SERVER=server:13013 tandem init .";
+
+const SERVER_AFTER_HELP: &str = "\
+EXAMPLES:
+    tandem server status
+    tandem server logs --level debug
+    tandem server logs --json";
 
 // ─── CLI definition ───────────────────────────────────────────────────────────
 
@@ -115,7 +123,7 @@ enum Commands {
     Init {
         /// Server address (host:port)
         #[arg(long, env = "TANDEM_SERVER")]
-        tandem_server: String,
+        server: String,
         /// Workspace name (auto-generated if omitted)
         #[arg(long, env = "TANDEM_WORKSPACE")]
         workspace: Option<String>,
@@ -157,6 +165,16 @@ enum Commands {
         control_socket: Option<String>,
     },
 
+    /// Tandem daemon status/log streaming commands
+    #[command(after_help = SERVER_AFTER_HELP)]
+    Server {
+        #[command(subcommand)]
+        command: ServerCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ServerCommands {
     /// Show tandem daemon status
     Status {
         /// Output as JSON
@@ -191,9 +209,7 @@ fn main() -> ExitCode {
     // argument parsing — this avoids conflicts with jj global flags like
     // --no-pager, --color, -R that appear before the subcommand.
     match args.get(1).map(|s| s.as_str()) {
-        None
-        | Some("serve" | "init" | "watch" | "up" | "down" | "status" | "logs" | "--help" | "-h") => {
-        }
+        None | Some("serve" | "init" | "watch" | "up" | "down" | "server" | "--help" | "-h") => {}
         _ => return run_jj(),
     }
 
@@ -222,12 +238,12 @@ fn main() -> ExitCode {
             log_file.as_deref(),
         ),
         Some(Commands::Init {
-            tandem_server,
+            server,
             workspace,
             path,
         }) => {
             let workspace_name = resolve_init_workspace_name(workspace.as_deref());
-            run_tandem_init(&tandem_server, &workspace_name, &path)
+            run_tandem_init(&server, &workspace_name, &path)
         }
         Some(Commands::Watch { server }) => run_watch(&server),
         Some(Commands::Up {
@@ -244,15 +260,17 @@ fn main() -> ExitCode {
             control_socket.as_deref(),
         ),
         Some(Commands::Down { control_socket }) => run_down(control_socket.as_deref()),
-        Some(Commands::Status {
-            json,
-            control_socket,
-        }) => run_status(json, control_socket.as_deref()),
-        Some(Commands::Logs {
-            level,
-            json,
-            control_socket,
-        }) => run_logs(&level, json, control_socket.as_deref()),
+        Some(Commands::Server { command }) => match command {
+            ServerCommands::Status {
+                json,
+                control_socket,
+            } => run_status(json, control_socket.as_deref()),
+            ServerCommands::Logs {
+                level,
+                json,
+                control_socket,
+            } => run_logs(&level, json, control_socket.as_deref()),
+        },
     }
 }
 
@@ -271,8 +289,8 @@ fn run_watch(server_addr: &str) -> ExitCode {
 fn run_serve(
     listen_addr: &str,
     repo_path: &str,
-    _log_level: &str,
-    _log_format: &str,
+    log_level: &str,
+    log_format: &str,
     control_socket: Option<&str>,
     daemon: bool,
     log_file: Option<&str>,
@@ -289,6 +307,8 @@ fn run_serve(
     let opts = server::ServeOptions {
         listen_addr: listen_addr.to_string(),
         repo_path: repo_path.to_string(),
+        log_level: log_level.to_string(),
+        log_format: log_format.to_string(),
         control_socket: control_socket.map(|s| s.to_string()),
         daemon,
         log_file: log_file.map(|s| s.to_string()),
@@ -303,8 +323,6 @@ fn run_serve(
 }
 
 // ─── Up / Down / Status / Logs ────────────────────────────────────────────────
-
-mod control;
 
 fn default_control_socket() -> String {
     let dir = std::env::temp_dir().join("tandem");

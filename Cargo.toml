@@ -56,6 +56,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dunce = "1"
 libc = "0.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "json", "registry"] }
 
 [build-dependencies]
 capnpc = "0.20"

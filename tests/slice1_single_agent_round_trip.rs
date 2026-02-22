@@ -16,11 +16,7 @@ fn slice1_single_agent_file_round_trip() {
     common::wait_for_server(&addr, &mut server);
 
     // Initialize workspace with tandem backend
-    let init = common::run_tandem_in(
-        &workspace_dir,
-        &["init", "--tandem-server", &addr, "."],
-        &home,
-    );
+    let init = common::run_tandem_in(&workspace_dir, &["init", "--server", &addr, "."], &home);
     common::assert_ok(&init, "tandem init");
 
     // Verify .jj structure was created

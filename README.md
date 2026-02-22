@@ -34,10 +34,10 @@ cargo build --release
 ```bash
 # On your server (VPS, or localhost for testing)
 tandem up --repo ~/project --listen 0.0.0.0:13013
-tandem status
+tandem server status
 
 # On each agent's machine
-tandem init --tandem-server=your-server:13013 ~/work
+tandem init --server=your-server:13013 ~/work
 cd ~/work
 echo 'pub fn auth() {}' > auth.rs
 tandem new -m "feat: add auth"
@@ -64,20 +64,20 @@ cargo install jj-tandem
 tandem up --repo /srv/project --listen 0.0.0.0:13013
 
 # Verify
-tandem status
+tandem server status
 ```
 
 On agent machines:
 
 ```bash
 # Agent A
-tandem init --tandem-server=your-vps:13013 ~/work
+tandem init --server=your-vps:13013 ~/work
 cd ~/work
 echo 'pub fn auth(token: &str) -> bool { !token.is_empty() }' > auth.rs
 tandem new -m "feat: add auth module"
 
 # Agent B (different machine)
-tandem init --tandem-server=your-vps:13013 --workspace=agent-b ~/work
+tandem init --server=your-vps:13013 --workspace=agent-b ~/work
 cd ~/work
 tandem log                                     # sees Agent A's commit
 tandem file show -r <change-id> auth.rs        # reads Agent A's file
@@ -105,11 +105,11 @@ Server and agents on the same machine, different directories.
 tandem up --repo /tmp/project --listen 127.0.0.1:13013
 
 # Agent A
-tandem init --tandem-server=127.0.0.1:13013 /tmp/agent-a
+tandem init --server=127.0.0.1:13013 /tmp/agent-a
 cd /tmp/agent-a && echo 'hello' > file.txt && tandem new -m "agent A"
 
 # Agent B
-tandem init --tandem-server=127.0.0.1:13013 --workspace=agent-b /tmp/agent-b
+tandem init --server=127.0.0.1:13013 --workspace=agent-b /tmp/agent-b
 cd /tmp/agent-b && tandem log   # sees agent A's commit
 
 # Done
@@ -134,7 +134,7 @@ docker run -d --name tandem-server --network tandem-net \
 docker run --rm --network tandem-net \
   -v $(pwd)/target/release/tandem:/usr/local/bin/tandem \
   debian:trixie-slim bash -c '
-    tandem init --tandem-server=tandem-server:13013 /work
+    tandem init --server=tandem-server:13013 /work
     cd /work
     echo "from agent A" > hello.txt
     tandem new -m "agent A commit"
@@ -155,12 +155,12 @@ time via the shared store.
 tandem up --repo /srv/project --listen 0.0.0.0:13013
 
 # Agent 1
-tandem init --tandem-server=your-vps:13013 --workspace=backend ~/work-backend
+tandem init --server=your-vps:13013 --workspace=backend ~/work-backend
 cd ~/work-backend
 claude --prompt "Implement auth module in src/auth.rs. Use tandem for version control."
 
 # Agent 2
-tandem init --tandem-server=your-vps:13013 --workspace=frontend ~/work-frontend
+tandem init --server=your-vps:13013 --workspace=frontend ~/work-frontend
 cd ~/work-frontend
 claude --prompt "Implement UI. Run tandem log to see other agents' work."
 ```
@@ -185,6 +185,9 @@ Do NOT use git commands — this repo uses tandem.
 
 ## Commands
 
+`tandem status` is the stock jj working-copy status command.
+Use `tandem server status` for daemon health.
+
 ### Server lifecycle
 
 Start, stop, and monitor the tandem server.
@@ -192,9 +195,9 @@ Start, stop, and monitor the tandem server.
 ```
 tandem up --repo <path> --listen <addr>        Start background daemon
 tandem down                                     Stop the daemon
-tandem status                                   Check if daemon is running
-tandem logs                                     Stream logs from daemon
-tandem serve --listen <addr> --repo <path>      Start server (foreground)
+tandem server status                            Check if daemon is running
+tandem server logs                              Stream logs from daemon
+tandem serve --listen <addr> --repo <path>     Start server (foreground)
 ```
 
 **tandem up** — starts a background daemon and returns immediately.
@@ -216,16 +219,16 @@ tandem down [--control-socket <path>]
 
 Sends a shutdown request via the control socket, waits for the process to exit.
 
-**tandem status** — reports whether the daemon is running.
+**tandem server status** — reports whether the daemon is running.
 
 ```
-tandem status [--json] [--control-socket <path>]
+tandem server status [--json] [--control-socket <path>]
 ```
 
 Exit code 0 = running, 1 = not running.
 
 ```
-$ tandem status
+$ tandem server status
 tandem is running
   PID:      1234
   Uptime:   2h 15m
@@ -235,19 +238,22 @@ tandem is running
 ```
 
 ```
-$ tandem status --json
+$ tandem server status --json
 {"running":true,"pid":1234,"uptime_secs":8100,"repo":"/srv/project","listen":"0.0.0.0:13013","version":"0.3.0"}
 ```
 
-**tandem logs** — streams log output from the daemon.
+**tandem server logs** — streams log output from the daemon.
 
 ```
-tandem logs [--level <level>] [--json] [--control-socket <path>]
+tandem server logs [--level <level>] [--json] [--control-socket <path>]
 ```
 
 Connects to the control socket and streams log events. `--level` filters
 server-side (trace, debug, info, warn, error). `--json` outputs raw JSON
 lines instead of formatted text.
+
+JSON log objects include structured fields:
+`ts`, `level`, `target`, `msg`, and `fields`.
 
 **tandem serve** — runs the server in the foreground. Use this for systemd,
 Docker, or debugging. Logs to stderr.
@@ -260,7 +266,7 @@ tandem serve --listen <addr> --repo <path> [--log-level <level>] [--log-format <
 ### Workspace setup
 
 ```
-tandem init --tandem-server <addr> [--workspace <name>] [path]
+tandem init --server <addr> [--workspace <name>] [path]
 ```
 
 Initializes a tandem-backed workspace. Creates the directory, registers the
@@ -282,6 +288,7 @@ rebuilds or CI when any agent commits.
 Every jj command works through tandem:
 
 ```
+tandem status                           Show working-copy status
 tandem log                              Show commit history
 tandem new -m "message"                 Create new change
 tandem diff -r @-                       Show changes
@@ -299,7 +306,7 @@ the remote store.
 
 | Variable | Purpose |
 |----------|---------|
-| `TANDEM_SERVER` | Server address — fallback for `--tandem-server` |
+| `TANDEM_SERVER` | Server address — fallback for `--server` |
 | `TANDEM_WORKSPACE` | Workspace name fallback for `tandem init` when `--workspace` is not provided. |
 
 ---
@@ -415,7 +422,7 @@ Cross-machine tested with Docker containers — see `qa/v1/cross-machine-report.
 
 - **No TLS** — connections are plaintext. Use SSH tunnels or a VPN for untrusted networks.
 - **No auth** — anyone who can reach the port can read/write the repo. Firewall the port and use SSH tunnels for access.
-- **Unix only for daemon management** — `tandem up`, `tandem down`, `tandem status`, and `tandem logs` use Unix domain sockets. macOS and Linux only, not Windows. (`tandem serve` works everywhere.)
+- **Unix only for daemon management** — `tandem up`, `tandem down`, `tandem server status`, and `tandem server logs` use Unix domain sockets. macOS and Linux only, not Windows. (`tandem serve` works everywhere.)
 - **No static binary yet** — requires glibc 2.39+. Use matching distro or build locally.
 - **fsmonitor conflict** — if your jj config has `fsmonitor.backend = "watchman"`,
   pass `--config=fsmonitor.backend=none` to tandem commands.

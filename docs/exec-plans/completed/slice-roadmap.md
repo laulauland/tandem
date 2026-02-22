@@ -3,6 +3,8 @@
 **Status:** All slices completed as of 2026-02-15.
 **See:** `docs/exec-plans/completed/` for detailed completion notes.
 
+**Follow-up plan completed:** `docs/exec-plans/completed/option-c-jj-lib-head-authority.md`
+
 **Stock `jj` on the client, tandem as a remote jj store backend.**
 
 The client and server store real jj objects (commits with tree pointers,
@@ -12,7 +14,8 @@ trees with file entries, file blobs) so that `jj` itself is the client CLI.
 
 Every slice must pass its acceptance criteria using **stock `jj` commands**
 on the client side. No custom `tandem new/log/describe/diff` CLI.
-The only tandem-specific commands are `tandem serve` and `tandem watch`.
+Tandem-specific commands are server/workspace lifecycle commands
+(`tandem serve`, `tandem up/down`, `tandem server status/logs`, `tandem watch`).
 
 ---
 
@@ -191,9 +194,10 @@ impl OpHeadsStore for TandemOpHeadsStore { /* getHeads, updateOpHeads */ }
 
 The client binary:
 - `tandem serve --listen <addr> --repo <path>` — server mode
+- `tandem up/down` + `tandem server status/logs` — daemon lifecycle/control socket
 - `tandem watch` — head change notifications
 - `tandem --help` — local-only help
-- All other commands: use **stock `jj`** configured to use TandemBackend
+- All other commands: use **stock `jj`** configured to use TandemBackend (`tandem status` included)
 
 ### Server storage
 

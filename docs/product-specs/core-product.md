@@ -24,7 +24,8 @@
 
 ## Planned
 
-- **Server lifecycle management** — `tandem up/down/status/logs` for daemon
-  management without systemd. See `docs/design-docs/server-lifecycle.md`.
+- **Server lifecycle management** — `tandem up/down` plus
+  `tandem server status/logs` for daemon management without systemd.
+  See `docs/design-docs/server-lifecycle.md`.
 - **Token auth** — bearer token on Cap'n Proto port. Single shared secret,
   no user/role model. Required for servers on public networks.

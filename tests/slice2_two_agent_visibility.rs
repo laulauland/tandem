@@ -30,14 +30,7 @@ fn v1_slice2_two_agent_file_visibility() {
     // ── Initialize Agent A workspace ──────────────────────────────────────
     let init_a = common::run_tandem_in(
         &agent_a_dir,
-        &[
-            "init",
-            "--tandem-server",
-            &addr,
-            "--workspace",
-            "agent-a",
-            ".",
-        ],
+        &["init", "--server", &addr, "--workspace", "agent-a", "."],
         &home,
     );
     common::assert_ok(&init_a, "agent-a init");
@@ -52,14 +45,7 @@ fn v1_slice2_two_agent_file_visibility() {
     // ── Initialize Agent B workspace ──────────────────────────────────────
     let init_b = common::run_tandem_in(
         &agent_b_dir,
-        &[
-            "init",
-            "--tandem-server",
-            &addr,
-            "--workspace",
-            "agent-b",
-            ".",
-        ],
+        &["init", "--server", &addr, "--workspace", "agent-b", "."],
         &home,
     );
     common::assert_ok(&init_b, "agent-b init");

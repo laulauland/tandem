@@ -8,7 +8,7 @@
 Multi-workspace support through jj-lib's native workspace model:
 
 1. **Workspace initialization**
-   - `tandem init --tandem-server <addr> --workspace <name> <path>`
+   - `tandem init --server <addr> --workspace <name> <path>`
    - Each agent gets its own workspace backed by the shared tandem server
    - Workspaces tracked in jj's `View.wc_commit_ids` map (standard jj model)
 

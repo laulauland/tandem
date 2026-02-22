@@ -44,9 +44,11 @@ If incompatible, client should fail fast with a clear error.
 
 ### Head state
 
-- Current op-head set is stored server-side.
-- Head updates are linearizable via compare-and-swap semantics.
-- A monotonic `headsVersion` is incremented on successful head updates.
+- Current op-head set authority is jj-lib op-heads state on the server.
+- Tandem sidecar metadata (`.jj/repo/tandem/heads.json`) stores only:
+  - monotonic CAS `version`
+  - `workspace_heads` mapping
+- Head updates are linearizable via compare-and-swap semantics on the metadata version.
 
 ## Cap'n Proto interface (shape)
 
@@ -164,7 +166,7 @@ enum Capability {
 
 ### `updateOpHeads`
 
-- Logical behavior: remove `oldIds`, add `newId`.
+- Logical behavior: remove `oldIds`, add `newId` in jj-lib op-heads state.
 - `workspaceId` identifies which workspace moved to `newId`.
 - `ok=false` means caller must read current heads and retry merge/update flow.
 - Successful responses include updated `workspaceHeads` for visibility/debugging.
@@ -172,7 +174,7 @@ enum Capability {
 
 ### `getHeads`
 
-- Returns current op heads, CAS `version`, and `workspaceHeads` (workspace -> commit mapping).
+- Returns current op heads sourced from jj-lib, plus metadata CAS `version` and `workspaceHeads`.
 
 ### `watchHeads`
 
@@ -212,4 +214,5 @@ enum Capability {
 - `wc_commit_ids` in views is preserved exactly (workspace visibility model).
 - Non-root operations must keep valid parent links.
 - Head updates are durable before success responses.
+- Server does not maintain a second manual op-head file-sync path.
 - Object reads/writes must not require any client-side global cache for correctness.

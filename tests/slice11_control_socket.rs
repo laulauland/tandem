@@ -32,7 +32,7 @@ fn slice11_status_json_while_running() {
     // Run tandem status --json
     let status_out = common::run_tandem_in(
         tmp.path(),
-        &["status", "--json", "--control-socket", sock_str],
+        &["server", "status", "--json", "--control-socket", sock_str],
         &home,
     );
     common::assert_ok(&status_out, "tandem status --json");
@@ -76,8 +76,11 @@ fn slice11_status_human_while_running() {
     common::wait_for_server(&addr, &mut server);
     common::wait_for_socket(&sock, Duration::from_secs(5));
 
-    let status_out =
-        common::run_tandem_in(tmp.path(), &["status", "--control-socket", sock_str], &home);
+    let status_out = common::run_tandem_in(
+        tmp.path(),
+        &["server", "status", "--control-socket", sock_str],
+        &home,
+    );
     common::assert_ok(&status_out, "tandem status");
 
     let out = common::stdout_str(&status_out);
@@ -105,8 +108,11 @@ fn slice11_status_not_running() {
     let sock = tmp.path().join("nonexistent.sock");
     let sock_str = sock.to_str().unwrap();
 
-    let status_out =
-        common::run_tandem_in(tmp.path(), &["status", "--control-socket", sock_str], &home);
+    let status_out = common::run_tandem_in(
+        tmp.path(),
+        &["server", "status", "--control-socket", sock_str],
+        &home,
+    );
 
     assert!(
         !status_out.status.success(),
@@ -177,7 +183,7 @@ fn slice11_status_reports_correct_info() {
 
     let status_out = common::run_tandem_in(
         tmp.path(),
-        &["status", "--json", "--control-socket", sock_str],
+        &["server", "status", "--json", "--control-socket", sock_str],
         &home,
     );
     common::assert_ok(&status_out, "tandem status --json");

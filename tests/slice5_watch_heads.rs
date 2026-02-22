@@ -18,11 +18,7 @@ fn slice5_watch_heads_notifications() {
     common::wait_for_server(&addr, &mut server);
 
     // Initialize workspace A
-    let init = common::run_tandem_in(
-        &workspace_a,
-        &["init", "--tandem-server", &addr, "."],
-        &home,
-    );
+    let init = common::run_tandem_in(&workspace_a, &["init", "--server", &addr, "."], &home);
     common::assert_ok(&init, "tandem init workspace A");
 
     // Start `tandem watch` as a background process
@@ -130,11 +126,7 @@ fn slice5_watch_catches_up_on_existing_heads() {
     common::wait_for_server(&addr, &mut server);
 
     // Initialize workspace and make a commit BEFORE starting watch
-    let init = common::run_tandem_in(
-        &workspace_a,
-        &["init", "--tandem-server", &addr, "."],
-        &home,
-    );
+    let init = common::run_tandem_in(&workspace_a, &["init", "--server", &addr, "."], &home);
     common::assert_ok(&init, "tandem init");
 
     std::fs::write(workspace_a.join("before.txt"), b"before watch\n").unwrap();

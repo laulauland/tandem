@@ -95,13 +95,21 @@ struct TestHarness {
 
 impl TestHarness {
     fn new(agent_count: usize) -> Self {
+        Self::new_with_server_args(agent_count, &[])
+    }
+
+    fn new_with_server_args(agent_count: usize, server_extra_args: &[&str]) -> Self {
         let root = TempDir::new().unwrap();
         let home = common::isolated_home(root.path());
         let server_repo = root.path().join("server-repo");
         std::fs::create_dir_all(&server_repo).unwrap();
 
         let addr = common::free_addr();
-        let mut server = common::spawn_server(&server_repo, &addr);
+        let mut server = if server_extra_args.is_empty() {
+            common::spawn_server(&server_repo, &addr)
+        } else {
+            common::spawn_server_with_args(&server_repo, &addr, server_extra_args, &home)
+        };
         common::wait_for_server(&addr, &mut server);
 
         let mut agent_dirs = Vec::new();
@@ -113,7 +121,7 @@ impl TestHarness {
                 &dir,
                 &[
                     "init",
-                    "--tandem-server",
+                    "--server",
                     &addr,
                     "--workspace",
                     &workspace_name,
@@ -287,7 +295,10 @@ fn v1_slice3_two_agents_concurrent_file_writes_converge() {
 #[test]
 fn v1_slice3_five_agents_concurrent_file_writes_all_survive() {
     let agent_count = 5;
-    let harness = TestHarness::new(agent_count);
+    // Keep server logging minimal in this stress test. The test harness pipes
+    // server stdout/stderr and does not continuously drain them; under 5-agent
+    // contention, info-level logs can fill the pipe and cause false hangs.
+    let harness = TestHarness::new_with_server_args(agent_count, &["--log-level", "error"]);
     let home = harness.home.clone();
 
     // Each agent writes src/agent_N.rs with unique content

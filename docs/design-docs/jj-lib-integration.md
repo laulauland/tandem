@@ -24,6 +24,17 @@ transparently — the agent never knows the store is remote.
 
 See `tests/slice1_single_agent_round_trip.rs` for integration test coverage.
 
+## Head authority model (Option C)
+
+Server head authority is jj-lib op-heads state.
+
+- `src/server.rs` updates/reads op heads via jj-lib `OpHeadsStore` APIs.
+- `.jj/repo/tandem/heads.json` is metadata sidecar only (`version`, `workspace_heads`).
+- No manual filesystem sync path for `.jj/repo/op_heads/heads/*`.
+
+See `tests/slice15_head_authority_jj_lib.rs` for integration coverage of
+jj-lib vs RPC head consistency.
+
 ---
 
 ## Original Research Notes
@@ -721,7 +732,7 @@ tandem backend transparently.
 
 ### Initialization Flow
 
-1. User runs: `jj-tandem init --tandem-server=host:13013 /path/to/workspace`
+1. User runs: `jj-tandem init --server=host:13013 /path/to/workspace`
 2. `jj-tandem` calls `Workspace::init_with_factories()` with `TandemBackend::init`
 3. `TandemBackend::init` connects to server, gets `RepoInfo`, writes
    `store/type = "tandem"` and `store/server_address = "host:13013"`

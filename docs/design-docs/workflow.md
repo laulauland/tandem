@@ -38,7 +38,7 @@ tandem serve --listen 0.0.0.0:13013 --repo /srv/project
 
 ```bash
 # Agent A (any machine)
-tandem init --tandem-server=server:13013 ~/work/project
+tandem init --server=server:13013 ~/work/project
 # If --workspace is omitted, tandem auto-generates a unique workspace name.
 cd ~/work/project
 ls src/                                 # real files, fetched from server
@@ -49,7 +49,7 @@ tandem new -m "feat: add auth"
 
 ```bash
 # Agent B (different machine)
-tandem init --tandem-server=server:13013 --workspace=agent-b ~/work/project
+tandem init --server=server:13013 --workspace=agent-b ~/work/project
 cd ~/work/project
 tandem log                              # sees Agent A's commit
 tandem file show -r <commit> src/auth.rs  # Agent A's file, fetched from server

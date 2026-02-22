@@ -65,7 +65,7 @@ fn v1_slice14_implicit_workspace_names_are_unique_and_tracked() {
     common::wait_for_server(&addr, &mut server);
 
     // Init A without --workspace -> should auto-generate non-default name.
-    let init_a = common::run_tandem_in(&ws_a_dir, &["init", "--tandem-server", &addr, "."], &home);
+    let init_a = common::run_tandem_in(&ws_a_dir, &["init", "--server", &addr, "."], &home);
     common::assert_ok(&init_a, "workspace A init (implicit workspace)");
     let ws_a_name = parse_workspace_name_from_init(&init_a);
     assert_ne!(
@@ -96,7 +96,7 @@ fn v1_slice14_implicit_workspace_names_are_unique_and_tracked() {
     );
 
     // Init B without --workspace after A has committed.
-    let init_b = common::run_tandem_in(&ws_b_dir, &["init", "--tandem-server", &addr, "."], &home);
+    let init_b = common::run_tandem_in(&ws_b_dir, &["init", "--server", &addr, "."], &home);
     common::assert_ok(&init_b, "workspace B init (implicit workspace)");
     let ws_b_name = parse_workspace_name_from_init(&init_b);
     assert_ne!(

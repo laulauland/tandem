@@ -10,7 +10,7 @@ Comprehensive help text and error messages for agent discoverability:
 1. **Command-specific help**
    - `tandem --help` — prints usage without server connection
    - `tandem serve --help` — explains `--listen` and `--repo` flags
-   - `tandem init --help` — explains `--tandem-server` and `--workspace` flags
+   - `tandem init --help` — explains `--server` and `--workspace` flags
    - `tandem watch --help` — explains `--server` flag
 
 2. **After-help text**
@@ -24,7 +24,7 @@ Comprehensive help text and error messages for agent discoverability:
    - jj's own help system works: `tandem log --help` shows jj's log help
 
 4. **Environment variable fallbacks**
-   - `TANDEM_SERVER` — fallback for `--tandem-server` flag
+   - `TANDEM_SERVER` — fallback for `--server` flag
    - `TANDEM_WORKSPACE` — fallback for `--workspace` flag
 
    _Note (updated):_ implicit workspace names are now auto-generated when
