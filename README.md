@@ -242,13 +242,13 @@ tandem is running
   Uptime:   2h 15m
   Repo:     /srv/project
   Listen:   0.0.0.0:13013
-  Version:  0.3.0
+  Version:  0.3.1
   Integration workspace: disabled
 ```
 
 ```
 $ tandem server status --json
-{"running":true,"pid":1234,"uptime_secs":8100,"repo":"/srv/project","listen":"0.0.0.0:13013","version":"0.3.0","integration":{"enabled":false,"lastStatus":"disabled"}}
+{"running":true,"pid":1234,"uptime_secs":8100,"repo":"/srv/project","listen":"0.0.0.0:13013","version":"0.3.1","integration":{"enabled":false,"lastStatus":"disabled"}}
 ```
 
 **tandem server logs** — streams log output from the daemon.
