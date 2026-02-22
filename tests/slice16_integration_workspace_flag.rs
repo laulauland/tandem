@@ -58,6 +58,27 @@ fn write_single_commit(workspace_dir: &std::path::Path, home: &std::path::Path) 
     common::assert_ok(&new_out, "new for flag test");
 }
 
+fn commit_author_email(
+    workspace_dir: &std::path::Path,
+    rev: &str,
+    home: &std::path::Path,
+) -> String {
+    let out = common::run_tandem_in(
+        workspace_dir,
+        &[
+            "log",
+            "-r",
+            rev,
+            "--no-graph",
+            "-T",
+            "author.email() ++ \"\\n\"",
+        ],
+        home,
+    );
+    common::assert_ok(&out, &format!("read author email for {rev}"));
+    common::stdout_str(&out).trim().to_string()
+}
+
 #[test]
 fn slice16_flag_off_no_integration_bookmark() {
     let tmp = TempDir::new().unwrap();
@@ -78,6 +99,11 @@ fn slice16_flag_off_no_integration_bookmark() {
 
     let init = common::run_tandem_in(&ws, &["init", "--server", &addr, "."], &home);
     common::assert_ok(&init, "init workspace");
+    let init_author_email = commit_author_email(&ws, "@", &home);
+    assert_eq!(
+        init_author_email, "test@tandem.dev",
+        "workspace init commit should pick user.email from jj config"
+    );
 
     write_single_commit(&ws, &home);
     thread::sleep(Duration::from_millis(500));
@@ -148,10 +174,20 @@ fn slice16_flag_on_creates_integration_bookmark_and_status() {
 
     let init = common::run_tandem_in(&ws, &["init", "--server", &addr, "."], &home);
     common::assert_ok(&init, "init workspace");
+    let init_author_email = commit_author_email(&ws, "@", &home);
+    assert_eq!(
+        init_author_email, "test@tandem.dev",
+        "workspace init commit should pick user.email from jj config"
+    );
 
     write_single_commit(&ws, &home);
     let integration_commit = wait_for_integration_commit(&ws, &home);
     assert!(!integration_commit.is_empty());
+    let integration_author_email = commit_author_email(&ws, &integration_commit, &home);
+    assert_eq!(
+        integration_author_email, "test@tandem.dev",
+        "integration commit should use configured user.email"
+    );
 
     let status = common::run_tandem_in(
         tmp.path(),

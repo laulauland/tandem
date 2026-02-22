@@ -312,8 +312,16 @@ impl Server {
     }
 
     fn user_settings() -> Result<jj_lib::settings::UserSettings> {
-        let config = jj_lib::config::StackedConfig::with_defaults();
-        jj_lib::settings::UserSettings::from_config(config).context("create jj settings")
+        let config_env = jj_cli::config::ConfigEnv::from_environment();
+        let mut raw_config =
+            jj_cli::config::config_from_environment(jj_cli::config::default_config_layers());
+        config_env
+            .reload_user_config(&mut raw_config)
+            .context("load jj user config")?;
+        let resolved = config_env
+            .resolve_config(&raw_config)
+            .context("resolve jj config")?;
+        jj_lib::settings::UserSettings::from_config(resolved).context("create jj settings")
     }
 
     /// Initialize a new jj+git colocated repo.

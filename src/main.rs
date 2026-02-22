@@ -712,6 +712,20 @@ fn generate_workspace_name() -> String {
     format!("ws-{pid:x}-{now_ns:x}-{counter:x}")
 }
 
+fn load_user_settings_from_environment() -> Result<jj_lib::settings::UserSettings, String> {
+    let config_env = jj_cli::config::ConfigEnv::from_environment();
+    let mut raw_config =
+        jj_cli::config::config_from_environment(jj_cli::config::default_config_layers());
+    config_env
+        .reload_user_config(&mut raw_config)
+        .map_err(|e| format!("cannot load jj user config: {e}"))?;
+    let resolved = config_env
+        .resolve_config(&raw_config)
+        .map_err(|e| format!("cannot resolve jj config: {e}"))?;
+    jj_lib::settings::UserSettings::from_config(resolved)
+        .map_err(|e| format!("cannot create settings: {e}"))
+}
+
 fn run_tandem_init(server_addr: &str, workspace_name: &str, workspace_path_str: &str) -> ExitCode {
     let workspace_path = Path::new(workspace_path_str);
 
@@ -731,11 +745,10 @@ fn run_tandem_init(server_addr: &str, workspace_name: &str, workspace_path_str: 
     };
 
     // Use jj-lib's workspace init with our custom factories
-    let config = jj_lib::config::StackedConfig::with_defaults();
-    let settings = match jj_lib::settings::UserSettings::from_config(config) {
+    let settings = match load_user_settings_from_environment() {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("error: cannot create settings: {e}");
+            eprintln!("error: {e}");
             return ExitCode::FAILURE;
         }
     };

@@ -114,7 +114,7 @@ tandem is running
   Uptime:   2h 15m
   Repo:     /srv/project
   Listen:   0.0.0.0:13013
-  Version:  0.3.1
+  Version:  0.3.2
   Integration workspace: enabled
   Integration status: clean
   Integration commit: 7f0f4e9e...
@@ -129,7 +129,7 @@ tandem is running
   "uptime_secs": 8100,
   "repo": "/srv/project",
   "listen": "0.0.0.0:13013",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "integration": {
     "enabled": true,
     "lastStatus": "clean",
