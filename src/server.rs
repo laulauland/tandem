@@ -3,7 +3,7 @@
 //! The server stores objects through jj's Git backend so that `jj git push`
 //! on the server repo just works. Operations and views are stored in the
 //! standard jj op_store directory. Op heads are managed via CAS in
-//! `.tandem/heads.json` and synced to jj's op_heads directory.
+//! `.jj/repo/tandem/heads.json` and synced to jj's op_heads directory.
 
 use anyhow::{anyhow, bail, Context, Result};
 // blake2 is available if needed for raw hashing, but we use jj_lib::content_hash
@@ -224,7 +224,7 @@ struct Server {
     op_store_path: PathBuf,
     /// Path to `.jj/repo/op_heads/heads/` for syncing op heads.
     op_heads_dir: PathBuf,
-    /// Path to `.tandem/` for CAS heads management.
+    /// Path to `.jj/repo/tandem/` for CAS heads management.
     tandem_dir: PathBuf,
     lock: Mutex<()>,
     watchers: Mutex<Vec<WatcherEntry>>,
@@ -264,13 +264,37 @@ impl Server {
         let op_store_path = repo_dir.join("op_store");
         let op_heads_dir = repo_dir.join("op_heads").join("heads");
 
-        // Create tandem-specific directory for CAS heads management
-        let tandem_dir = repo.join(".tandem");
+        // Create tandem-specific directory for CAS heads management.
+        let tandem_dir = repo_dir.join("tandem");
         fs::create_dir_all(&tandem_dir)?;
 
         let heads_path = tandem_dir.join("heads.json");
+        let legacy_heads_path = repo.join(".tandem").join("heads.json");
+
+        // One-time migration from legacy repo-root `.tandem/heads.json`.
+        if !heads_path.exists() && legacy_heads_path.exists() {
+            match fs::rename(&legacy_heads_path, &heads_path) {
+                Ok(()) => {}
+                Err(_rename_err) => {
+                    fs::copy(&legacy_heads_path, &heads_path).with_context(|| {
+                        format!(
+                            "failed to migrate legacy heads from {} to {}",
+                            legacy_heads_path.display(),
+                            heads_path.display()
+                        )
+                    })?;
+                    fs::remove_file(&legacy_heads_path).with_context(|| {
+                        format!(
+                            "failed to remove legacy heads file {}",
+                            legacy_heads_path.display()
+                        )
+                    })?;
+                }
+            }
+        }
+
         if !heads_path.exists() {
-            // Initialize heads from jj's op_heads directory
+            // Initialize heads from jj's op_heads directory.
             let initial_heads = Self::read_jj_op_heads(&op_heads_dir)?;
             let initial = HeadsState {
                 version: 0,
