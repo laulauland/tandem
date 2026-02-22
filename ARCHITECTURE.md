@@ -4,16 +4,17 @@
 
 ## Implementation Status
 
-**Complete as of 2026-02-22.** Slices 1-15 implemented (slice 15 adds jj-lib head authority coverage).
-See `docs/exec-plans/completed/` and `tests/slice15_head_authority_jj_lib.rs` for details.
+**Complete as of 2026-02-22.** Slices 1-17 implemented (slice 15 adds jj-lib head
+authority coverage; slices 16-17 add integration-workspace mode and conflict visibility).
+See `docs/exec-plans/completed/` plus slice tests for details.
 
 ## Shape
 
 Single binary, multiple modes:
 
-- `tandem up --repo <path> --listen <addr>` — start background daemon
+- `tandem up --repo <path> --listen <addr> [--enable-integration-workspace]` — start background daemon
 - `tandem down` / `tandem server status` / `tandem server logs` — manage the daemon
-- `tandem serve --listen <addr> --repo <path>` — foreground server (systemd/docker)
+- `tandem serve --listen <addr> --repo <path> [--enable-integration-workspace]` — foreground server (systemd/docker)
 - `tandem <jj-command>` — client mode (stock jj via CliRunner)
 
 `tandem up` is the easy way. It forks `tandem serve --daemon`, waits for
@@ -31,6 +32,9 @@ a control socket so `tandem down`, `tandem server status`, and
 - Backend/OpStore/OpHeadsStore trait implementations route to server
 - Server op-head authority is jj-lib's op-heads store (no manual op-head file sync)
 - `.jj/repo/tandem/heads.json` is metadata sidecar only (`version`, `workspace_heads`)
+- Optional integration workspace mode recomputes and advances bookmark `integration`
+  after successful workspace head updates (`--enable-integration-workspace`)
+- Integration status metadata is stored at `.jj/repo/tandem/integration.json`
 - Clients read current heads from server on each command; however jj may still
   require `workspace update-stale` in high-concurrency/shared-workspace cases.
   Auto-generated unique workspace names reduce accidental collisions.
@@ -47,7 +51,8 @@ the server just works.
 1. Read/write jj backend + op-store objects (commit/tree/file/symlink/copy/operation/view)
 2. Coordinate op heads with atomic compare-and-swap (CAS metadata) while mutating heads via jj-lib op-heads APIs
 3. Notify watchers on head changes (`watchHeads`)
-4. Host the jj+git colocated repo for git interop
+4. (Optional) run integration recompute worker and maintain bookmark `integration`
+5. Host the jj+git colocated repo for git interop
 
 ### Client
 
@@ -124,6 +129,8 @@ Integration tests across slices 1-14:
 | 13 | `tests/slice13_log_streaming.rs` | Log streaming, level filtering, JSON output |
 | 14 | `tests/slice14_auto_workspace_names.rs` | Auto-generated workspace names + workspace head identity tracking |
 | 15 | `tests/slice15_head_authority_jj_lib.rs` | jj-lib op-head authority and sidecar metadata consistency |
+| 16 | `tests/slice16_integration_workspace_flag.rs` | Integration workspace mode flag plumbing + status visibility |
+| 17 | `tests/slice17_integration_conflict_visibility.rs` | Conflicted integration commit visibility |
 
 All tests assert on **file byte content**, not just commit descriptions.
 

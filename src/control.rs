@@ -14,6 +14,23 @@ use tokio::sync::broadcast;
 
 // ─── Protocol types ───────────────────────────────────────────────────────────
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrationStatus {
+    pub enabled: bool,
+    pub last_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_integration_commit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_input_fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_commit_count: Option<u64>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StatusResponse {
     pub running: bool,
@@ -22,6 +39,7 @@ pub struct StatusResponse {
     pub repo: String,
     pub listen: String,
     pub version: String,
+    pub integration: IntegrationStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +62,8 @@ pub struct ControlState {
     pub listen: String,
     pub shutdown_tx: tokio::sync::mpsc::Sender<()>,
     pub log_tx: broadcast::Sender<LogEvent>,
+    pub integration_enabled: bool,
+    pub integration_metadata_path: String,
 }
 
 fn level_rank(level: &str) -> u8 {
@@ -55,6 +75,68 @@ fn level_rank(level: &str) -> u8 {
         "error" => 4,
         _ => 2,
     }
+}
+
+fn read_integration_status(enabled: bool, metadata_path: &str) -> IntegrationStatus {
+    let mut status = IntegrationStatus {
+        enabled,
+        last_status: if enabled {
+            "idle".to_string()
+        } else {
+            "disabled".to_string()
+        },
+        last_integration_commit: None,
+        last_error: None,
+        last_input_fingerprint: None,
+        updated_at: None,
+        workspace_commit_count: None,
+    };
+
+    if !enabled {
+        return status;
+    }
+
+    let bytes = match std::fs::read(metadata_path) {
+        Ok(bytes) => bytes,
+        Err(_) => return status,
+    };
+    let value: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(_) => return status,
+    };
+
+    status.last_status = value
+        .get("lastStatus")
+        .or_else(|| value.get("last_status"))
+        .and_then(|v| v.as_str())
+        .unwrap_or(status.last_status.as_str())
+        .to_string();
+    status.last_integration_commit = value
+        .get("lastIntegrationCommit")
+        .or_else(|| value.get("last_integration_commit"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    status.last_error = value
+        .get("lastError")
+        .or_else(|| value.get("last_error"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    status.last_input_fingerprint = value
+        .get("lastInputFingerprint")
+        .or_else(|| value.get("last_input_fingerprint"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    status.updated_at = value
+        .get("updatedAt")
+        .or_else(|| value.get("updated_at"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    status.workspace_commit_count = value
+        .get("workspaceCommitCount")
+        .or_else(|| value.get("workspace_commit_count"))
+        .and_then(|v| v.as_u64());
+
+    status
 }
 
 // ─── Control socket server ───────────────────────────────────────────────────
@@ -119,6 +201,10 @@ async fn handle_control_connection(
                 repo: state.repo.clone(),
                 listen: state.listen.clone(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
+                integration: read_integration_status(
+                    state.integration_enabled,
+                    &state.integration_metadata_path,
+                ),
             };
             let json = serde_json::to_string(&resp)?;
             writer.write_all(json.as_bytes()).await?;

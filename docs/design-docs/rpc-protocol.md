@@ -48,6 +48,11 @@ If incompatible, client should fail fast with a clear error.
 - Tandem sidecar metadata (`.jj/repo/tandem/heads.json`) stores only:
   - monotonic CAS `version`
   - `workspace_heads` mapping
+- Optional integration workspace mode (`--enable-integration-workspace`) runs a
+  background recompute worker after successful `updateOpHeads` and updates bookmark
+  `integration`.
+- Integration worker status metadata is stored in `.jj/repo/tandem/integration.json`
+  (enabled flag, last fingerprint/commit/status/error).
 - Head updates are linearizable via compare-and-swap semantics on the metadata version.
 
 ## Cap'n Proto interface (shape)
@@ -170,6 +175,8 @@ enum Capability {
 - `workspaceId` identifies which workspace moved to `newId`.
 - `ok=false` means caller must read current heads and retry merge/update flow.
 - Successful responses include updated `workspaceHeads` for visibility/debugging.
+- When integration workspace mode is enabled, successful updates enqueue an
+  asynchronous integration recompute (coalesced/debounced).
 - This operation is the concurrency correctness boundary.
 
 ### `getHeads`

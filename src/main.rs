@@ -45,6 +45,9 @@ ENVIRONMENT:
                             backend when connecting to a remote store
     TANDEM_WORKSPACE        Workspace name for `tandem init` when --workspace
                             is not provided
+    TANDEM_ENABLE_INTEGRATION_WORKSPACE
+                            Set to 1/true to enable server-side integration
+                            workspace recompute mode
 
 SETUP:
     # Start a server
@@ -116,6 +119,9 @@ enum Commands {
         /// Log file path (used in daemon mode)
         #[arg(long)]
         log_file: Option<String>,
+        /// Enable server-side integration workspace recompute mode
+        #[arg(long)]
+        enable_integration_workspace: bool,
     },
 
     /// Initialize a tandem-backed workspace
@@ -156,6 +162,9 @@ enum Commands {
         /// Path to control socket
         #[arg(long)]
         control_socket: Option<String>,
+        /// Enable server-side integration workspace recompute mode
+        #[arg(long)]
+        enable_integration_workspace: bool,
     },
 
     /// Stop the tandem daemon
@@ -228,6 +237,7 @@ fn main() -> ExitCode {
             control_socket,
             daemon,
             log_file,
+            enable_integration_workspace,
         }) => run_serve(
             &listen,
             &repo,
@@ -236,6 +246,7 @@ fn main() -> ExitCode {
             control_socket.as_deref(),
             daemon,
             log_file.as_deref(),
+            enable_integration_workspace,
         ),
         Some(Commands::Init {
             server,
@@ -252,12 +263,14 @@ fn main() -> ExitCode {
             log_level,
             log_file,
             control_socket,
+            enable_integration_workspace,
         }) => run_up(
             &repo,
             &listen,
             &log_level,
             log_file.as_deref(),
             control_socket.as_deref(),
+            enable_integration_workspace,
         ),
         Some(Commands::Down { control_socket }) => run_down(control_socket.as_deref()),
         Some(Commands::Server { command }) => match command {
@@ -294,6 +307,7 @@ fn run_serve(
     control_socket: Option<&str>,
     daemon: bool,
     log_file: Option<&str>,
+    enable_integration_workspace_flag: bool,
 ) -> ExitCode {
     // In daemon mode, stdout/stderr are already redirected to the log file
     // by `run_up` before spawning this process. Nothing extra needed here.
@@ -312,6 +326,9 @@ fn run_serve(
         control_socket: control_socket.map(|s| s.to_string()),
         daemon,
         log_file: log_file.map(|s| s.to_string()),
+        enable_integration_workspace: resolve_integration_workspace_enabled(
+            enable_integration_workspace_flag,
+        ),
     };
 
     if let Err(err) = local.block_on(&rt, server::run_serve(opts)) {
@@ -336,14 +353,33 @@ fn resolve_control_socket(explicit: Option<&str>) -> String {
         .unwrap_or_else(default_control_socket)
 }
 
+fn env_flag_enabled(name: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn resolve_integration_workspace_enabled(flag: bool) -> bool {
+    flag || env_flag_enabled("TANDEM_ENABLE_INTEGRATION_WORKSPACE")
+}
+
 fn run_up(
     repo: &str,
     listen: &str,
     log_level: &str,
     log_file: Option<&str>,
     control_socket: Option<&str>,
+    enable_integration_workspace_flag: bool,
 ) -> ExitCode {
     let sock_path = resolve_control_socket(control_socket);
+    let enable_integration_workspace =
+        resolve_integration_workspace_enabled(enable_integration_workspace_flag);
 
     // Check if already running by trying to connect to control socket
     if let Ok(status) = control::client_status(&sock_path) {
@@ -386,6 +422,9 @@ fn run_up(
         &log_file_path,
         "--daemon",
     ]);
+    if enable_integration_workspace {
+        cmd.arg("--enable-integration-workspace");
+    }
 
     // Redirect stdout/stderr to log file for daemon
     let log_file_handle = match std::fs::File::create(&log_file_path) {
@@ -512,6 +551,23 @@ fn run_status(json: bool, control_socket: Option<&str>) -> ExitCode {
                 println!("  Repo:     {}", status.repo);
                 println!("  Listen:   {}", status.listen);
                 println!("  Version:  {}", status.version);
+                println!(
+                    "  Integration workspace: {}",
+                    if status.integration.enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
+                if status.integration.enabled {
+                    println!("  Integration status: {}", status.integration.last_status);
+                    if let Some(commit) = status.integration.last_integration_commit.as_deref() {
+                        println!("  Integration commit: {commit}");
+                    }
+                    if let Some(error) = status.integration.last_error.as_deref() {
+                        println!("  Integration error:  {error}");
+                    }
+                }
             }
             ExitCode::SUCCESS
         }

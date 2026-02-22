@@ -193,11 +193,13 @@ Use `tandem server status` for daemon health.
 Start, stop, and monitor the tandem server.
 
 ```
-tandem up --repo <path> --listen <addr>        Start background daemon
+tandem up --repo <path> --listen <addr> [--enable-integration-workspace]
+                                                Start background daemon
 tandem down                                     Stop the daemon
 tandem server status                            Check if daemon is running
 tandem server logs                              Stream logs from daemon
-tandem serve --listen <addr> --repo <path>     Start server (foreground)
+tandem serve --listen <addr> --repo <path> [--enable-integration-workspace]
+                                                Start server (foreground)
 ```
 
 **tandem up** — starts a background daemon and returns immediately.
@@ -205,6 +207,7 @@ tandem serve --listen <addr> --repo <path>     Start server (foreground)
 ```
 tandem up --repo <path> --listen <addr> [--log-level <level>] [--log-file <path>]
                                         [--control-socket <path>]
+                                        [--enable-integration-workspace]
 ```
 
 Forks `tandem serve --daemon` in the background. Waits for the control socket
@@ -235,11 +238,12 @@ tandem is running
   Repo:     /srv/project
   Listen:   0.0.0.0:13013
   Version:  0.3.0
+  Integration workspace: disabled
 ```
 
 ```
 $ tandem server status --json
-{"running":true,"pid":1234,"uptime_secs":8100,"repo":"/srv/project","listen":"0.0.0.0:13013","version":"0.3.0"}
+{"running":true,"pid":1234,"uptime_secs":8100,"repo":"/srv/project","listen":"0.0.0.0:13013","version":"0.3.0","integration":{"enabled":false,"lastStatus":"disabled"}}
 ```
 
 **tandem server logs** — streams log output from the daemon.
@@ -258,9 +262,13 @@ JSON log objects include structured fields:
 **tandem serve** — runs the server in the foreground. Use this for systemd,
 Docker, or debugging. Logs to stderr.
 
+Pass `--enable-integration-workspace` to keep an `integration` bookmark updated
+from active workspace heads. This mode is off by default.
+
 ```
 tandem serve --listen <addr> --repo <path> [--log-level <level>] [--log-format <fmt>]
              [--control-socket <path>] [--log-file <path>]
+             [--enable-integration-workspace]
 ```
 
 ### Workspace setup
@@ -308,6 +316,7 @@ the remote store.
 |----------|---------|
 | `TANDEM_SERVER` | Server address — fallback for `--server` |
 | `TANDEM_WORKSPACE` | Workspace name fallback for `tandem init` when `--workspace` is not provided. |
+| `TANDEM_ENABLE_INTEGRATION_WORKSPACE` | Set to `1`/`true` to enable integration workspace mode when `--enable-integration-workspace` is not passed. |
 
 ---
 
@@ -402,7 +411,7 @@ agents to see each other's work without merging, tandem is what you want.
 cargo test
 ```
 
-34 integration tests covering:
+38 integration tests covering:
 
 - Single-agent file round-trip (write → commit → read back exact bytes)
 - Two-agent cross-workspace file visibility

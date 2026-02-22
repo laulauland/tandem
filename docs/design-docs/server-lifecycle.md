@@ -10,7 +10,8 @@ stock jj working-copy status command.
 ## API surface
 
 ```
-tandem up --repo /srv/project --listen 0.0.0.0:13013   # start daemon, return
+tandem up --repo /srv/project --listen 0.0.0.0:13013 [--enable-integration-workspace]
+                                                    # start daemon, return
 tandem down                                              # stop daemon
 tandem server status                                     # health check
 tandem server status --json                              # machine-readable
@@ -22,6 +23,7 @@ tandem server logs --level debug                         # stream at higher verb
 
 ```
 tandem serve --repo /srv/project --listen 0.0.0.0:13013
+# optionally: --enable-integration-workspace
 tandem serve --log-level debug --log-file /var/log/tandem.log --log-format json
 tandem serve --pidfile /var/run/tandem.pid
 ```
@@ -111,6 +113,9 @@ tandem is running
   Repo:     /srv/project
   Listen:   0.0.0.0:13013
   Version:  0.3.0
+  Integration workspace: enabled
+  Integration status: clean
+  Integration commit: 7f0f4e9e...
 ```
 
 `tandem server status --json`:
@@ -123,7 +128,12 @@ tandem is running
   "repo": "/srv/project",
   "listen": "0.0.0.0:13013",
   "version": "0.3.0",
-  "workspaces": 3
+  "integration": {
+    "enabled": true,
+    "lastStatus": "clean",
+    "lastIntegrationCommit": "7f0f4e9e...",
+    "updatedAt": "1761442512"
+  }
 }
 ```
 
@@ -169,6 +179,8 @@ Both modes create the control socket. `tandem down`,
 --log-format <fmt>        text|json (default: text)
 --pidfile <path>          Write PID file (opt-in)
 --control-socket <path>   Override control socket path
+--enable-integration-workspace
+                          Enable integration recompute worker + bookmark updates
 --daemon                  Internal flag, set by `tandem up`
 ```
 
@@ -179,11 +191,18 @@ Both modes create the control socket. `tandem down`,
 --repo <path>             Repository path (required)
 --log-level <level>       Daemon log level (default: info)
 --log-file <path>         Daemon log file (default: $XDG_RUNTIME_DIR/tandem/daemon.log)
+--enable-integration-workspace
+                          Forwarded to daemonized `serve`
 ```
 
 ### tandem down
 
 No flags. Finds daemon via control socket.
+
+Environment fallback:
+
+- `TANDEM_ENABLE_INTEGRATION_WORKSPACE=1` enables integration mode for both
+  `tandem serve` and `tandem up` when the flag is not passed.
 
 ### tandem server status
 

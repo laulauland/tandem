@@ -12,6 +12,8 @@ knows the store is remote.
 - Runs on a VM/VPS as a persistent service
 - Hosts the canonical jj+git repo
 - Runs `tandem serve`
+- Optionally runs with `--enable-integration-workspace` to maintain an always-updated
+  `integration` bookmark across active workspaces
 - Is where git operations happen (`jj git push`, `jj git fetch`, `gh pr create`)
 - Operated by the orchestrator / teamlead / main agent
 
@@ -32,6 +34,7 @@ jj git init
 jj git remote add origin git@github.com:org/project.git
 jj git fetch
 tandem serve --listen 0.0.0.0:13013 --repo /srv/project
+# optional: add --enable-integration-workspace to keep bookmark `integration` updated
 ```
 
 ### 2. Agents work
@@ -64,6 +67,7 @@ tandem new -m "feat: add api"
 cd /srv/project
 jj log                                  # sees all agents' work
 jj diff -r <commit>                     # reviews actual code changes
+jj diff -r integration                  # optional: inspect server-computed combined state
 jj bookmark create feature -r <tip>
 jj git push --bookmark feature
 gh pr create --base main --head feature

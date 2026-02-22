@@ -122,12 +122,25 @@ pub fn run_jj_in(repo: &Path, args: &[&str]) -> Output {
 
 /// Spawn a server with extra args and HOME isolation.
 pub fn spawn_server_with_args(repo: &Path, addr: &str, extra_args: &[&str], home: &Path) -> Child {
+    spawn_server_with_args_and_env(repo, addr, extra_args, &[], home)
+}
+
+pub fn spawn_server_with_args_and_env(
+    repo: &Path,
+    addr: &str,
+    extra_args: &[&str],
+    env: &[(&str, &str)],
+    home: &Path,
+) -> Child {
     let mut cmd = Command::new(tandem_bin());
     cmd.args(["serve", "--listen", addr, "--repo", repo.to_str().unwrap()]);
     for arg in extra_args {
         cmd.arg(arg);
     }
     isolate_env(&mut cmd, home);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
     cmd.stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

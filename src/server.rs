@@ -13,7 +13,10 @@ use capnp_rpc::pry;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use jj_lib::backend::{CommitId, TreeId};
 use jj_lib::object_id::ObjectId as _;
+use jj_lib::op_store::RefTarget;
+use jj_lib::repo::Repo as _;
 use jj_lib::repo_path::RepoPath;
+use jj_lib::rewrite::merge_commit_trees;
 use prost::Message as _;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -23,6 +26,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
 
 use crate::control;
@@ -41,6 +45,7 @@ pub struct ServeOptions {
     pub control_socket: Option<String>,
     pub daemon: bool,
     pub log_file: Option<String>,
+    pub enable_integration_workspace: bool,
 }
 
 pub async fn run_serve(opts: ServeOptions) -> Result<()> {
@@ -53,6 +58,7 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
         daemon = opts.daemon,
         log_level = %opts.log_level,
         log_format = %opts.log_format,
+        integration_workspace = opts.enable_integration_workspace,
         "starting tandem server"
     );
     if let Some(path) = opts.log_file.as_deref() {
@@ -60,7 +66,8 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
     }
 
     let repo = PathBuf::from(&opts.repo_path);
-    let server = Rc::new(Server::new(repo)?);
+    let server = Rc::new(Server::new(repo, opts.enable_integration_workspace)?);
+    server.start_integration_worker();
     let listener = tokio::net::TcpListener::bind(&opts.listen_addr)
         .await
         .with_context(|| format!("failed to bind {}", opts.listen_addr))?;
@@ -80,6 +87,11 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
             listen: local_addr.to_string(),
             shutdown_tx: shutdown_tx.clone(),
             log_tx: log_tx.clone(),
+            integration_enabled: opts.enable_integration_workspace,
+            integration_metadata_path: server
+                .integration_metadata_path()
+                .to_string_lossy()
+                .to_string(),
         });
 
         let sock = sock_path.clone();
@@ -222,12 +234,16 @@ struct WatcherEntry {
 struct Server {
     /// jj Store wrapping the GitBackend — used for all object I/O.
     store: Arc<jj_lib::store::Store>,
+    /// Repo loader for jj-lib reads/transactions.
+    repo_loader: jj_lib::repo::RepoLoader,
     /// Path to `.jj/repo/op_store/` for operations and views.
     op_store_path: PathBuf,
     /// jj-lib op heads store — single authority for operation heads.
     op_heads_store: Arc<dyn jj_lib::op_heads_store::OpHeadsStore>,
     /// Path to `.jj/repo/tandem/` for tandem metadata sidecar (CAS/workspace map).
     tandem_dir: PathBuf,
+    integration_enabled: bool,
+    integration_trigger: Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>,
     lock: Mutex<()>,
     watchers: Mutex<Vec<WatcherEntry>>,
 }
@@ -249,7 +265,7 @@ fn from_hex(hex: &str) -> Result<Vec<u8>> {
 }
 
 impl Server {
-    fn new(repo: PathBuf) -> Result<Self> {
+    fn new(repo: PathBuf, integration_enabled: bool) -> Result<Self> {
         fs::create_dir_all(&repo)?;
 
         if !repo.join(".jj").exists() {
@@ -262,8 +278,9 @@ impl Server {
 
         let settings = Self::user_settings()?;
         let factories = jj_lib::repo::StoreFactories::default();
-        let loader = jj_lib::repo::RepoLoader::init_from_file_system(&settings, &repo_dir, &factories)
-            .context("load jj repo state")?;
+        let loader =
+            jj_lib::repo::RepoLoader::init_from_file_system(&settings, &repo_dir, &factories)
+                .context("load jj repo state")?;
 
         // Create tandem-specific directory for CAS/version/workspace metadata.
         let tandem_dir = repo_dir.join("tandem");
@@ -278,14 +295,20 @@ impl Server {
             fs::write(&metadata_path, serde_json::to_vec_pretty(&initial)?)?;
         }
 
-        Ok(Self {
+        let op_heads_store = loader.op_heads_store().clone();
+        let mut server = Self {
             store: loader.store().clone(),
+            repo_loader: loader,
             op_store_path,
-            op_heads_store: loader.op_heads_store().clone(),
+            op_heads_store,
             tandem_dir,
+            integration_enabled,
+            integration_trigger: Mutex::new(None),
             lock: Mutex::new(()),
             watchers: Mutex::new(Vec::new()),
-        })
+        };
+        server.initialize_integration_metadata()?;
+        Ok(server)
     }
 
     fn user_settings() -> Result<jj_lib::settings::UserSettings> {
@@ -307,6 +330,256 @@ impl Server {
         let mut heads: Vec<String> = ids.into_iter().map(|id| id.hex()).collect();
         heads.sort();
         Ok(heads)
+    }
+
+    fn integration_metadata_path(&self) -> PathBuf {
+        self.tandem_dir.join("integration.json")
+    }
+
+    fn initialize_integration_metadata(&mut self) -> Result<()> {
+        let mut metadata =
+            self.read_integration_metadata()
+                .unwrap_or_else(|_| IntegrationMetadata {
+                    enabled: self.integration_enabled,
+                    last_input_fingerprint: None,
+                    last_integration_commit: None,
+                    last_status: if self.integration_enabled {
+                        "idle".to_string()
+                    } else {
+                        "disabled".to_string()
+                    },
+                    last_error: None,
+                    updated_at: Some(now_epoch_secs_string()),
+                    workspace_commit_count: Some(0),
+                });
+        metadata.enabled = self.integration_enabled;
+        if !self.integration_enabled {
+            metadata.last_status = "disabled".to_string();
+        }
+        self.write_integration_metadata(&metadata)
+    }
+
+    fn read_integration_metadata(&self) -> Result<IntegrationMetadata> {
+        let bytes = fs::read(self.integration_metadata_path())?;
+        Ok(serde_json::from_slice(&bytes)?)
+    }
+
+    fn write_integration_metadata(&self, metadata: &IntegrationMetadata) -> Result<()> {
+        fs::write(
+            self.integration_metadata_path(),
+            serde_json::to_vec_pretty(metadata)?,
+        )?;
+        Ok(())
+    }
+
+    fn record_integration_error(&self, err: &anyhow::Error) {
+        let mut metadata = self
+            .read_integration_metadata()
+            .unwrap_or(IntegrationMetadata {
+                enabled: true,
+                last_input_fingerprint: None,
+                last_integration_commit: None,
+                last_status: "error".to_string(),
+                last_error: None,
+                updated_at: None,
+                workspace_commit_count: None,
+            });
+        metadata.enabled = self.integration_enabled;
+        metadata.last_status = "error".to_string();
+        metadata.last_error = Some(format!("{err:#}"));
+        metadata.updated_at = Some(now_epoch_secs_string());
+        if let Err(write_err) = self.write_integration_metadata(&metadata) {
+            tracing::error!(error = %write_err, "failed to persist integration error metadata");
+        }
+    }
+
+    fn start_integration_worker(self: &Rc<Self>) {
+        if !self.integration_enabled {
+            return;
+        }
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        {
+            let mut slot = self.integration_trigger.lock().unwrap();
+            *slot = Some(tx);
+        }
+        let server = Rc::clone(self);
+        tokio::task::spawn_local(async move {
+            tracing::info!("integration worker started");
+            while rx.recv().await.is_some() {
+                tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                while rx.try_recv().is_ok() {}
+                if let Err(err) = server.recompute_integration_bookmark() {
+                    tracing::error!(error = %err, "integration recompute failed");
+                    server.record_integration_error(&err);
+                }
+            }
+            tracing::info!("integration worker stopped");
+        });
+    }
+
+    fn enqueue_integration_recompute(&self) {
+        let sender = self.integration_trigger.lock().unwrap().clone();
+        if let Some(tx) = sender {
+            let _ = tx.send(());
+        }
+    }
+
+    fn recompute_integration_bookmark(&self) -> Result<()> {
+        if !self.integration_enabled {
+            return Ok(());
+        }
+
+        let workspace_heads = {
+            let _guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
+            self.read_heads_metadata()?.workspace_heads
+        };
+        let workspace_commits = self.resolve_workspace_commits(&workspace_heads)?;
+        let input_fingerprint = fingerprint_workspace_commits(&workspace_commits);
+
+        let mut metadata =
+            self.read_integration_metadata()
+                .unwrap_or_else(|_| IntegrationMetadata {
+                    enabled: true,
+                    last_input_fingerprint: None,
+                    last_integration_commit: None,
+                    last_status: "idle".to_string(),
+                    last_error: None,
+                    updated_at: None,
+                    workspace_commit_count: Some(0),
+                });
+        metadata.enabled = true;
+
+        if workspace_commits.is_empty() {
+            metadata.last_input_fingerprint = Some(input_fingerprint);
+            metadata.last_status = "idle".to_string();
+            metadata.last_error = None;
+            metadata.workspace_commit_count = Some(0);
+            metadata.updated_at = Some(now_epoch_secs_string());
+            self.write_integration_metadata(&metadata)?;
+            tracing::debug!("integration recompute skipped: no workspace commits");
+            return Ok(());
+        }
+
+        let already_current = metadata.last_input_fingerprint.as_deref()
+            == Some(&input_fingerprint)
+            && matches!(metadata.last_status.as_str(), "clean" | "conflicted");
+        if already_current {
+            return Ok(());
+        }
+
+        let mut parent_hexes: Vec<String> = workspace_commits.values().cloned().collect();
+        parent_hexes.sort();
+        parent_hexes.dedup();
+
+        let readonly_repo = self
+            .repo_loader
+            .load_at_head()
+            .context("load repo at head")?;
+        let parent_ids: Vec<CommitId> = parent_hexes
+            .iter()
+            .map(|hex| from_hex(hex).map(CommitId::new))
+            .collect::<Result<Vec<_>>>()?;
+        let parent_commits: Vec<_> = parent_ids
+            .iter()
+            .map(|id| readonly_repo.store().get_commit(id))
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| anyhow!("load parent commit: {e}"))?;
+
+        let merged_tree =
+            pollster::block_on(merge_commit_trees(readonly_repo.as_ref(), &parent_commits))
+                .map_err(|e| anyhow!("merge workspace commits: {e}"))?;
+
+        let mut tx = readonly_repo.start_transaction();
+        let mut commit_builder = tx.repo_mut().new_commit(parent_ids, merged_tree).detach();
+        commit_builder.set_description("integration workspace recompute");
+        let integration_commit = commit_builder
+            .write(tx.repo_mut())
+            .map_err(|e| anyhow!("write integration commit: {e}"))?;
+        tx.repo_mut().set_local_bookmark_target(
+            "integration".as_ref(),
+            RefTarget::normal(integration_commit.id().clone()),
+        );
+
+        let unpublished = tx
+            .write("integration workspace recompute")
+            .map_err(|e| anyhow!("write integration operation: {e}"))?;
+
+        {
+            let _guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
+            unpublished
+                .publish()
+                .map_err(|e| anyhow!("publish integration operation: {e}"))?;
+
+            let heads_metadata = self.read_heads_metadata()?;
+            let next_heads = self.read_jj_op_heads()?;
+            let next_metadata = HeadsMetadata {
+                version: heads_metadata.version + 1,
+                workspace_heads: heads_metadata.workspace_heads,
+            };
+            self.write_heads_metadata(&next_metadata)?;
+            let heads_bytes: Vec<Vec<u8>> =
+                next_heads.iter().filter_map(|h| from_hex(h).ok()).collect();
+            self.notify_watchers(next_metadata.version, &heads_bytes);
+        }
+
+        metadata.last_input_fingerprint = Some(input_fingerprint);
+        metadata.last_integration_commit = Some(integration_commit.id().hex());
+        metadata.last_status = if integration_commit.has_conflict() {
+            "conflicted".to_string()
+        } else {
+            "clean".to_string()
+        };
+        metadata.last_error = None;
+        metadata.workspace_commit_count = Some(workspace_commits.len());
+        metadata.updated_at = Some(now_epoch_secs_string());
+        self.write_integration_metadata(&metadata)?;
+
+        tracing::info!(
+            status = %metadata.last_status,
+            integration_commit = %integration_commit.id().hex(),
+            workspace_commits = workspace_commits.len(),
+            "integration recompute completed"
+        );
+        Ok(())
+    }
+
+    fn resolve_workspace_commits(
+        &self,
+        workspace_heads: &BTreeMap<String, String>,
+    ) -> Result<BTreeMap<String, String>> {
+        let op_store = self.repo_loader.op_store();
+        let mut workspace_commits = BTreeMap::new();
+
+        for (workspace_id, op_hex) in workspace_heads {
+            let op_bytes = match from_hex(op_hex) {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    tracing::warn!(workspace_id = %workspace_id, op_id = %op_hex, error = %err, "bad workspace op id");
+                    continue;
+                }
+            };
+            let op_id = jj_lib::op_store::OperationId::new(op_bytes);
+            let operation = match pollster::block_on(op_store.read_operation(&op_id)) {
+                Ok(op) => op,
+                Err(err) => {
+                    tracing::warn!(workspace_id = %workspace_id, op_id = %op_hex, error = %err, "operation missing for workspace");
+                    continue;
+                }
+            };
+            let view = match pollster::block_on(op_store.read_view(&operation.view_id)) {
+                Ok(view) => view,
+                Err(err) => {
+                    tracing::warn!(workspace_id = %workspace_id, op_id = %op_hex, error = %err, "view missing for workspace operation");
+                    continue;
+                }
+            };
+            let key = jj_lib::ref_name::WorkspaceNameBuf::from(workspace_id.clone());
+            if let Some(commit_id) = view.wc_commit_ids.get(&key) {
+                workspace_commits.insert(workspace_id.clone(), commit_id.hex());
+            }
+        }
+
+        Ok(workspace_commits)
     }
 
     // ─── Object operations (through git backend) ─────────────────────
@@ -527,8 +800,10 @@ impl Server {
             });
         }
 
-        let mut old_op_ids: Vec<jj_lib::op_store::OperationId> =
-            old_ids.into_iter().map(jj_lib::op_store::OperationId::new).collect();
+        let mut old_op_ids: Vec<jj_lib::op_store::OperationId> = old_ids
+            .into_iter()
+            .map(jj_lib::op_store::OperationId::new)
+            .collect();
         let new_op_id = jj_lib::op_store::OperationId::new(new_id.clone());
         old_op_ids.retain(|id| id != &new_op_id);
         pollster::block_on(self.op_heads_store.update_op_heads(&old_op_ids, &new_op_id))
@@ -559,6 +834,9 @@ impl Server {
             .collect();
 
         self.notify_watchers(next_metadata.version, &heads_bytes);
+        if self.integration_enabled {
+            self.enqueue_integration_recompute();
+        }
 
         Ok(UpdateResult {
             ok: true,
@@ -648,6 +926,43 @@ struct HeadsState {
     version: u64,
     heads: Vec<String>, // hex-encoded op IDs from jj-lib op-heads store
     workspace_heads: BTreeMap<String, String>, // hex-encoded
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IntegrationMetadata {
+    enabled: bool,
+    #[serde(default)]
+    last_input_fingerprint: Option<String>,
+    #[serde(default)]
+    last_integration_commit: Option<String>,
+    #[serde(default = "default_integration_status")]
+    last_status: String,
+    #[serde(default)]
+    last_error: Option<String>,
+    #[serde(default)]
+    updated_at: Option<String>,
+    #[serde(default)]
+    workspace_commit_count: Option<usize>,
+}
+
+fn default_integration_status() -> String {
+    "idle".to_string()
+}
+
+fn now_epoch_secs_string() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_else(|_| "0".to_string())
+}
+
+fn fingerprint_workspace_commits(workspace_commits: &BTreeMap<String, String>) -> String {
+    workspace_commits
+        .iter()
+        .map(|(workspace, commit)| format!("{workspace}:{commit}"))
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 // ─── Cap'n Proto Store implementation ─────────────────────────────────────────

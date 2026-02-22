@@ -35,6 +35,21 @@ Server head authority is jj-lib op-heads state.
 See `tests/slice15_head_authority_jj_lib.rs` for integration coverage of
 jj-lib vs RPC head consistency.
 
+## Integration workspace mode (flagged)
+
+Optional runtime mode (`--enable-integration-workspace`, or
+`TANDEM_ENABLE_INTEGRATION_WORKSPACE=1`) adds a server-side recompute worker:
+
+- Trigger: successful `updateOpHeads` RPC
+- Input: latest workspace head map (`workspace_heads`) resolved to workspace commit IDs
+- Action: compute merged tree, create integration commit, move bookmark `integration`
+- Output metadata: `.jj/repo/tandem/integration.json`
+  (`enabled`, `last_input_fingerprint`, `last_integration_commit`, `last_status`,
+  `last_error`, `updated_at`)
+
+Conflict merges are intentionally visible: if parents conflict, `integration`
+points to a conflicted commit.
+
 ---
 
 ## Original Research Notes
