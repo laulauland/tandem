@@ -813,7 +813,119 @@ fn run_tandem_init(server_addr: &str, workspace_name: &str, workspace_path_str: 
         &*jj_lib::workspace::default_working_copy_factory(),
         jj_lib::ref_name::WorkspaceNameBuf::from(workspace_name.to_string()),
     ) {
-        Ok(_) => {
+        Ok((mut workspace, repo)) => {
+            use jj_lib::repo::Repo as _;
+
+            let head_repo = match repo.loader().load_at_head() {
+                Ok(repo) => repo,
+                Err(e) => {
+                    eprintln!("error: workspace init failed: cannot load repository head: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+
+            let source_parent_commits = if let Some(source_wc_commit_id) = head_repo
+                .view()
+                .get_wc_commit_id(jj_lib::ref_name::WorkspaceName::DEFAULT)
+            {
+                let source_wc_commit = match head_repo.store().get_commit(source_wc_commit_id) {
+                    Ok(commit) => commit,
+                    Err(e) => {
+                        eprintln!(
+                            "error: workspace init failed: cannot load source workspace commit: {e}"
+                        );
+                        return ExitCode::FAILURE;
+                    }
+                };
+
+                let mut parents = Vec::new();
+                for parent_id in source_wc_commit.parent_ids() {
+                    match head_repo.store().get_commit(parent_id) {
+                        Ok(parent) => parents.push(parent),
+                        Err(e) => {
+                            eprintln!(
+                                "error: workspace init failed: cannot load source workspace parent {parent_id}: {e}"
+                            );
+                            return ExitCode::FAILURE;
+                        }
+                    }
+                }
+
+                if parents.is_empty() {
+                    vec![head_repo.store().root_commit()]
+                } else {
+                    parents
+                }
+            } else {
+                vec![head_repo.store().root_commit()]
+            };
+
+            let merged_tree = match pollster::block_on(jj_lib::rewrite::merge_commit_trees(
+                head_repo.as_ref(),
+                &source_parent_commits,
+            )) {
+                Ok(tree) => tree,
+                Err(e) => {
+                    eprintln!(
+                        "error: workspace init failed: cannot merge source workspace parents: {e}"
+                    );
+                    return ExitCode::FAILURE;
+                }
+            };
+
+            let mut tx = head_repo.start_transaction();
+            let parent_ids: Vec<jj_lib::backend::CommitId> = source_parent_commits
+                .iter()
+                .map(|commit| commit.id().clone())
+                .collect();
+            let new_wc_commit = match tx
+                .repo_mut()
+                .new_commit(parent_ids, merged_tree)
+                .detach()
+                .write(tx.repo_mut())
+            {
+                Ok(commit) => commit,
+                Err(e) => {
+                    eprintln!(
+                        "error: workspace init failed: cannot create initial working-copy commit: {e}"
+                    );
+                    return ExitCode::FAILURE;
+                }
+            };
+
+            if let Err(e) = tx.repo_mut().edit(
+                jj_lib::ref_name::WorkspaceNameBuf::from(workspace_name.to_string()),
+                &new_wc_commit,
+            ) {
+                eprintln!(
+                    "error: workspace init failed: cannot move workspace to source context: {e}"
+                );
+                return ExitCode::FAILURE;
+            }
+
+            if let Err(e) = tx.repo_mut().rebase_descendants() {
+                eprintln!("error: workspace init failed: cannot rebase rewritten descendants: {e}");
+                return ExitCode::FAILURE;
+            }
+
+            let updated_repo = match tx.commit(format!(
+                "create initial working-copy commit in workspace {workspace_name}"
+            )) {
+                Ok(repo) => repo,
+                Err(e) => {
+                    eprintln!(
+                        "error: workspace init failed: cannot publish initial operation: {e}"
+                    );
+                    return ExitCode::FAILURE;
+                }
+            };
+
+            if let Err(e) = workspace.check_out(updated_repo.op_id().clone(), None, &new_wc_commit)
+            {
+                eprintln!("error: workspace init failed: cannot update working copy checkout: {e}");
+                return ExitCode::FAILURE;
+            }
+
             eprintln!(
                 "Initialized tandem workspace '{}' at {} (server: {})",
                 workspace_name,
