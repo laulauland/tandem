@@ -48,6 +48,9 @@ ENVIRONMENT:
     TANDEM_ENABLE_INTEGRATION_WORKSPACE
                             Set to 1/true to enable server-side integration
                             workspace recompute mode
+    TANDEM_LISTEN           Listen address for `tandem up` (host:port).
+                            If unset, tandem auto-selects a free port
+                            in 0.0.0.0:13013-13063
 
 SETUP:
     # Start a server
@@ -150,9 +153,9 @@ enum Commands {
         /// Path to the repository directory
         #[arg(long)]
         repo: String,
-        /// Address to listen on (e.g. 0.0.0.0:13013)
-        #[arg(long)]
-        listen: String,
+        /// Address to listen on (e.g. 0.0.0.0:13013). If omitted, tandem auto-selects.
+        #[arg(long, env = "TANDEM_LISTEN")]
+        listen: Option<String>,
         /// Log level for the daemon (trace, debug, info, warn, error)
         #[arg(long, default_value = "info")]
         log_level: String,
@@ -266,7 +269,7 @@ fn main() -> ExitCode {
             enable_integration_workspace,
         }) => run_up(
             &repo,
-            &listen,
+            listen.as_deref(),
             &log_level,
             log_file.as_deref(),
             control_socket.as_deref(),
@@ -369,9 +372,82 @@ fn resolve_integration_workspace_enabled(flag: bool) -> bool {
     flag || env_flag_enabled("TANDEM_ENABLE_INTEGRATION_WORKSPACE")
 }
 
+const DEFAULT_UP_HOST: &str = "0.0.0.0";
+const DEFAULT_UP_PORT_START: u16 = 13013;
+const DEFAULT_UP_PORT_END: u16 = 13063;
+
+fn up_state_dir() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join("tandem").join("up-state");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+fn hash_repo_identity(repo: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+
+    let canonical = std::fs::canonicalize(repo).unwrap_or_else(|_| std::path::PathBuf::from(repo));
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    canonical.to_string_lossy().hash(&mut hasher);
+    hasher.finish()
+}
+
+fn last_listen_path(repo: &str) -> std::path::PathBuf {
+    let key = format!("{:016x}", hash_repo_identity(repo));
+    up_state_dir().join(format!("last-listen-{key}.txt"))
+}
+
+fn read_last_listen(repo: &str) -> Option<String> {
+    let path = last_listen_path(repo);
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn write_last_listen(repo: &str, listen: &str) {
+    let path = last_listen_path(repo);
+    let _ = std::fs::write(path, listen);
+}
+
+fn can_bind_listen_addr(addr: &str) -> bool {
+    std::net::TcpListener::bind(addr).is_ok()
+}
+
+fn find_auto_listen_addr(repo: &str) -> Option<String> {
+    let span = (DEFAULT_UP_PORT_END - DEFAULT_UP_PORT_START + 1) as usize;
+    let start_offset = (hash_repo_identity(repo) as usize) % span;
+
+    for i in 0..span {
+        let port = DEFAULT_UP_PORT_START + ((start_offset + i) % span) as u16;
+        let candidate = format!("{DEFAULT_UP_HOST}:{port}");
+        if can_bind_listen_addr(&candidate) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn resolve_up_listen(repo: &str, explicit: Option<&str>) -> Result<String, String> {
+    if let Some(addr) = explicit.map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        return Ok(addr.to_string());
+    }
+
+    if let Some(last) = read_last_listen(repo) {
+        if can_bind_listen_addr(&last) {
+            return Ok(last);
+        }
+    }
+
+    find_auto_listen_addr(repo).ok_or_else(|| {
+        format!(
+            "could not find a free listen address in {DEFAULT_UP_HOST}:{DEFAULT_UP_PORT_START}-{DEFAULT_UP_PORT_END}; pass --listen <addr>"
+        )
+    })
+}
+
 fn run_up(
     repo: &str,
-    listen: &str,
+    listen: Option<&str>,
     log_level: &str,
     log_file: Option<&str>,
     control_socket: Option<&str>,
@@ -392,6 +468,14 @@ fn run_up(
         }
     }
 
+    let listen_addr = match resolve_up_listen(repo, listen) {
+        Ok(addr) => addr,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
     // Determine log file
     let log_file_path = log_file.map(|s| s.to_string()).unwrap_or_else(|| {
         let dir = std::env::temp_dir().join("tandem");
@@ -411,7 +495,7 @@ fn run_up(
     cmd.args([
         "serve",
         "--listen",
-        listen,
+        &listen_addr,
         "--repo",
         repo,
         "--log-level",
@@ -466,7 +550,8 @@ fn run_up(
                 // Verify healthy via status
                 if let Ok(status) = control::client_status(&sock_path) {
                     if status.running {
-                        println!("tandem running, PID {pid}");
+                        write_last_listen(repo, &listen_addr);
+                        println!("tandem running on {listen_addr}, PID {pid}");
                         return ExitCode::SUCCESS;
                     }
                 }

@@ -2,6 +2,7 @@
 //!
 //! Acceptance criteria:
 //! - `tandem up --repo ... --listen ...` returns immediately, daemon is running.
+//! - `tandem up --repo ...` auto-selects a listen address when omitted.
 //! - `tandem status` shows running after `tandem up`.
 //! - `tandem down` stops daemon, `tandem status` shows not running.
 //! - `tandem up` twice: second invocation errors with "already running".
@@ -97,6 +98,64 @@ fn slice12_up_status_down() {
         !sock.exists(),
         "control socket should be removed after down"
     );
+}
+
+/// tandem up with no --listen picks a free default port.
+#[test]
+fn slice12_up_auto_listen_port() {
+    let tmp = TempDir::new().unwrap();
+    let home = common::isolated_home(tmp.path());
+    let server_repo = tmp.path().join("server-repo");
+    std::fs::create_dir_all(&server_repo).unwrap();
+
+    let sock = common::control_socket_path(tmp.path());
+    let sock_str = sock.to_str().unwrap();
+    let log_file = tmp.path().join("daemon.log");
+    let log_file_str = log_file.to_str().unwrap();
+
+    let up_out = common::run_tandem_in(
+        tmp.path(),
+        &[
+            "up",
+            "--repo",
+            server_repo.to_str().unwrap(),
+            "--control-socket",
+            sock_str,
+            "--log-file",
+            log_file_str,
+        ],
+        &home,
+    );
+    common::assert_ok(&up_out, "tandem up auto listen");
+
+    let status_out = common::run_tandem_in(
+        tmp.path(),
+        &["server", "status", "--json", "--control-socket", sock_str],
+        &home,
+    );
+    common::assert_ok(&status_out, "status after auto-listen up");
+    let json_str = common::stdout_str(&status_out);
+    let parsed: serde_json::Value =
+        serde_json::from_str(json_str.trim()).expect("status JSON should parse");
+    let listen = parsed["listen"]
+        .as_str()
+        .unwrap_or_else(|| panic!("missing listen in status JSON: {json_str}"));
+    let port: u16 = listen
+        .rsplit(':')
+        .next()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or_else(|| panic!("listen should include a port, got: {listen}"));
+    assert!(
+        (13013..=13063).contains(&port),
+        "auto-selected port should be in 13013-13063, got {port} (listen={listen})"
+    );
+
+    let loopback_addr = format!("127.0.0.1:{port}");
+    common::wait_for_addr(&loopback_addr, Duration::from_secs(10));
+
+    let down_out =
+        common::run_tandem_in(tmp.path(), &["down", "--control-socket", sock_str], &home);
+    common::assert_ok(&down_out, "tandem down after auto listen");
 }
 
 /// tandem up twice returns error on second invocation.

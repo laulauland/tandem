@@ -10,8 +10,8 @@ stock jj working-copy status command.
 ## API surface
 
 ```
-tandem up --repo /srv/project --listen 0.0.0.0:13013 [--enable-integration-workspace]
-                                                    # start daemon, return
+tandem up --repo /srv/project [--listen 0.0.0.0:13013] [--enable-integration-workspace]
+                                                          # start daemon, return
 tandem down                                              # stop daemon
 tandem server status                                     # health check
 tandem server status --json                              # machine-readable
@@ -32,11 +32,13 @@ tandem serve --pidfile /var/run/tandem.pid
 
 `tandem up` forks itself as a background process. No separate daemon binary.
 
-1. `tandem up` validates flags (repo exists, port parseable).
-2. Forks `tandem serve --daemon` with same flags. `--daemon` is internal/hidden.
-3. Parent waits for child to signal readiness (control socket exists + health OK).
-4. Parent prints "tandem running, PID <n>" and exits 0.
-5. If child fails to start within timeout (5s default), parent exits 1 with error.
+1. `tandem up` validates flags and resolves a listen address.
+2. If `--listen` is omitted, it first reuses the last successful address for the
+   repo when available, else probes `0.0.0.0:13013-13063` and picks a free port.
+3. Forks `tandem serve --daemon` with resolved flags. `--daemon` is internal/hidden.
+4. Parent waits for child to signal readiness (control socket exists + health OK).
+5. Parent prints "tandem running on <addr>, PID <n>" and exits 0.
+6. If child fails to start within timeout (5s default), parent exits 1 with error.
 
 The `--daemon` flag tells `serve` to:
 - Detach from terminal (setsid, close stdin/stdout/stderr).
@@ -187,12 +189,16 @@ Both modes create the control socket. `tandem down`,
 ### tandem up
 
 ```
---listen <addr>           Cap'n Proto listen address (required)
+--listen <addr>           Cap'n Proto listen address (optional)
 --repo <path>             Repository path (required)
 --log-level <level>       Daemon log level (default: info)
 --log-file <path>         Daemon log file (default: $XDG_RUNTIME_DIR/tandem/daemon.log)
 --enable-integration-workspace
                           Forwarded to daemonized `serve`
+
+If omitted, `--listen` falls back to:
+1) last successful listen addr for this repo (if currently free),
+2) first free port in `0.0.0.0:13013-13063` using repo-hash offset.
 ```
 
 ### tandem down
@@ -201,6 +207,8 @@ No flags. Finds daemon via control socket.
 
 Environment fallback:
 
+- `TANDEM_LISTEN=<addr>` provides the listen addr for `tandem up` when
+  `--listen` is not passed.
 - `TANDEM_ENABLE_INTEGRATION_WORKSPACE=1` enables integration mode for both
   `tandem serve` and `tandem up` when the flag is not passed.
 

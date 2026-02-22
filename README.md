@@ -193,7 +193,7 @@ Use `tandem server status` for daemon health.
 Start, stop, and monitor the tandem server.
 
 ```
-tandem up --repo <path> --listen <addr> [--enable-integration-workspace]
+tandem up --repo <path> [--listen <addr>] [--enable-integration-workspace]
                                                 Start background daemon
 tandem down                                     Stop the daemon
 tandem server status                            Check if daemon is running
@@ -205,14 +205,19 @@ tandem serve --listen <addr> --repo <path> [--enable-integration-workspace]
 **tandem up** — starts a background daemon and returns immediately.
 
 ```
-tandem up --repo <path> --listen <addr> [--log-level <level>] [--log-file <path>]
-                                        [--control-socket <path>]
-                                        [--enable-integration-workspace]
+tandem up --repo <path> [--listen <addr>] [--log-level <level>] [--log-file <path>]
+                         [--control-socket <path>]
+                         [--enable-integration-workspace]
 ```
 
 Forks `tandem serve --daemon` in the background. Waits for the control socket
 to become healthy, prints the PID, exits. If a daemon is already running,
 exits with an error.
+
+If `--listen` is omitted, tandem chooses a listen address with this heuristic:
+1) reuse the last successful listen address for this repo (if still free),
+2) otherwise pick the first free port in `0.0.0.0:13013-13063`, with a
+repo-path hash offset to reduce collisions across repos.
 
 **tandem down** — stops the running daemon.
 
@@ -316,6 +321,7 @@ the remote store.
 |----------|---------|
 | `TANDEM_SERVER` | Server address — fallback for `--server` |
 | `TANDEM_WORKSPACE` | Workspace name fallback for `tandem init` when `--workspace` is not provided. |
+| `TANDEM_LISTEN` | Listen address fallback for `tandem up --listen`. |
 | `TANDEM_ENABLE_INTEGRATION_WORKSPACE` | Set to `1`/`true` to enable integration workspace mode when `--enable-integration-workspace` is not passed. |
 
 ---
