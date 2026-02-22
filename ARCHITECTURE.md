@@ -4,8 +4,8 @@
 
 ## Implementation Status
 
-**Complete as of 2026-02-19.** All slices 1-13 implemented and tested (34 tests).
-See `docs/exec-plans/completed/` for details.
+**Complete as of 2026-02-22.** All slices 1-14 implemented and tested.
+See `docs/exec-plans/completed/` and `tests/slice14_auto_workspace_names.rs` for details.
 
 ## Shape
 
@@ -28,7 +28,9 @@ a control socket so `tandem down/status/logs` work against either.
 - Client keeps **working copy local** (real files on disk)
 - Client store calls are remote via Cap'n Proto RPC
 - Backend/OpStore/OpHeadsStore trait implementations route to server
-- No `workspace update-stale` — clients always read current heads from server
+- Clients read current heads from server on each command; however jj may still
+  require `workspace update-stale` in high-concurrency/shared-workspace cases.
+  Auto-generated unique workspace names reduce accidental collisions.
 
 ## Responsibilities
 
@@ -71,7 +73,8 @@ Core capabilities:
 - **Object I/O:** `getObject(kind, id)`, `putObject(kind, data)`
   - Kinds: commit, tree, file, symlink
 - **Operation I/O:** `getOperation(id)`, `putOperation(data)`, `getView(id)`, `putView(data)`
-- **Op head coordination:** `getHeads()`, `updateOpHeads(old_ids, new_id)` (CAS)
+- **Op head coordination:** `getHeads()`,
+  `updateOpHeads(old_ids, new_id, expected_version, workspace_id)` (CAS)
 - **Operation resolution:** `resolveOperationIdPrefix(prefix)`
 - **Watch subscriptions:** `watchHeads(watcher)` — streaming notifications
 - **Optional capabilities:** `snapshot()`, copy tracking (reserved for future)
@@ -100,7 +103,7 @@ See `docs/design-docs/workflow.md` for the full workflow.
 
 ## Test Coverage
 
-34 integration tests across slices 1-13:
+Integration tests across slices 1-14:
 
 | Slice | Test File | Coverage |
 |-------|-----------|----------|
@@ -115,6 +118,7 @@ See `docs/design-docs/workflow.md` for the full workflow.
 | 11 | `tests/slice11_control_socket.rs` | Control socket, status reporting |
 | 12 | `tests/slice12_up_down.rs` | Daemon lifecycle (up/down), duplicate detection |
 | 13 | `tests/slice13_log_streaming.rs` | Log streaming, level filtering, JSON output |
+| 14 | `tests/slice14_auto_workspace_names.rs` | Auto-generated workspace names + workspace head identity tracking |
 
 All tests assert on **file byte content**, not just commit descriptions.
 

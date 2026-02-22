@@ -14,14 +14,19 @@ use jj_lib::settings::UserSettings;
 
 use crate::rpc::TandemClient;
 
+const WORKSPACE_ID_FILE: &str = "workspace_id";
+
 /// OpHeadsStore implementation that proxies all reads/writes to a tandem server.
 pub struct TandemOpHeadsStore {
     client: Arc<TandemClient>,
+    workspace_id: String,
 }
 
 impl fmt::Debug for TandemOpHeadsStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TandemOpHeadsStore").finish()
+        f.debug_struct("TandemOpHeadsStore")
+            .field("workspace_id", &self.workspace_id)
+            .finish()
     }
 }
 
@@ -44,26 +49,65 @@ fn read_server_address(store_path: &Path) -> Result<String, BackendLoadError> {
     })
 }
 
+fn read_workspace_id(store_path: &Path) -> Result<String, BackendLoadError> {
+    if let Ok(workspace_id) = std::env::var("TANDEM_WORKSPACE") {
+        let trimmed = workspace_id.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+
+    let workspace_path = store_path.join(WORKSPACE_ID_FILE);
+    match std::fs::read_to_string(&workspace_path) {
+        Ok(id) => {
+            let trimmed = id.trim();
+            if trimmed.is_empty() {
+                Ok("default".to_string())
+            } else {
+                Ok(trimmed.to_string())
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("default".to_string()),
+        Err(e) => Err(BackendLoadError(
+            anyhow::anyhow!(
+                "cannot read tandem workspace identity from {}: {e}",
+                workspace_path.display()
+            )
+            .into(),
+        )),
+    }
+}
+
 impl TandemOpHeadsStore {
     /// Initialize a new tandem op heads store (called during workspace init).
     pub fn init(
         store_path: &Path,
         server_addr: &str,
+        workspace_id: &str,
     ) -> Result<Self, jj_lib::backend::BackendInitError> {
         std::fs::write(store_path.join("server_address"), server_addr)
+            .map_err(|e| jj_lib::backend::BackendInitError(e.into()))?;
+        std::fs::write(store_path.join(WORKSPACE_ID_FILE), workspace_id)
             .map_err(|e| jj_lib::backend::BackendInitError(e.into()))?;
 
         let client = TandemClient::connect(server_addr)
             .map_err(|e| jj_lib::backend::BackendInitError(e.into()))?;
 
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            workspace_id: workspace_id.to_string(),
+        })
     }
 
     /// Load an existing tandem op heads store from `store_path`.
     pub fn load(_settings: &UserSettings, store_path: &Path) -> Result<Self, BackendLoadError> {
         let server_addr = read_server_address(store_path)?;
+        let workspace_id = read_workspace_id(store_path)?;
         let client = TandemClient::connect(&server_addr).map_err(|e| BackendLoadError(e.into()))?;
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            workspace_id,
+        })
     }
 }
 
@@ -93,7 +137,7 @@ impl OpHeadsStore for TandemOpHeadsStore {
 
             let result = self
                 .client
-                .update_op_heads(&old_bytes, &new_bytes, version, "")
+                .update_op_heads(&old_bytes, &new_bytes, version, &self.workspace_id)
                 .map_err(|e| OpHeadsStoreError::Write {
                     new_op_id: new_id.clone(),
                     source: e.into(),

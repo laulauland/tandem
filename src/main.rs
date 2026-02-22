@@ -20,6 +20,8 @@ mod watch;
 
 use std::path::Path;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{CommandFactory, Parser, Subcommand};
 
@@ -39,7 +41,8 @@ JJ COMMANDS:
 ENVIRONMENT:
     TANDEM_SERVER           Server address (host:port) — used by the tandem
                             backend when connecting to a remote store
-    TANDEM_WORKSPACE        Workspace name (default: \"default\")
+    TANDEM_WORKSPACE        Workspace name for `tandem init` when --workspace
+                            is not provided
 
 SETUP:
     # Start a server
@@ -113,9 +116,9 @@ enum Commands {
         /// Server address (host:port)
         #[arg(long, env = "TANDEM_SERVER")]
         tandem_server: String,
-        /// Workspace name
-        #[arg(long, default_value = "default", env = "TANDEM_WORKSPACE")]
-        workspace: String,
+        /// Workspace name (auto-generated if omitted)
+        #[arg(long, env = "TANDEM_WORKSPACE")]
+        workspace: Option<String>,
         /// Workspace directory
         #[arg(default_value = ".")]
         path: String,
@@ -222,7 +225,10 @@ fn main() -> ExitCode {
             tandem_server,
             workspace,
             path,
-        }) => run_tandem_init(&tandem_server, &workspace, &path),
+        }) => {
+            let workspace_name = resolve_init_workspace_name(workspace.as_deref());
+            run_tandem_init(&tandem_server, &workspace_name, &path)
+        }
         Some(Commands::Watch { server }) => run_watch(&server),
         Some(Commands::Up {
             repo,
@@ -528,6 +534,25 @@ fn run_logs(level: &str, json: bool, control_socket: Option<&str>) -> ExitCode {
 
 // ─── Tandem init ──────────────────────────────────────────────────────────────
 
+static WORKSPACE_NAME_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn resolve_init_workspace_name(explicit_or_env: Option<&str>) -> String {
+    match explicit_or_env {
+        Some(name) if !name.trim().is_empty() => name.to_string(),
+        _ => generate_workspace_name(),
+    }
+}
+
+fn generate_workspace_name() -> String {
+    let now_ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    let counter = WORKSPACE_NAME_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("ws-{pid:x}-{now_ns:x}-{counter:x}")
+}
+
 fn run_tandem_init(server_addr: &str, workspace_name: &str, workspace_path_str: &str) -> ExitCode {
     let workspace_path = Path::new(workspace_path_str);
 
@@ -568,6 +593,8 @@ fn run_tandem_init(server_addr: &str, workspace_name: &str, workspace_path_str: 
     let sa1 = server_addr_owned.clone();
     let sa2 = server_addr_owned.clone();
     let sa3 = server_addr_owned.clone();
+    let workspace_name_owned = workspace_name.to_string();
+    let wn1 = workspace_name_owned.clone();
 
     let backend_init: &dyn Fn(
         &jj_lib::settings::UserSettings,
@@ -598,7 +625,7 @@ fn run_tandem_init(server_addr: &str, workspace_name: &str, workspace_path_str: 
         jj_lib::backend::BackendInitError,
     > = &|_settings, store_path| {
         Ok(Box::new(op_heads_store::TandemOpHeadsStore::init(
-            store_path, &sa3,
+            store_path, &sa3, &wn1,
         )?))
     };
 

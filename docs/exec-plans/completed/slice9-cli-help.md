@@ -25,7 +25,11 @@ Comprehensive help text and error messages for agent discoverability:
 
 4. **Environment variable fallbacks**
    - `TANDEM_SERVER` — fallback for `--tandem-server` flag
-   - `TANDEM_WORKSPACE` — fallback for `--workspace` flag (default: "default")
+   - `TANDEM_WORKSPACE` — fallback for `--workspace` flag
+
+   _Note (updated):_ implicit workspace names are now auto-generated when
+   `--workspace`/`TANDEM_WORKSPACE` are omitted (the old implicit `default`
+   behavior was removed in the workspace-collision fix).
 
 5. **Error messages**
    - Connection failures include the address that was tried

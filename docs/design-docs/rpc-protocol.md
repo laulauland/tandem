@@ -66,12 +66,15 @@ interface Store {
   resolveOperationIdPrefix @7 (hexPrefix :Text)
     -> (resolution :PrefixResolution, match :Data);
 
-  getHeads @8 () -> (heads :List(Data), version :UInt64);
+  getHeads @8 () -> (heads :List(Data), version :UInt64,
+                     workspaceHeads :List(WorkspaceHead));
   updateOpHeads @9 (
     oldIds :List(Data),
     newId :Data,
-    expectedVersion :UInt64
-  ) -> (ok :Bool, heads :List(Data), version :UInt64);
+    expectedVersion :UInt64,
+    workspaceId :Text
+  ) -> (ok :Bool, heads :List(Data), version :UInt64,
+        workspaceHeads :List(WorkspaceHead));
 
   watchHeads @10 (watcher :HeadWatcher, afterVersion :UInt64)
     -> (cancel :Cancel);
@@ -98,6 +101,11 @@ interface Cancel {
 struct IdBytes {
   id @0 :Data;
   data @1 :Data;
+}
+
+struct WorkspaceHead {
+  workspaceId @0 :Text;
+  commitId @1 :Data;
 }
 
 enum ObjectKind {
@@ -157,8 +165,14 @@ enum Capability {
 ### `updateOpHeads`
 
 - Logical behavior: remove `oldIds`, add `newId`.
+- `workspaceId` identifies which workspace moved to `newId`.
 - `ok=false` means caller must read current heads and retry merge/update flow.
+- Successful responses include updated `workspaceHeads` for visibility/debugging.
 - This operation is the concurrency correctness boundary.
+
+### `getHeads`
+
+- Returns current op heads, CAS `version`, and `workspaceHeads` (workspace -> commit mapping).
 
 ### `watchHeads`
 
@@ -190,7 +204,7 @@ enum Capability {
 ### OpHeadsStore
 
 - `get_op_heads` -> `getHeads`
-- `update_op_heads` -> `updateOpHeads`
+- `update_op_heads` -> `updateOpHeads` (passing workspace identity)
 - `lock` -> client-local no-op lock (correctness comes from server-side CAS)
 
 ## Operational invariants

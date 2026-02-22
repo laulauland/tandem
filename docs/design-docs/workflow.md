@@ -39,6 +39,7 @@ tandem serve --listen 0.0.0.0:13013 --repo /srv/project
 ```bash
 # Agent A (any machine)
 tandem init --tandem-server=server:13013 ~/work/project
+# If --workspace is omitted, tandem auto-generates a unique workspace name.
 cd ~/work/project
 ls src/                                 # real files, fetched from server
 echo 'pub fn auth() {}' > src/auth.rs

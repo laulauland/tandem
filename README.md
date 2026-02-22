@@ -264,8 +264,9 @@ tandem init --tandem-server <addr> [--workspace <name>] [path]
 ```
 
 Initializes a tandem-backed workspace. Creates the directory, registers the
-tandem backend, and connects to the server. `--workspace` names the workspace
-(default: `default`). Each agent should use a unique workspace name.
+tandem backend, and connects to the server. `--workspace` names the workspace.
+If omitted, tandem auto-generates a unique workspace name to avoid cross-device
+workspace collisions by default.
 
 ### Watch
 
@@ -299,7 +300,7 @@ the remote store.
 | Variable | Purpose |
 |----------|---------|
 | `TANDEM_SERVER` | Server address — fallback for `--tandem-server` |
-| `TANDEM_WORKSPACE` | Workspace name (default: `default`) |
+| `TANDEM_WORKSPACE` | Workspace name fallback for `tandem init` when `--workspace` is not provided. |
 
 ---
 
