@@ -49,7 +49,14 @@ fn find_commit_id(dir: &Path, desc_substring: &str, home: &Path) -> String {
     let revset = format!("description(substring:\"{desc_substring}\")");
     let out = common::run_tandem_in(
         dir,
-        &["log", "--no-graph", "-r", &revset, "-T", "commit_id ++ \"\\n\""],
+        &[
+            "log",
+            "--no-graph",
+            "-r",
+            &revset,
+            "-T",
+            "commit_id ++ \"\\n\"",
+        ],
         home,
     );
     common::assert_ok(&out, &format!("find commit_id for '{desc_substring}'"));
@@ -85,24 +92,36 @@ fn slice7_two_agents_files_bookmarks_git_round_trip() {
     // ── Initialize both agent workspaces ──────────────────────────────
     let init_a = common::run_tandem_in(
         &agent_a_dir,
-        &["init", "--tandem-server", &addr, "--workspace", "agent-a", "."],
+        &[
+            "init",
+            "--tandem-server",
+            &addr,
+            "--workspace",
+            "agent-a",
+            ".",
+        ],
         &home,
     );
     common::assert_ok(&init_a, "agent-a init");
 
     let init_b = common::run_tandem_in(
         &agent_b_dir,
-        &["init", "--tandem-server", &addr, "--workspace", "agent-b", "."],
+        &[
+            "init",
+            "--tandem-server",
+            &addr,
+            "--workspace",
+            "agent-b",
+            ".",
+        ],
         &home,
     );
     common::assert_ok(&init_b, "agent-b init");
 
     // ── Define file contents ──────────────────────────────────────────
-    let auth_content =
-        b"pub fn authenticate(token: &str) -> bool {\n    token.len() > 8\n}\n\n\
+    let auth_content = b"pub fn authenticate(token: &str) -> bool {\n    token.len() > 8\n}\n\n\
           pub fn validate_session(session_id: &str) -> bool {\n    !session_id.is_empty()\n}\n";
-    let api_content =
-        b"pub fn handle_request(method: &str, path: &str) -> String {\n    \
+    let api_content = b"pub fn handle_request(method: &str, path: &str) -> String {\n    \
           format!(\"{method} {path} -> 200 OK\")\n}\n\n\
           pub fn health_check() -> &'static str {\n    \"healthy\"\n}\n";
 
@@ -111,7 +130,8 @@ fn slice7_two_agents_files_bookmarks_git_round_trip() {
     std::fs::create_dir_all(&src_a).unwrap();
     std::fs::write(src_a.join("auth.rs"), auth_content).unwrap();
 
-    let describe_a = run_tandem_resilient(&agent_a_dir, &["describe", "-m", "add auth module"], &home);
+    let describe_a =
+        run_tandem_resilient(&agent_a_dir, &["describe", "-m", "add auth module"], &home);
     common::assert_ok(&describe_a, "agent-a describe");
 
     let new_a = run_tandem_resilient(&agent_a_dir, &["new"], &home);
@@ -122,7 +142,8 @@ fn slice7_two_agents_files_bookmarks_git_round_trip() {
     std::fs::create_dir_all(&src_b).unwrap();
     std::fs::write(src_b.join("api.rs"), api_content).unwrap();
 
-    let describe_b = run_tandem_resilient(&agent_b_dir, &["describe", "-m", "add api module"], &home);
+    let describe_b =
+        run_tandem_resilient(&agent_b_dir, &["describe", "-m", "add api module"], &home);
     common::assert_ok(&describe_b, "agent-b describe");
 
     let new_b = run_tandem_resilient(&agent_b_dir, &["new"], &home);
@@ -133,11 +154,7 @@ fn slice7_two_agents_files_bookmarks_git_round_trip() {
     settle(&agent_b_dir, "agent-b", &home);
 
     // ── Cross-visibility: both agents see each other's commits ────────
-    let log_a = common::run_tandem_in(
-        &agent_a_dir,
-        &["log", "--no-graph", "-r", "all()"],
-        &home,
-    );
+    let log_a = common::run_tandem_in(&agent_a_dir, &["log", "--no-graph", "-r", "all()"], &home);
     common::assert_ok(&log_a, "agent-a log all");
     let log_a_text = common::stdout_str(&log_a);
     assert!(
@@ -149,11 +166,7 @@ fn slice7_two_agents_files_bookmarks_git_round_trip() {
         "agent-a should see agent-b's commit\n{log_a_text}"
     );
 
-    let log_b = common::run_tandem_in(
-        &agent_b_dir,
-        &["log", "--no-graph", "-r", "all()"],
-        &home,
-    );
+    let log_b = common::run_tandem_in(&agent_b_dir, &["log", "--no-graph", "-r", "all()"], &home);
     common::assert_ok(&log_b, "agent-b log all");
     let log_b_text = common::stdout_str(&log_b);
     assert!(
@@ -203,11 +216,7 @@ fn slice7_two_agents_files_bookmarks_git_round_trip() {
 
     // ── Agent B sees the bookmark ─────────────────────────────────────
     settle(&agent_b_dir, "agent-b pre-bookmark-list", &home);
-    let bookmark_list = common::run_tandem_in(
-        &agent_b_dir,
-        &["bookmark", "list"],
-        &home,
-    );
+    let bookmark_list = common::run_tandem_in(&agent_b_dir, &["bookmark", "list"], &home);
     common::assert_ok(&bookmark_list, "agent-b bookmark list");
     let bookmark_text = common::stdout_str(&bookmark_list);
     assert!(
@@ -219,8 +228,11 @@ fn slice7_two_agents_files_bookmarks_git_round_trip() {
     let server_cat_auth = common::run_tandem_in_with_env(
         &server_repo,
         &[
-            "file", "show", "--ignore-working-copy",
-            "-r", &commit_auth,
+            "file",
+            "show",
+            "--ignore-working-copy",
+            "-r",
+            &commit_auth,
             "src/auth.rs",
         ],
         &[],
@@ -235,8 +247,11 @@ fn slice7_two_agents_files_bookmarks_git_round_trip() {
     let server_cat_api = common::run_tandem_in_with_env(
         &server_repo,
         &[
-            "file", "show", "--ignore-working-copy",
-            "-r", &commit_api,
+            "file",
+            "show",
+            "--ignore-working-copy",
+            "-r",
+            &commit_api,
             "src/api.rs",
         ],
         &[],
@@ -271,9 +286,12 @@ fn slice7_two_agents_files_bookmarks_git_round_trip() {
     let merge_out = common::run_tandem_in_with_env(
         &server_repo,
         &[
-            "new", "--ignore-working-copy",
-            "-m", "merge: auth + api",
-            &commit_auth, &commit_api,
+            "new",
+            "--ignore-working-copy",
+            "-m",
+            "merge: auth + api",
+            &commit_auth,
+            &commit_api,
         ],
         &[],
         &home,
@@ -287,8 +305,11 @@ fn slice7_two_agents_files_bookmarks_git_round_trip() {
     let merge_auth = common::run_tandem_in_with_env(
         &server_repo,
         &[
-            "file", "show", "--ignore-working-copy",
-            "-r", &merge_id,
+            "file",
+            "show",
+            "--ignore-working-copy",
+            "-r",
+            &merge_id,
             "src/auth.rs",
         ],
         &[],
@@ -300,8 +321,11 @@ fn slice7_two_agents_files_bookmarks_git_round_trip() {
     let merge_api = common::run_tandem_in_with_env(
         &server_repo,
         &[
-            "file", "show", "--ignore-working-copy",
-            "-r", &merge_id,
+            "file",
+            "show",
+            "--ignore-working-copy",
+            "-r",
+            &merge_id,
             "src/api.rs",
         ],
         &[],
@@ -314,8 +338,12 @@ fn slice7_two_agents_files_bookmarks_git_round_trip() {
     let bookmark_main = common::run_tandem_in_with_env(
         &server_repo,
         &[
-            "bookmark", "create", "--ignore-working-copy",
-            "main", "-r", &merge_id,
+            "bookmark",
+            "create",
+            "--ignore-working-copy",
+            "main",
+            "-r",
+            &merge_id,
         ],
         &[],
         &home,
@@ -335,20 +363,24 @@ fn slice7_two_agents_files_bookmarks_git_round_trip() {
     common::assert_ok(
         &common::run_git_in(
             tmp.path(),
-            &["clone", bare_remote.to_str().unwrap(), clone_dir.to_str().unwrap()],
+            &[
+                "clone",
+                bare_remote.to_str().unwrap(),
+                clone_dir.to_str().unwrap(),
+            ],
         ),
         "git clone",
     );
 
-    let cloned_auth = std::fs::read(clone_dir.join("src/auth.rs"))
-        .expect("auth.rs should exist in clone");
+    let cloned_auth =
+        std::fs::read(clone_dir.join("src/auth.rs")).expect("auth.rs should exist in clone");
     assert_eq!(
         cloned_auth, auth_content,
         "cloned auth.rs should be byte-identical"
     );
 
-    let cloned_api = std::fs::read(clone_dir.join("src/api.rs"))
-        .expect("api.rs should exist in clone");
+    let cloned_api =
+        std::fs::read(clone_dir.join("src/api.rs")).expect("api.rs should exist in clone");
     assert_eq!(
         cloned_api, api_content,
         "cloned api.rs should be byte-identical"
@@ -364,14 +396,21 @@ fn find_commit_id_on_server(server_repo: &Path, desc_substring: &str, home: &Pat
     let out = common::run_tandem_in_with_env(
         server_repo,
         &[
-            "log", "--ignore-working-copy", "--no-graph",
-            "-r", &revset,
-            "-T", "commit_id ++ \"\\n\"",
+            "log",
+            "--ignore-working-copy",
+            "--no-graph",
+            "-r",
+            &revset,
+            "-T",
+            "commit_id ++ \"\\n\"",
         ],
         &[],
         home,
     );
-    common::assert_ok(&out, &format!("server find commit_id for '{desc_substring}'"));
+    common::assert_ok(
+        &out,
+        &format!("server find commit_id for '{desc_substring}'"),
+    );
     let text = common::stdout_str(&out);
     let commit_id = text
         .lines()
@@ -407,7 +446,14 @@ fn slice7_byte_identity_all_perspectives() {
     common::assert_ok(
         &common::run_tandem_in(
             &agent_a_dir,
-            &["init", "--tandem-server", &addr, "--workspace", "agent-a", "."],
+            &[
+                "init",
+                "--tandem-server",
+                &addr,
+                "--workspace",
+                "agent-a",
+                ".",
+            ],
             &home,
         ),
         "agent-a init",
@@ -415,7 +461,14 @@ fn slice7_byte_identity_all_perspectives() {
     common::assert_ok(
         &common::run_tandem_in(
             &agent_b_dir,
-            &["init", "--tandem-server", &addr, "--workspace", "agent-b", "."],
+            &[
+                "init",
+                "--tandem-server",
+                &addr,
+                "--workspace",
+                "agent-b",
+                ".",
+            ],
             &home,
         ),
         "agent-b init",
@@ -430,7 +483,11 @@ fn slice7_byte_identity_all_perspectives() {
     std::fs::write(src_a.join("config.rs"), config_content).unwrap();
 
     common::assert_ok(
-        &run_tandem_resilient(&agent_a_dir, &["describe", "-m", "agent-a: auth + config"], &home),
+        &run_tandem_resilient(
+            &agent_a_dir,
+            &["describe", "-m", "agent-a: auth + config"],
+            &home,
+        ),
         "agent-a describe",
     );
     common::assert_ok(
@@ -447,7 +504,11 @@ fn slice7_byte_identity_all_perspectives() {
     std::fs::write(src_b.join("routes.rs"), routes_content).unwrap();
 
     common::assert_ok(
-        &run_tandem_resilient(&agent_b_dir, &["describe", "-m", "agent-b: api + routes"], &home),
+        &run_tandem_resilient(
+            &agent_b_dir,
+            &["describe", "-m", "agent-b: api + routes"],
+            &home,
+        ),
         "agent-b describe",
     );
     common::assert_ok(
@@ -495,7 +556,14 @@ fn slice7_byte_identity_all_perspectives() {
         // From server
         let out = common::run_tandem_in_with_env(
             &server_repo,
-            &["file", "show", "--ignore-working-copy", "-r", &commit_a, path],
+            &[
+                "file",
+                "show",
+                "--ignore-working-copy",
+                "-r",
+                &commit_a,
+                path,
+            ],
             &[],
             &home,
         );
@@ -525,7 +593,14 @@ fn slice7_byte_identity_all_perspectives() {
         // From server
         let out = common::run_tandem_in_with_env(
             &server_repo,
-            &["file", "show", "--ignore-working-copy", "-r", &commit_b, path],
+            &[
+                "file",
+                "show",
+                "--ignore-working-copy",
+                "-r",
+                &commit_b,
+                path,
+            ],
             &[],
             &home,
         );

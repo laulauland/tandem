@@ -117,8 +117,8 @@ async fn handle_control_connection(
         return Ok(());
     }
 
-    let request: serde_json::Value = serde_json::from_str(line)
-        .map_err(|e| anyhow::anyhow!("invalid JSON: {e}"))?;
+    let request: serde_json::Value =
+        serde_json::from_str(line).map_err(|e| anyhow::anyhow!("invalid JSON: {e}"))?;
 
     let req_type = request["type"].as_str().unwrap_or("");
 
@@ -147,10 +147,7 @@ async fn handle_control_connection(
             let _ = state.shutdown_tx.send(()).await;
         }
         "logs" => {
-            let level_filter = request["level"]
-                .as_str()
-                .unwrap_or("info")
-                .to_string();
+            let level_filter = request["level"].as_str().unwrap_or("info").to_string();
             let min_rank = level_rank(&level_filter);
 
             let mut rx = state.log_tx.subscribe();

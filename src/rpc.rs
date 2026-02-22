@@ -250,10 +250,7 @@ impl TandemClient {
         reply_rx.recv().map_err(|_| anyhow!("RPC reply dropped"))?
     }
 
-    pub fn resolve_op_prefix(
-        &self,
-        hex_prefix: &str,
-    ) -> Result<(PrefixResult, Option<Vec<u8>>)> {
+    pub fn resolve_op_prefix(&self, hex_prefix: &str) -> Result<(PrefixResult, Option<Vec<u8>>)> {
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
         self.tx
             .send(RpcMsg::ResolveOpPrefix {
@@ -289,8 +286,7 @@ async fn rpc_loop(
             Default::default(),
         );
         let mut rpc_system = RpcSystem::new(Box::new(network), None);
-        let client: store::Client =
-            rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
+        let client: store::Client = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
         tokio::task::spawn_local(rpc_system);
         Ok::<_, anyhow::Error>(client)
     }
@@ -470,11 +466,7 @@ async fn do_update_op_heads(
     for i in 0..heads_reader.len() {
         heads.push(heads_reader.get(i)?.to_vec());
     }
-    Ok(UpdateHeadsResult {
-        ok,
-        heads,
-        version,
-    })
+    Ok(UpdateHeadsResult { ok, heads, version })
 }
 
 async fn do_resolve_op_prefix(

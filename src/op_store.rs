@@ -83,8 +83,7 @@ impl TandemOpStore {
         root_data: RootOperationData,
     ) -> Result<Self, BackendLoadError> {
         let server_addr = read_server_address(store_path)?;
-        let client =
-            TandemClient::connect(&server_addr).map_err(|e| BackendLoadError(e.into()))?;
+        let client = TandemClient::connect(&server_addr).map_err(|e| BackendLoadError(e.into()))?;
         let info = client
             .get_repo_info()
             .map_err(|e| BackendLoadError(e.into()))?;
@@ -117,13 +116,14 @@ impl OpStore for TandemOpStore {
             return Ok(View::make_root(self.root_commit_id.clone()));
         }
 
-        let data = self.client.get_view(id.as_bytes()).map_err(|e| {
-            OpStoreError::ReadObject {
+        let data = self
+            .client
+            .get_view(id.as_bytes())
+            .map_err(|e| OpStoreError::ReadObject {
                 object_type: id.object_type(),
                 hash: id.hex(),
                 source: e.into(),
-            }
-        })?;
+            })?;
 
         let proto = jj_lib::protos::simple_op_store::View::decode(&*data)
             .map_err(|e| to_op_err(e.into()))?;
@@ -142,13 +142,14 @@ impl OpStore for TandemOpStore {
             return Ok(Operation::make_root(self.root_view_id.clone()));
         }
 
-        let data = self.client.get_operation(id.as_bytes()).map_err(|e| {
-            OpStoreError::ReadObject {
-                object_type: id.object_type(),
-                hash: id.hex(),
-                source: e.into(),
-            }
-        })?;
+        let data =
+            self.client
+                .get_operation(id.as_bytes())
+                .map_err(|e| OpStoreError::ReadObject {
+                    object_type: id.object_type(),
+                    hash: id.hex(),
+                    source: e.into(),
+                })?;
 
         let proto = jj_lib::protos::simple_op_store::Operation::decode(&*data)
             .map_err(|e| to_op_err(e.into()))?;
@@ -186,10 +187,7 @@ impl OpStore for TandemOpStore {
             ));
         }
 
-        let (result, matched) = self
-            .client
-            .resolve_op_prefix(&hex)
-            .map_err(to_op_err)?;
+        let (result, matched) = self.client.resolve_op_prefix(&hex).map_err(to_op_err)?;
 
         match result {
             PrefixResult::NoMatch => {

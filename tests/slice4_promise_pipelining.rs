@@ -64,11 +64,8 @@ fn slice4_ten_files_rapid_fire_round_trip() {
     for i in 0..file_count {
         std::fs::write(src_dir.join(&filenames[i]), &contents[i]).unwrap();
 
-        let describe = common::run_tandem_in(
-            &workspace_dir,
-            &["describe", "-m", &descriptions[i]],
-            &home,
-        );
+        let describe =
+            common::run_tandem_in(&workspace_dir, &["describe", "-m", &descriptions[i]], &home);
         common::assert_ok(&describe, &format!("describe file_{i}"));
 
         let new = common::run_tandem_in(&workspace_dir, &["new"], &home);
@@ -83,11 +80,7 @@ fn slice4_ten_files_rapid_fire_round_trip() {
     );
 
     // ── Verify all commits visible in log ────────────────────────────
-    let log = common::run_tandem_in(
-        &workspace_dir,
-        &["log", "--no-graph", "-r", "all()"],
-        &home,
-    );
+    let log = common::run_tandem_in(&workspace_dir, &["log", "--no-graph", "-r", "all()"], &home);
     common::assert_ok(&log, "jj log all");
     let log_text = common::stdout_str(&log);
     for desc in &descriptions {
@@ -104,7 +97,13 @@ fn slice4_ten_files_rapid_fire_round_trip() {
         let revset = format!("description(substring:\"{}\")", descriptions[i]);
         let cat = common::run_tandem_in(
             &workspace_dir,
-            &["file", "show", "-r", &revset, &format!("src/{}", filenames[i])],
+            &[
+                "file",
+                "show",
+                "-r",
+                &revset,
+                &format!("src/{}", filenames[i]),
+            ],
             &home,
         );
         common::assert_ok(&cat, &format!("file show src/{}", filenames[i]));
@@ -131,7 +130,10 @@ fn slice4_ten_files_rapid_fire_round_trip() {
             &[],
             &home,
         );
-        common::assert_ok(&server_cat, &format!("server file show src/{}", filenames[i]));
+        common::assert_ok(
+            &server_cat,
+            &format!("server file show src/{}", filenames[i]),
+        );
         assert_eq!(
             server_cat.stdout, contents[i],
             "server src/{} content mismatch",
@@ -207,11 +209,8 @@ fn slice4_large_files_pipelining() {
     // Verify all files round-trip with exact bytes
     for i in 0..file_count {
         let path = format!("src/large_{i}.rs");
-        let cat = common::run_tandem_in(
-            &workspace_dir,
-            &["file", "show", "-r", "@-", &path],
-            &home,
-        );
+        let cat =
+            common::run_tandem_in(&workspace_dir, &["file", "show", "-r", "@-", &path], &home);
         common::assert_ok(&cat, &format!("file show {path}"));
         assert_eq!(cat.stdout, contents[i], "{path} content mismatch");
     }

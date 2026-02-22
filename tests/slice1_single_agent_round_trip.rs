@@ -25,8 +25,7 @@ fn slice1_single_agent_file_round_trip() {
 
     // Verify .jj structure was created
     assert!(workspace_dir.join(".jj").exists(), ".jj dir should exist");
-    let store_type =
-        std::fs::read_to_string(workspace_dir.join(".jj/repo/store/type")).unwrap();
+    let store_type = std::fs::read_to_string(workspace_dir.join(".jj/repo/store/type")).unwrap();
     assert_eq!(store_type.trim(), "tandem", "store type should be tandem");
 
     // Write a file

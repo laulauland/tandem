@@ -34,10 +34,7 @@ pub fn tree_from_proto(proto: jj_lib::protos::simple_store::Tree) -> Tree {
         .into_iter()
         .map(|proto_entry| {
             let value = tree_value_from_proto(proto_entry.value.unwrap());
-            (
-                RepoPathComponentBuf::new(proto_entry.name).unwrap(),
-                value,
-            )
+            (RepoPathComponentBuf::new(proto_entry.name).unwrap(), value)
         })
         .collect();
     Tree::from_sorted_entries(entries)
@@ -60,9 +57,9 @@ fn tree_value_to_proto(value: &TreeValue) -> jj_lib::protos::simple_store::TreeV
             ));
         }
         TreeValue::Symlink(id) => {
-            proto.value = Some(
-                jj_lib::protos::simple_store::tree_value::Value::SymlinkId(id.to_bytes()),
-            );
+            proto.value = Some(jj_lib::protos::simple_store::tree_value::Value::SymlinkId(
+                id.to_bytes(),
+            ));
         }
         TreeValue::Tree(id) => {
             proto.value = Some(jj_lib::protos::simple_store::tree_value::Value::TreeId(
@@ -114,8 +111,7 @@ pub fn commit_from_proto(mut proto: jj_lib::protos::simple_store::Commit) -> Com
     let merge_builder: jj_lib::merge::MergeBuilder<_> =
         proto.root_tree.into_iter().map(TreeId::new).collect();
     let root_tree = merge_builder.build();
-    let conflict_labels =
-        jj_lib::conflict_labels::ConflictLabels::from_vec(proto.conflict_labels);
+    let conflict_labels = jj_lib::conflict_labels::ConflictLabels::from_vec(proto.conflict_labels);
     let change_id = ChangeId::new(proto.change_id);
 
     Commit {
@@ -132,9 +128,7 @@ pub fn commit_from_proto(mut proto: jj_lib::protos::simple_store::Commit) -> Com
 }
 
 #[allow(dead_code)]
-fn signature_to_proto(
-    signature: &Signature,
-) -> jj_lib::protos::simple_store::commit::Signature {
+fn signature_to_proto(signature: &Signature) -> jj_lib::protos::simple_store::commit::Signature {
     jj_lib::protos::simple_store::commit::Signature {
         name: signature.name.clone(),
         email: signature.email.clone(),
@@ -145,9 +139,7 @@ fn signature_to_proto(
     }
 }
 
-fn signature_from_proto(
-    proto: jj_lib::protos::simple_store::commit::Signature,
-) -> Signature {
+fn signature_from_proto(proto: jj_lib::protos::simple_store::commit::Signature) -> Signature {
     let timestamp = proto.timestamp.unwrap_or_default();
     Signature {
         name: proto.name,
@@ -161,18 +153,14 @@ fn signature_from_proto(
 
 // ─── OpStore: Timestamp helpers ───────────────────────────────────────────────
 
-fn op_timestamp_to_proto(
-    timestamp: &Timestamp,
-) -> jj_lib::protos::simple_op_store::Timestamp {
+fn op_timestamp_to_proto(timestamp: &Timestamp) -> jj_lib::protos::simple_op_store::Timestamp {
     jj_lib::protos::simple_op_store::Timestamp {
         millis_since_epoch: timestamp.timestamp.0,
         tz_offset: timestamp.tz_offset,
     }
 }
 
-fn op_timestamp_from_proto(
-    proto: jj_lib::protos::simple_op_store::Timestamp,
-) -> Timestamp {
+fn op_timestamp_from_proto(proto: jj_lib::protos::simple_op_store::Timestamp) -> Timestamp {
     Timestamp {
         timestamp: MillisSinceEpoch(proto.millis_since_epoch),
         tz_offset: proto.tz_offset,
@@ -181,9 +169,7 @@ fn op_timestamp_from_proto(
 
 // ─── OpStore: Operation ───────────────────────────────────────────────────────
 
-pub fn operation_to_proto(
-    operation: &Operation,
-) -> jj_lib::protos::simple_op_store::Operation {
+pub fn operation_to_proto(operation: &Operation) -> jj_lib::protos::simple_op_store::Operation {
     let (commit_predecessors, stores_commit_predecessors) = match &operation.commit_predecessors {
         Some(map) => (commit_predecessors_map_to_proto(map), true),
         None => (vec![], false),
@@ -205,7 +191,11 @@ pub fn operation_from_proto(
         .parents
         .into_iter()
         .map(|bytes| {
-            anyhow::ensure!(bytes.len() == 64, "invalid operation id length: {}", bytes.len());
+            anyhow::ensure!(
+                bytes.len() == 64,
+                "invalid operation id length: {}",
+                bytes.len()
+            );
             Ok(OperationId::new(bytes))
         })
         .collect::<anyhow::Result<_>>()?;
@@ -345,9 +335,7 @@ pub fn view_to_proto(view: &View) -> jj_lib::protos::simple_op_store::View {
     }
 }
 
-pub fn view_from_proto(
-    proto: jj_lib::protos::simple_op_store::View,
-) -> anyhow::Result<View> {
+pub fn view_from_proto(proto: jj_lib::protos::simple_op_store::View) -> anyhow::Result<View> {
     let mut wc_commit_ids = BTreeMap::new();
     #[allow(deprecated)]
     if !proto.wc_commit_id.is_empty() {
@@ -414,9 +402,7 @@ pub fn view_from_proto(
 
 // ─── RefTarget helpers ────────────────────────────────────────────────────────
 
-fn ref_target_to_proto(
-    value: &RefTarget,
-) -> Option<jj_lib::protos::simple_op_store::RefTarget> {
+fn ref_target_to_proto(value: &RefTarget) -> Option<jj_lib::protos::simple_op_store::RefTarget> {
     let term_to_proto =
         |term: &Option<CommitId>| jj_lib::protos::simple_op_store::ref_conflict::Term {
             value: term.as_ref().map(|id| id.to_bytes()),
@@ -427,9 +413,7 @@ fn ref_target_to_proto(
         adds: merge.adds().map(term_to_proto).collect(),
     };
     Some(jj_lib::protos::simple_op_store::RefTarget {
-        value: Some(
-            jj_lib::protos::simple_op_store::ref_target::Value::Conflict(conflict_proto),
-        ),
+        value: Some(jj_lib::protos::simple_op_store::ref_target::Value::Conflict(conflict_proto)),
     })
 }
 
@@ -451,10 +435,9 @@ fn ref_target_from_proto(
             RefTarget::from_legacy_form(removes, adds)
         }
         jj_lib::protos::simple_op_store::ref_target::Value::Conflict(conflict) => {
-            let term_from_proto =
-                |term: jj_lib::protos::simple_op_store::ref_conflict::Term| {
-                    term.value.map(CommitId::new)
-                };
+            let term_from_proto = |term: jj_lib::protos::simple_op_store::ref_conflict::Term| {
+                term.value.map(CommitId::new)
+            };
             let removes = conflict.removes.into_iter().map(term_from_proto);
             let adds = conflict.adds.into_iter().map(term_from_proto);
             RefTarget::from_merge(Merge::from_removes_adds(removes, adds))
@@ -551,13 +534,11 @@ fn remote_views_to_proto(
 ) -> Vec<jj_lib::protos::simple_op_store::RemoteView> {
     remote_views
         .iter()
-        .map(
-            |(name, view)| jj_lib::protos::simple_op_store::RemoteView {
-                name: AsRef::<str>::as_ref(name).to_owned(),
-                bookmarks: remote_refs_to_proto(&view.bookmarks),
-                tags: remote_refs_to_proto(&view.tags),
-            },
-        )
+        .map(|(name, view)| jj_lib::protos::simple_op_store::RemoteView {
+            name: AsRef::<str>::as_ref(name).to_owned(),
+            bookmarks: remote_refs_to_proto(&view.bookmarks),
+            tags: remote_refs_to_proto(&view.tags),
+        })
         .collect()
 }
 

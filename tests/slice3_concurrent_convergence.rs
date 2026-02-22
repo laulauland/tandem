@@ -56,7 +56,14 @@ fn find_commit_id_by_description(dir: &Path, desc_substring: &str, home: &Path) 
     let revset = format!("description(substring:\"{desc_substring}\")");
     let out = common::run_tandem_in(
         dir,
-        &["log", "--no-graph", "-r", &revset, "-T", "commit_id ++ \"\\n\""],
+        &[
+            "log",
+            "--no-graph",
+            "-r",
+            &revset,
+            "-T",
+            "commit_id ++ \"\\n\"",
+        ],
         home,
     );
     common::assert_ok(&out, &format!("find commit_id for '{desc_substring}'"));
@@ -332,7 +339,8 @@ fn v1_slice3_five_agents_concurrent_file_writes_all_survive() {
         .collect();
 
     for (i, h) in handles.into_iter().enumerate() {
-        h.join().unwrap_or_else(|_| panic!("agent-{i} thread panicked"));
+        h.join()
+            .unwrap_or_else(|_| panic!("agent-{i} thread panicked"));
     }
 
     // ── Settle: update stale working copies after concurrent ops ──────

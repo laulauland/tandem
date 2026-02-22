@@ -89,7 +89,11 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
     }
 
     // Emit initial log event
-    emit_log(&log_tx, "info", &format!("tandem server listening on {local_addr}"));
+    emit_log(
+        &log_tx,
+        "info",
+        &format!("tandem server listening on {local_addr}"),
+    );
 
     // Signal handling
     let (signal_tx, mut signal_rx) = tokio::sync::mpsc::channel::<()>(2);
@@ -289,8 +293,8 @@ impl Server {
     /// Initialize a new jj+git colocated repo and return its Store.
     fn init_jj_git_repo(repo_path: &Path) -> Result<Arc<jj_lib::store::Store>> {
         let config = jj_lib::config::StackedConfig::with_defaults();
-        let settings = jj_lib::settings::UserSettings::from_config(config)
-            .context("create jj settings")?;
+        let settings =
+            jj_lib::settings::UserSettings::from_config(config).context("create jj settings")?;
 
         let (_workspace, jj_repo) =
             jj_lib::workspace::Workspace::init_colocated_git(&settings, repo_path)
@@ -302,8 +306,8 @@ impl Server {
     /// Load an existing jj+git repo's Store.
     fn load_store(repo_path: &Path) -> Result<Arc<jj_lib::store::Store>> {
         let config = jj_lib::config::StackedConfig::with_defaults();
-        let settings = jj_lib::settings::UserSettings::from_config(config)
-            .context("create jj settings")?;
+        let settings =
+            jj_lib::settings::UserSettings::from_config(config).context("create jj settings")?;
 
         let store_path = dunce::canonicalize(repo_path.join(".jj/repo/store"))
             .context("canonicalize store path")?;
@@ -311,8 +315,7 @@ impl Server {
         let git_backend = jj_lib::git_backend::GitBackend::load(&settings, &store_path)
             .map_err(|e| anyhow!("load git backend: {e}"))?;
 
-        let signer = jj_lib::signing::Signer::from_settings(&settings)
-            .context("create signer")?;
+        let signer = jj_lib::signing::Signer::from_settings(&settings).context("create signer")?;
         let merge_options = jj_lib::tree_merge::MergeOptions::from_settings(&settings)
             .map_err(|e| anyhow!("merge options: {e}"))?;
 
@@ -363,23 +366,17 @@ impl Server {
         match kind {
             "file" => {
                 let file_id = jj_lib::backend::FileId::new(id.to_vec());
-                let mut reader = pollster::block_on(
-                    backend.read_file(&RepoPath::root(), &file_id),
-                )
-                .map_err(|e| anyhow!("read file {}: {e}", to_hex(id)))?;
+                let mut reader = pollster::block_on(backend.read_file(&RepoPath::root(), &file_id))
+                    .map_err(|e| anyhow!("read file {}: {e}", to_hex(id)))?;
                 let mut buf = Vec::new();
-                pollster::block_on(
-                    tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut buf),
-                )
-                .map_err(|e| anyhow!("read file bytes: {e}"))?;
+                pollster::block_on(tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut buf))
+                    .map_err(|e| anyhow!("read file bytes: {e}"))?;
                 Ok(buf)
             }
             "tree" => {
                 let tree_id = TreeId::new(id.to_vec());
-                let tree = pollster::block_on(
-                    backend.read_tree(&RepoPath::root(), &tree_id),
-                )
-                .map_err(|e| anyhow!("read tree {}: {e}", to_hex(id)))?;
+                let tree = pollster::block_on(backend.read_tree(&RepoPath::root(), &tree_id))
+                    .map_err(|e| anyhow!("read tree {}: {e}", to_hex(id)))?;
                 let proto = proto_convert::tree_to_proto(&tree);
                 Ok(proto.encode_to_vec())
             }
@@ -400,10 +397,9 @@ impl Server {
             }
             "symlink" => {
                 let symlink_id = jj_lib::backend::SymlinkId::new(id.to_vec());
-                let target = pollster::block_on(
-                    backend.read_symlink(&RepoPath::root(), &symlink_id),
-                )
-                .map_err(|e| anyhow!("read symlink {}: {e}", to_hex(id)))?;
+                let target =
+                    pollster::block_on(backend.read_symlink(&RepoPath::root(), &symlink_id))
+                        .map_err(|e| anyhow!("read symlink {}: {e}", to_hex(id)))?;
                 Ok(target.into_bytes())
             }
             "copy" => {
@@ -419,20 +415,17 @@ impl Server {
         match kind {
             "file" => {
                 let mut cursor = Cursor::new(data.to_vec());
-                let file_id = pollster::block_on(
-                    backend.write_file(&RepoPath::root(), &mut cursor),
-                )
-                .map_err(|e| anyhow!("write file: {e}"))?;
+                let file_id =
+                    pollster::block_on(backend.write_file(&RepoPath::root(), &mut cursor))
+                        .map_err(|e| anyhow!("write file: {e}"))?;
                 Ok((file_id.as_bytes().to_vec(), data.to_vec()))
             }
             "tree" => {
                 let proto = jj_lib::protos::simple_store::Tree::decode(data)
                     .context("decode tree proto")?;
                 let tree = proto_convert::tree_from_proto(proto);
-                let tree_id = pollster::block_on(
-                    backend.write_tree(&RepoPath::root(), &tree),
-                )
-                .map_err(|e| anyhow!("write tree: {e}"))?;
+                let tree_id = pollster::block_on(backend.write_tree(&RepoPath::root(), &tree))
+                    .map_err(|e| anyhow!("write tree: {e}"))?;
                 // Return the original proto data as normalized (the tree is the same)
                 Ok((tree_id.as_bytes().to_vec(), data.to_vec()))
             }
@@ -440,22 +433,20 @@ impl Server {
                 let proto = jj_lib::protos::simple_store::Commit::decode(data)
                     .context("decode commit proto")?;
                 let commit = proto_convert::commit_from_proto(proto);
-                let (commit_id, stored_commit) = pollster::block_on(
-                    backend.write_commit(commit, None),
-                )
-                .map_err(|e| anyhow!("write commit: {e}"))?;
+                let (commit_id, stored_commit) =
+                    pollster::block_on(backend.write_commit(commit, None))
+                        .map_err(|e| anyhow!("write commit: {e}"))?;
                 // Re-encode the stored commit (may have normalized fields)
                 let stored_proto = jj_lib::simple_backend::commit_to_proto(&stored_commit);
                 let normalized_data = stored_proto.encode_to_vec();
                 Ok((commit_id.as_bytes().to_vec(), normalized_data))
             }
             "symlink" => {
-                let target = std::str::from_utf8(data)
-                    .context("symlink target is not valid UTF-8")?;
-                let symlink_id = pollster::block_on(
-                    backend.write_symlink(&RepoPath::root(), target),
-                )
-                .map_err(|e| anyhow!("write symlink: {e}"))?;
+                let target =
+                    std::str::from_utf8(data).context("symlink target is not valid UTF-8")?;
+                let symlink_id =
+                    pollster::block_on(backend.write_symlink(&RepoPath::root(), target))
+                        .map_err(|e| anyhow!("write symlink: {e}"))?;
                 Ok((symlink_id.as_bytes().to_vec(), data.to_vec()))
             }
             "copy" => {
@@ -480,8 +471,8 @@ impl Server {
         // Decode proto → Operation struct → compute ContentHash-based ID
         let proto = jj_lib::protos::simple_op_store::Operation::decode(data)
             .context("decode operation proto")?;
-        let operation = proto_convert::operation_from_proto(proto)
-            .context("convert operation from proto")?;
+        let operation =
+            proto_convert::operation_from_proto(proto).context("convert operation from proto")?;
 
         let hash = jj_lib::content_hash::blake2b_hash(&operation);
         let id: Vec<u8> = hash.to_vec();
@@ -501,10 +492,9 @@ impl Server {
 
     fn put_view_sync(&self, data: &[u8]) -> Result<Vec<u8>> {
         // Decode proto → View struct → compute ContentHash-based ID
-        let proto = jj_lib::protos::simple_op_store::View::decode(data)
-            .context("decode view proto")?;
-        let view = proto_convert::view_from_proto(proto)
-            .context("convert view from proto")?;
+        let proto =
+            jj_lib::protos::simple_op_store::View::decode(data).context("decode view proto")?;
+        let view = proto_convert::view_from_proto(proto).context("convert view from proto")?;
 
         let hash = jj_lib::content_hash::blake2b_hash(&view);
         let id: Vec<u8> = hash.to_vec();
@@ -565,7 +555,11 @@ impl Server {
         if state.version != expected_version {
             return Ok(UpdateResult {
                 ok: false,
-                heads: state.heads.iter().map(|h| from_hex(h).unwrap_or_default()).collect(),
+                heads: state
+                    .heads
+                    .iter()
+                    .map(|h| from_hex(h).unwrap_or_default())
+                    .collect(),
                 version: state.version,
                 workspace_heads: state.workspace_heads,
             });
@@ -576,11 +570,8 @@ impl Server {
         let new_hex = to_hex(&new_id);
 
         let next_heads = updated_heads(&state.heads, &old_hex, &new_hex);
-        let next_workspace_heads = updated_workspace_heads(
-            &state.workspace_heads,
-            workspace_id.as_deref(),
-            &new_hex,
-        );
+        let next_workspace_heads =
+            updated_workspace_heads(&state.workspace_heads, workspace_id.as_deref(), &new_hex);
 
         let next_state = HeadsState {
             version: state.version + 1,
@@ -735,7 +726,11 @@ impl store::Server for StoreImpl {
 
         match self.server.get_object_sync(kind_str, id_bytes) {
             Ok(data) => {
-                emit_log(&self.log_tx, "debug", &format!("getObject {kind_str} size={}", data.len()));
+                emit_log(
+                    &self.log_tx,
+                    "debug",
+                    &format!("getObject {kind_str} size={}", data.len()),
+                );
                 results.get().set_data(&data);
                 Promise::ok(())
             }
@@ -755,7 +750,11 @@ impl store::Server for StoreImpl {
 
         match self.server.put_object_sync(kind_str, &data) {
             Ok((id, normalized)) => {
-                emit_log(&self.log_tx, "info", &format!("putObject {kind_str} size={}", data.len()));
+                emit_log(
+                    &self.log_tx,
+                    "info",
+                    &format!("putObject {kind_str} size={}", data.len()),
+                );
                 let mut r = results.get();
                 r.set_id(&id);
                 r.set_normalized_data(&normalized);
@@ -928,7 +927,11 @@ impl store::Server for StoreImpl {
             .update_op_heads_sync(old_ids, new_id, expected_version, workspace_id)
         {
             Ok(result) => {
-                emit_log(&self.log_tx, "info", &format!("updateOpHeads ok={} version={}", result.ok, result.version));
+                emit_log(
+                    &self.log_tx,
+                    "info",
+                    &format!("updateOpHeads ok={} version={}", result.ok, result.version),
+                );
                 let mut r = results.get();
                 r.set_ok(result.ok);
                 {
@@ -939,8 +942,7 @@ impl store::Server for StoreImpl {
                 }
                 r.set_version(result.version);
                 {
-                    let mut wh =
-                        r.init_workspace_heads(result.workspace_heads.len() as u32);
+                    let mut wh = r.init_workspace_heads(result.workspace_heads.len() as u32);
                     for (i, (ws_id, commit_hex)) in result.workspace_heads.iter().enumerate() {
                         let mut entry = wh.reborrow().get(i as u32);
                         entry.set_workspace_id(ws_id);
@@ -991,8 +993,7 @@ impl store::Server for StoreImpl {
             });
         }
 
-        self.server
-            .register_watcher(watcher, current_state.version);
+        self.server.register_watcher(watcher, current_state.version);
 
         let cancel_impl = CancelImpl {
             server: self.server.clone(),

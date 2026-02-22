@@ -22,20 +22,12 @@ fn slice13_logs_not_running() {
     let sock = tmp.path().join("nonexistent.sock");
     let sock_str = sock.to_str().unwrap();
 
-    let out = common::run_tandem_in(
-        tmp.path(),
-        &["logs", "--control-socket", sock_str],
-        &home,
-    );
+    let out = common::run_tandem_in(tmp.path(), &["logs", "--control-socket", sock_str], &home);
     assert!(
         !out.status.success(),
         "tandem logs with no daemon should exit 1"
     );
-    let combined = format!(
-        "{}{}",
-        common::stdout_str(&out),
-        common::stderr_str(&out)
-    );
+    let combined = format!("{}{}", common::stdout_str(&out), common::stderr_str(&out));
     assert!(
         combined.contains("not running") || combined.contains("no tandem daemon running"),
         "should mention not running\noutput: {combined}"
@@ -56,12 +48,8 @@ fn slice13_logs_json_streams_events() {
     let sock = common::control_socket_path(tmp.path());
     let sock_str = sock.to_str().unwrap();
 
-    let mut server = common::spawn_server_with_args(
-        &server_repo,
-        &addr,
-        &["--control-socket", sock_str],
-        &home,
-    );
+    let mut server =
+        common::spawn_server_with_args(&server_repo, &addr, &["--control-socket", sock_str], &home);
     common::wait_for_server(&addr, &mut server);
     common::wait_for_socket(&sock, Duration::from_secs(5));
 
@@ -131,12 +119,8 @@ fn slice13_logs_exits_on_shutdown() {
     let sock = common::control_socket_path(tmp.path());
     let sock_str = sock.to_str().unwrap();
 
-    let mut server = common::spawn_server_with_args(
-        &server_repo,
-        &addr,
-        &["--control-socket", sock_str],
-        &home,
-    );
+    let mut server =
+        common::spawn_server_with_args(&server_repo, &addr, &["--control-socket", sock_str], &home);
     common::wait_for_server(&addr, &mut server);
     common::wait_for_socket(&sock, Duration::from_secs(5));
 
@@ -185,25 +169,35 @@ fn slice13_logs_level_filtering() {
     let sock = common::control_socket_path(tmp.path());
     let sock_str = sock.to_str().unwrap();
 
-    let mut server = common::spawn_server_with_args(
-        &server_repo,
-        &addr,
-        &["--control-socket", sock_str],
-        &home,
-    );
+    let mut server =
+        common::spawn_server_with_args(&server_repo, &addr, &["--control-socket", sock_str], &home);
     common::wait_for_server(&addr, &mut server);
     common::wait_for_socket(&sock, Duration::from_secs(5));
 
     // Start logs at debug level
     let mut debug_cmd = Command::new(common::tandem_bin());
-    debug_cmd.args(["logs", "--json", "--level", "debug", "--control-socket", sock_str]);
+    debug_cmd.args([
+        "logs",
+        "--json",
+        "--level",
+        "debug",
+        "--control-socket",
+        sock_str,
+    ]);
     common::isolate_env(&mut debug_cmd, &home);
     debug_cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut debug_child = debug_cmd.spawn().expect("spawn debug logs");
 
     // Start logs at warn level
     let mut warn_cmd = Command::new(common::tandem_bin());
-    warn_cmd.args(["logs", "--json", "--level", "warn", "--control-socket", sock_str]);
+    warn_cmd.args([
+        "logs",
+        "--json",
+        "--level",
+        "warn",
+        "--control-socket",
+        sock_str,
+    ]);
     common::isolate_env(&mut warn_cmd, &home);
     warn_cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut warn_child = warn_cmd.spawn().expect("spawn warn logs");
@@ -233,7 +227,10 @@ fn slice13_logs_level_filtering() {
     let debug_stdout = String::from_utf8_lossy(&debug_out.stdout).to_string();
     let warn_stdout = String::from_utf8_lossy(&warn_out.stdout).to_string();
 
-    let debug_count = debug_stdout.lines().filter(|l| !l.trim().is_empty()).count();
+    let debug_count = debug_stdout
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .count();
     let warn_count = warn_stdout.lines().filter(|l| !l.trim().is_empty()).count();
 
     // Debug should have at least as many lines as warn (usually more)

@@ -54,7 +54,9 @@ fn slice5_watch_heads_notifications() {
 
     // Kill the watch process and collect its output
     let _ = watch_proc.kill();
-    let output = watch_proc.wait_with_output().expect("wait for watch process");
+    let output = watch_proc
+        .wait_with_output()
+        .expect("wait for watch process");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -151,7 +153,9 @@ fn slice5_watch_catches_up_on_existing_heads() {
     std::thread::sleep(Duration::from_millis(1000));
 
     let _ = watch_proc.kill();
-    let output = watch_proc.wait_with_output().expect("wait for watch process");
+    let output = watch_proc
+        .wait_with_output()
+        .expect("wait for watch process");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -171,7 +175,10 @@ fn slice5_watch_catches_up_on_existing_heads() {
 
     // The catch-up notification should have heads (non-empty)
     let first = notifications[0];
-    let heads_part = first.split("heads=").nth(1).expect("heads= in notification");
+    let heads_part = first
+        .split("heads=")
+        .nth(1)
+        .expect("heads= in notification");
     assert!(
         !heads_part.is_empty(),
         "catch-up notification should have non-empty heads"

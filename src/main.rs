@@ -188,7 +188,9 @@ fn main() -> ExitCode {
     // argument parsing — this avoids conflicts with jj global flags like
     // --no-pager, --color, -R that appear before the subcommand.
     match args.get(1).map(|s| s.as_str()) {
-        None | Some("serve" | "init" | "watch" | "up" | "down" | "status" | "logs" | "--help" | "-h") => {}
+        None
+        | Some("serve" | "init" | "watch" | "up" | "down" | "status" | "logs" | "--help" | "-h") => {
+        }
         _ => return run_jj(),
     }
 
@@ -207,7 +209,15 @@ fn main() -> ExitCode {
             control_socket,
             daemon,
             log_file,
-        }) => run_serve(&listen, &repo, &log_level, &log_format, control_socket.as_deref(), daemon, log_file.as_deref()),
+        }) => run_serve(
+            &listen,
+            &repo,
+            &log_level,
+            &log_format,
+            control_socket.as_deref(),
+            daemon,
+            log_file.as_deref(),
+        ),
         Some(Commands::Init {
             tandem_server,
             workspace,
@@ -220,7 +230,13 @@ fn main() -> ExitCode {
             log_level,
             log_file,
             control_socket,
-        }) => run_up(&repo, &listen, &log_level, log_file.as_deref(), control_socket.as_deref()),
+        }) => run_up(
+            &repo,
+            &listen,
+            &log_level,
+            log_file.as_deref(),
+            control_socket.as_deref(),
+        ),
         Some(Commands::Down { control_socket }) => run_down(control_socket.as_deref()),
         Some(Commands::Status {
             json,
@@ -556,32 +572,35 @@ fn run_tandem_init(server_addr: &str, workspace_name: &str, workspace_path_str: 
     let backend_init: &dyn Fn(
         &jj_lib::settings::UserSettings,
         &Path,
-    ) -> Result<Box<dyn jj_lib::backend::Backend>, jj_lib::backend::BackendInitError> =
-        &|_settings, store_path| {
-            Ok(Box::new(backend::TandemBackend::init(store_path, &sa1)?))
-        };
+    ) -> Result<
+        Box<dyn jj_lib::backend::Backend>,
+        jj_lib::backend::BackendInitError,
+    > = &|_settings, store_path| Ok(Box::new(backend::TandemBackend::init(store_path, &sa1)?));
 
     let op_store_init: &dyn Fn(
         &jj_lib::settings::UserSettings,
         &Path,
         jj_lib::op_store::RootOperationData,
-    ) -> Result<Box<dyn jj_lib::op_store::OpStore>, jj_lib::backend::BackendInitError> =
-        &|_settings, store_path, root_data| {
-            Ok(Box::new(op_store::TandemOpStore::init(
-                store_path, &sa2, root_data,
-            )?))
-        };
+    ) -> Result<
+        Box<dyn jj_lib::op_store::OpStore>,
+        jj_lib::backend::BackendInitError,
+    > = &|_settings, store_path, root_data| {
+        Ok(Box::new(op_store::TandemOpStore::init(
+            store_path, &sa2, root_data,
+        )?))
+    };
 
     let op_heads_init: &dyn Fn(
         &jj_lib::settings::UserSettings,
         &Path,
-    )
-        -> Result<Box<dyn jj_lib::op_heads_store::OpHeadsStore>, jj_lib::backend::BackendInitError> =
-        &|_settings, store_path| {
-            Ok(Box::new(
-                op_heads_store::TandemOpHeadsStore::init(store_path, &sa3)?,
-            ))
-        };
+    ) -> Result<
+        Box<dyn jj_lib::op_heads_store::OpHeadsStore>,
+        jj_lib::backend::BackendInitError,
+    > = &|_settings, store_path| {
+        Ok(Box::new(op_heads_store::TandemOpHeadsStore::init(
+            store_path, &sa3,
+        )?))
+    };
 
     match jj_lib::workspace::Workspace::init_with_factories(
         &settings,
@@ -631,7 +650,9 @@ fn tandem_factories() -> jj_lib::repo::StoreFactories {
     factories.add_backend(
         "tandem",
         Box::new(|settings, store_path| {
-            Ok(Box::new(backend::TandemBackend::load(settings, store_path)?))
+            Ok(Box::new(backend::TandemBackend::load(
+                settings, store_path,
+            )?))
         }),
     );
 
@@ -647,9 +668,9 @@ fn tandem_factories() -> jj_lib::repo::StoreFactories {
     factories.add_op_heads_store(
         "tandem_op_heads_store",
         Box::new(|settings, store_path| {
-            Ok(Box::new(
-                op_heads_store::TandemOpHeadsStore::load(settings, store_path)?,
-            ))
+            Ok(Box::new(op_heads_store::TandemOpHeadsStore::load(
+                settings, store_path,
+            )?))
         }),
     );
 

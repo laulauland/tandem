@@ -24,12 +24,8 @@ fn slice11_status_json_while_running() {
     let sock = common::control_socket_path(tmp.path());
     let sock_str = sock.to_str().unwrap();
 
-    let mut server = common::spawn_server_with_args(
-        &server_repo,
-        &addr,
-        &["--control-socket", sock_str],
-        &home,
-    );
+    let mut server =
+        common::spawn_server_with_args(&server_repo, &addr, &["--control-socket", sock_str], &home);
     common::wait_for_server(&addr, &mut server);
     common::wait_for_socket(&sock, Duration::from_secs(5));
 
@@ -75,20 +71,13 @@ fn slice11_status_human_while_running() {
     let sock = common::control_socket_path(tmp.path());
     let sock_str = sock.to_str().unwrap();
 
-    let mut server = common::spawn_server_with_args(
-        &server_repo,
-        &addr,
-        &["--control-socket", sock_str],
-        &home,
-    );
+    let mut server =
+        common::spawn_server_with_args(&server_repo, &addr, &["--control-socket", sock_str], &home);
     common::wait_for_server(&addr, &mut server);
     common::wait_for_socket(&sock, Duration::from_secs(5));
 
-    let status_out = common::run_tandem_in(
-        tmp.path(),
-        &["status", "--control-socket", sock_str],
-        &home,
-    );
+    let status_out =
+        common::run_tandem_in(tmp.path(), &["status", "--control-socket", sock_str], &home);
     common::assert_ok(&status_out, "tandem status");
 
     let out = common::stdout_str(&status_out);
@@ -116,11 +105,8 @@ fn slice11_status_not_running() {
     let sock = tmp.path().join("nonexistent.sock");
     let sock_str = sock.to_str().unwrap();
 
-    let status_out = common::run_tandem_in(
-        tmp.path(),
-        &["status", "--control-socket", sock_str],
-        &home,
-    );
+    let status_out =
+        common::run_tandem_in(tmp.path(), &["status", "--control-socket", sock_str], &home);
 
     assert!(
         !status_out.status.success(),
@@ -150,12 +136,8 @@ fn slice11_socket_cleaned_up_on_exit() {
     let sock = common::control_socket_path(tmp.path());
     let sock_str = sock.to_str().unwrap();
 
-    let mut server = common::spawn_server_with_args(
-        &server_repo,
-        &addr,
-        &["--control-socket", sock_str],
-        &home,
-    );
+    let mut server =
+        common::spawn_server_with_args(&server_repo, &addr, &["--control-socket", sock_str], &home);
     common::wait_for_server(&addr, &mut server);
     common::wait_for_socket(&sock, Duration::from_secs(5));
 
@@ -188,12 +170,8 @@ fn slice11_status_reports_correct_info() {
     let sock = common::control_socket_path(tmp.path());
     let sock_str = sock.to_str().unwrap();
 
-    let mut server = common::spawn_server_with_args(
-        &server_repo,
-        &addr,
-        &["--control-socket", sock_str],
-        &home,
-    );
+    let mut server =
+        common::spawn_server_with_args(&server_repo, &addr, &["--control-socket", sock_str], &home);
     common::wait_for_server(&addr, &mut server);
     common::wait_for_socket(&sock, Duration::from_secs(5));
 

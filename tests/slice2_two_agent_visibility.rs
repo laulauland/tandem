@@ -30,7 +30,14 @@ fn v1_slice2_two_agent_file_visibility() {
     // ── Initialize Agent A workspace ──────────────────────────────────────
     let init_a = common::run_tandem_in(
         &agent_a_dir,
-        &["init", "--tandem-server", &addr, "--workspace", "agent-a", "."],
+        &[
+            "init",
+            "--tandem-server",
+            &addr,
+            "--workspace",
+            "agent-a",
+            ".",
+        ],
         &home,
     );
     common::assert_ok(&init_a, "agent-a init");
@@ -45,7 +52,14 @@ fn v1_slice2_two_agent_file_visibility() {
     // ── Initialize Agent B workspace ──────────────────────────────────────
     let init_b = common::run_tandem_in(
         &agent_b_dir,
-        &["init", "--tandem-server", &addr, "--workspace", "agent-b", "."],
+        &[
+            "init",
+            "--tandem-server",
+            &addr,
+            "--workspace",
+            "agent-b",
+            ".",
+        ],
         &home,
     );
     common::assert_ok(&init_b, "agent-b init");
@@ -98,11 +112,7 @@ fn v1_slice2_two_agent_file_visibility() {
     );
 
     // ── Agent B sees Agent A's commit ─────────────────────────────────────
-    let log_b = common::run_tandem_in(
-        &agent_b_dir,
-        &["log", "--no-graph", "-r", "all()"],
-        &home,
-    );
+    let log_b = common::run_tandem_in(&agent_b_dir, &["log", "--no-graph", "-r", "all()"], &home);
     common::assert_ok(&log_b, "agent-b log");
     let log_b_text = common::stdout_str(&log_b);
     assert!(
@@ -173,11 +183,8 @@ fn v1_slice2_two_agent_file_visibility() {
     );
 
     // ── Both agents see both commits in their logs ────────────────────────
-    let log_a_final = common::run_tandem_in(
-        &agent_a_dir,
-        &["log", "--no-graph", "-r", "all()"],
-        &home,
-    );
+    let log_a_final =
+        common::run_tandem_in(&agent_a_dir, &["log", "--no-graph", "-r", "all()"], &home);
     common::assert_ok(&log_a_final, "agent-a final log");
     let log_a_text = common::stdout_str(&log_a_final);
     assert!(
@@ -189,11 +196,8 @@ fn v1_slice2_two_agent_file_visibility() {
         "Agent A's final log should show 'add api'\n{log_a_text}"
     );
 
-    let log_b_final = common::run_tandem_in(
-        &agent_b_dir,
-        &["log", "--no-graph", "-r", "all()"],
-        &home,
-    );
+    let log_b_final =
+        common::run_tandem_in(&agent_b_dir, &["log", "--no-graph", "-r", "all()"], &home);
     common::assert_ok(&log_b_final, "agent-b final log");
     let log_b_final_text = common::stdout_str(&log_b_final);
     assert!(
@@ -210,11 +214,7 @@ fn v1_slice2_two_agent_file_visibility() {
     // After the op merge, each agent's tree is independent, but
     // cross-reading via change_id works (already verified above).
     // Additionally check that diff shows file additions:
-    let diff_a = common::run_tandem_in(
-        &agent_a_dir,
-        &["diff", "-r", &change_a_id],
-        &home,
-    );
+    let diff_a = common::run_tandem_in(&agent_a_dir, &["diff", "-r", &change_a_id], &home);
     common::assert_ok(&diff_a, "agent-a diff on auth commit");
     let diff_a_text = common::stdout_str(&diff_a);
     assert!(
@@ -222,11 +222,7 @@ fn v1_slice2_two_agent_file_visibility() {
         "diff of Agent A's commit should show auth.rs\n{diff_a_text}"
     );
 
-    let diff_b = common::run_tandem_in(
-        &agent_b_dir,
-        &["diff", "-r", &change_b_id],
-        &home,
-    );
+    let diff_b = common::run_tandem_in(&agent_b_dir, &["diff", "-r", &change_b_id], &home);
     common::assert_ok(&diff_b, "agent-b diff on api commit");
     let diff_b_text = common::stdout_str(&diff_b);
     assert!(

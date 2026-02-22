@@ -95,7 +95,14 @@ fn slice6_git_round_trip_server_has_real_git_objects() {
     // First, find the commit on the client side (we know this works)
     let client_log_ids = common::run_tandem_in(
         &workspace_dir,
-        &["log", "--no-graph", "-r", "@-", "-T", "commit_id ++ \"\\n\""],
+        &[
+            "log",
+            "--no-graph",
+            "-r",
+            "@-",
+            "-T",
+            "commit_id ++ \"\\n\"",
+        ],
         &home,
     );
     common::assert_ok(&client_log_ids, "client jj log for commit id");
@@ -111,10 +118,13 @@ fn slice6_git_round_trip_server_has_real_git_objects() {
     let server_log_ids = common::run_tandem_in_with_env(
         &server_repo,
         &[
-            "log", "--ignore-working-copy",
+            "log",
+            "--ignore-working-copy",
             "--no-graph",
-            "-r", &commit_id,
-            "-T", "description",
+            "-r",
+            &commit_id,
+            "-T",
+            "description",
         ],
         &[],
         &home,
@@ -129,7 +139,14 @@ fn slice6_git_round_trip_server_has_real_git_objects() {
     // Read the file from the server repo using jj
     let server_cat = common::run_tandem_in_with_env(
         &server_repo,
-        &["file", "show", "--ignore-working-copy", "-r", &commit_id, "src/feature.rs"],
+        &[
+            "file",
+            "show",
+            "--ignore-working-copy",
+            "-r",
+            &commit_id,
+            "src/feature.rs",
+        ],
         &[],
         &home,
     );
@@ -172,7 +189,14 @@ fn slice6_git_round_trip_server_has_real_git_objects() {
     // Create a bookmark on the server repo pointing to the commit
     let bookmark_create = common::run_tandem_in_with_env(
         &server_repo,
-        &["bookmark", "create", "--ignore-working-copy", "main", "-r", &commit_id],
+        &[
+            "bookmark",
+            "create",
+            "--ignore-working-copy",
+            "main",
+            "-r",
+            &commit_id,
+        ],
         &[],
         &home,
     );
@@ -191,13 +215,17 @@ fn slice6_git_round_trip_server_has_real_git_objects() {
     let clone_dir = tmp.path().join("clone");
     let git_clone = common::run_git_in(
         tmp.path(),
-        &["clone", bare_remote.to_str().unwrap(), clone_dir.to_str().unwrap()],
+        &[
+            "clone",
+            bare_remote.to_str().unwrap(),
+            clone_dir.to_str().unwrap(),
+        ],
     );
     common::assert_ok(&git_clone, "git clone");
 
     // Verify the file exists in the clone with correct content
-    let cloned_content = std::fs::read(clone_dir.join("src/feature.rs"))
-        .expect("feature.rs should exist in clone");
+    let cloned_content =
+        std::fs::read(clone_dir.join("src/feature.rs")).expect("feature.rs should exist in clone");
     assert_eq!(
         cloned_content, file_content,
         "cloned file should have exact same bytes"
@@ -257,20 +285,26 @@ fn slice6_multiple_files_git_round_trip() {
         ("src/api.rs", &api_content[..]),
         ("README.md", &readme_content[..]),
     ] {
-        let cat = common::run_tandem_in(
-            &workspace_dir,
-            &["file", "show", "-r", "@-", path],
-            &home,
-        );
+        let cat = common::run_tandem_in(&workspace_dir, &["file", "show", "-r", "@-", path], &home);
         common::assert_ok(&cat, &format!("client file show {path}"));
-        assert_eq!(cat.stdout, expected, "file {path} content mismatch via client");
+        assert_eq!(
+            cat.stdout, expected,
+            "file {path} content mismatch via client"
+        );
     }
 
     // Verify all files via server jj
     // Get commit ID from the client side (same approach as first test)
     let client_log_ids = common::run_tandem_in(
         &workspace_dir,
-        &["log", "--no-graph", "-r", "@-", "-T", "commit_id ++ \"\\n\""],
+        &[
+            "log",
+            "--no-graph",
+            "-r",
+            "@-",
+            "-T",
+            "commit_id ++ \"\\n\"",
+        ],
         &home,
     );
     common::assert_ok(&client_log_ids, "client jj log for commit id");
@@ -286,18 +320,31 @@ fn slice6_multiple_files_git_round_trip() {
     ] {
         let cat = common::run_tandem_in_with_env(
             &server_repo,
-            &["file", "show", "--ignore-working-copy", "-r", &commit_id, path],
+            &[
+                "file",
+                "show",
+                "--ignore-working-copy",
+                "-r",
+                &commit_id,
+                path,
+            ],
             &[],
             &home,
         );
         common::assert_ok(&cat, &format!("server file show {path}"));
-        assert_eq!(cat.stdout, expected, "file {path} content mismatch via server");
+        assert_eq!(
+            cat.stdout, expected,
+            "file {path} content mismatch via server"
+        );
     }
 
     // Git push and verify
     let bare_remote = tmp.path().join("bare-remote.git");
     common::assert_ok(
-        &common::run_git_in(tmp.path(), &["init", "--bare", bare_remote.to_str().unwrap()]),
+        &common::run_git_in(
+            tmp.path(),
+            &["init", "--bare", bare_remote.to_str().unwrap()],
+        ),
         "git init --bare",
     );
     common::assert_ok(
@@ -310,7 +357,14 @@ fn slice6_multiple_files_git_round_trip() {
     common::assert_ok(
         &common::run_tandem_in_with_env(
             &server_repo,
-            &["bookmark", "create", "--ignore-working-copy", "main", "-r", &commit_id],
+            &[
+                "bookmark",
+                "create",
+                "--ignore-working-copy",
+                "main",
+                "-r",
+                &commit_id,
+            ],
             &[],
             &home,
         ),
@@ -331,7 +385,11 @@ fn slice6_multiple_files_git_round_trip() {
     common::assert_ok(
         &common::run_git_in(
             tmp.path(),
-            &["clone", bare_remote.to_str().unwrap(), clone_dir.to_str().unwrap()],
+            &[
+                "clone",
+                bare_remote.to_str().unwrap(),
+                clone_dir.to_str().unwrap(),
+            ],
         ),
         "git clone",
     );

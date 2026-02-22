@@ -65,11 +65,8 @@ fn slice12_up_status_down() {
     assert_eq!(parsed["running"], true);
 
     // tandem down
-    let down_out = common::run_tandem_in(
-        tmp.path(),
-        &["down", "--control-socket", sock_str],
-        &home,
-    );
+    let down_out =
+        common::run_tandem_in(tmp.path(), &["down", "--control-socket", sock_str], &home);
     common::assert_ok(&down_out, "tandem down");
     let down_text = format!(
         "{}{}",
@@ -85,11 +82,8 @@ fn slice12_up_status_down() {
     std::thread::sleep(Duration::from_millis(500));
 
     // tandem status should show not running
-    let status_after = common::run_tandem_in(
-        tmp.path(),
-        &["status", "--control-socket", sock_str],
-        &home,
-    );
+    let status_after =
+        common::run_tandem_in(tmp.path(), &["status", "--control-socket", sock_str], &home);
     assert!(
         !status_after.status.success(),
         "status should exit 1 after down"
@@ -151,26 +145,15 @@ fn slice12_up_twice_errors() {
         ],
         &home,
     );
-    assert!(
-        !up2.status.success(),
-        "second tandem up should fail"
-    );
-    let combined = format!(
-        "{}{}",
-        common::stdout_str(&up2),
-        common::stderr_str(&up2)
-    );
+    assert!(!up2.status.success(), "second tandem up should fail");
+    let combined = format!("{}{}", common::stdout_str(&up2), common::stderr_str(&up2));
     assert!(
         combined.contains("already running"),
         "should say 'already running'\noutput: {combined}"
     );
 
     // Cleanup: bring it down
-    let _ = common::run_tandem_in(
-        tmp.path(),
-        &["down", "--control-socket", sock_str],
-        &home,
-    );
+    let _ = common::run_tandem_in(tmp.path(), &["down", "--control-socket", sock_str], &home);
     std::thread::sleep(Duration::from_millis(500));
 }
 
@@ -231,20 +214,14 @@ fn slice12_up_roundtrip_down() {
     assert_eq!(cat.stdout, b"daemon test\n", "file content round-trip");
 
     // Bring it down
-    let down_out = common::run_tandem_in(
-        tmp.path(),
-        &["down", "--control-socket", sock_str],
-        &home,
-    );
+    let down_out =
+        common::run_tandem_in(tmp.path(), &["down", "--control-socket", sock_str], &home);
     common::assert_ok(&down_out, "tandem down");
     std::thread::sleep(Duration::from_millis(500));
 
     // Verify stopped
-    let status = common::run_tandem_in(
-        tmp.path(),
-        &["status", "--control-socket", sock_str],
-        &home,
-    );
+    let status =
+        common::run_tandem_in(tmp.path(), &["status", "--control-socket", sock_str], &home);
     assert!(!status.status.success(), "status should fail after down");
 }
 
@@ -257,11 +234,8 @@ fn slice12_down_not_running() {
     let sock = tmp.path().join("nonexistent.sock");
     let sock_str = sock.to_str().unwrap();
 
-    let down_out = common::run_tandem_in(
-        tmp.path(),
-        &["down", "--control-socket", sock_str],
-        &home,
-    );
+    let down_out =
+        common::run_tandem_in(tmp.path(), &["down", "--control-socket", sock_str], &home);
     assert!(
         !down_out.status.success(),
         "tandem down with no daemon should exit 1"

@@ -69,16 +69,12 @@ fn read_server_address(store_path: &Path) -> Result<String, BackendLoadError> {
 
 impl TandemBackend {
     /// Initialize a new tandem backend (called during workspace init).
-    pub fn init(
-        store_path: &Path,
-        server_addr: &str,
-    ) -> Result<Self, BackendInitError> {
+    pub fn init(store_path: &Path, server_addr: &str) -> Result<Self, BackendInitError> {
         // Write server address for future loads
         std::fs::write(store_path.join("server_address"), server_addr)
             .map_err(|e| BackendInitError(e.into()))?;
 
-        let client = TandemClient::connect(server_addr)
-            .map_err(|e| BackendInitError(e.into()))?;
+        let client = TandemClient::connect(server_addr).map_err(|e| BackendInitError(e.into()))?;
         let info = client
             .get_repo_info()
             .map_err(|e| BackendInitError(e.into()))?;
@@ -94,13 +90,9 @@ impl TandemBackend {
     }
 
     /// Load an existing tandem backend from `store_path`.
-    pub fn load(
-        _settings: &UserSettings,
-        store_path: &Path,
-    ) -> Result<Self, BackendLoadError> {
+    pub fn load(_settings: &UserSettings, store_path: &Path) -> Result<Self, BackendLoadError> {
         let server_addr = read_server_address(store_path)?;
-        let client = TandemClient::connect(&server_addr)
-            .map_err(|e| BackendLoadError(e.into()))?;
+        let client = TandemClient::connect(&server_addr).map_err(|e| BackendLoadError(e.into()))?;
         let info = client
             .get_repo_info()
             .map_err(|e| BackendLoadError(e.into()))?;

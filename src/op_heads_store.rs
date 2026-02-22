@@ -60,13 +60,9 @@ impl TandemOpHeadsStore {
     }
 
     /// Load an existing tandem op heads store from `store_path`.
-    pub fn load(
-        _settings: &UserSettings,
-        store_path: &Path,
-    ) -> Result<Self, BackendLoadError> {
+    pub fn load(_settings: &UserSettings, store_path: &Path) -> Result<Self, BackendLoadError> {
         let server_addr = read_server_address(store_path)?;
-        let client =
-            TandemClient::connect(&server_addr).map_err(|e| BackendLoadError(e.into()))?;
+        let client = TandemClient::connect(&server_addr).map_err(|e| BackendLoadError(e.into()))?;
         Ok(Self { client })
     }
 }
@@ -87,12 +83,13 @@ impl OpHeadsStore for TandemOpHeadsStore {
 
         // Retry loop for CAS conflicts
         for _attempt in 0..20 {
-            let (_current_heads, version) = self.client.get_heads().map_err(|e| {
-                OpHeadsStoreError::Write {
-                    new_op_id: new_id.clone(),
-                    source: e.into(),
-                }
-            })?;
+            let (_current_heads, version) =
+                self.client
+                    .get_heads()
+                    .map_err(|e| OpHeadsStoreError::Write {
+                        new_op_id: new_id.clone(),
+                        source: e.into(),
+                    })?;
 
             let result = self
                 .client
