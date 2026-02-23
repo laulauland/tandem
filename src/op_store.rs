@@ -64,9 +64,7 @@ impl TandemOpStore {
 
         let client = TandemClient::connect(server_addr)
             .map_err(|e| jj_lib::backend::BackendInitError(e.into()))?;
-        let info = client
-            .get_repo_info()
-            .map_err(|e| jj_lib::backend::BackendInitError(e.into()))?;
+        let info = client.repo_info().clone();
 
         Ok(Self {
             client,
@@ -84,9 +82,7 @@ impl TandemOpStore {
     ) -> Result<Self, BackendLoadError> {
         let server_addr = read_server_address(store_path)?;
         let client = TandemClient::connect(&server_addr).map_err(|e| BackendLoadError(e.into()))?;
-        let info = client
-            .get_repo_info()
-            .map_err(|e| BackendLoadError(e.into()))?;
+        let info = client.repo_info().clone();
 
         Ok(Self {
             client,

@@ -12,23 +12,65 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
-fn run_tandem_in_resilient(dir: &std::path::Path, args: &[&str], home: &std::path::Path) {
-    let out = common::run_tandem_in(dir, args, home);
-    if out.status.success() {
-        return;
-    }
-    let err = common::stderr_str(&out).to_lowercase();
-    if err.contains("working copy is stale") || err.contains("update-stale") {
-        let update = common::run_tandem_in(dir, &["workspace", "update-stale"], home);
-        common::assert_ok(&update, "workspace update-stale for resilient run");
-        let retry = common::run_tandem_in(dir, args, home);
-        common::assert_ok(&retry, "retry tandem command after update-stale");
+const RESILIENT_MAX_RETRIES: usize = 10;
+
+fn hinted_op_integrate_id(stderr: &str) -> Option<String> {
+    let marker = "jj op integrate ";
+    let line = stderr.lines().find(|line| line.contains(marker))?;
+    let suffix = line.split(marker).nth(1)?;
+    let op_id = suffix.split('`').next()?.trim();
+    if op_id.is_empty() {
+        None
     } else {
-        common::assert_ok(&out, "tandem command");
+        Some(op_id.to_string())
     }
 }
 
-fn wait_for_conflicted_integration(workspace_dir: &std::path::Path, home: &std::path::Path) {
+fn reconcile_workspace_state(dir: &std::path::Path, home: &std::path::Path, stderr: &str) -> bool {
+    let lower = stderr.to_lowercase();
+    let retriable = lower.contains("working copy is stale")
+        || lower.contains("update-stale")
+        || lower.contains("seems to be a sibling of the working copy's operation")
+        || (lower.contains("reconcile divergent operation heads")
+            && lower.contains("already exists"));
+    if !retriable {
+        return false;
+    }
+
+    if let Some(op_id) = hinted_op_integrate_id(stderr) {
+        let _ = common::run_tandem_in(dir, &["op", "integrate", &op_id], home);
+    }
+    let _ = common::run_tandem_in(dir, &["workspace", "update-stale"], home);
+    true
+}
+
+fn run_tandem_in_resilient(
+    dir: &std::path::Path,
+    args: &[&str],
+    home: &std::path::Path,
+) -> std::process::Output {
+    for attempt in 0..=RESILIENT_MAX_RETRIES {
+        let out = common::run_tandem_in(dir, args, home);
+        if out.status.success() {
+            return out;
+        }
+
+        let stderr = common::stderr_str(&out);
+        let retriable = reconcile_workspace_state(dir, home, &stderr);
+        if !retriable || attempt == RESILIENT_MAX_RETRIES {
+            return out;
+        }
+
+        thread::sleep(Duration::from_millis(20 * (attempt as u64 + 1)));
+    }
+
+    unreachable!("retry loop must return")
+}
+
+fn wait_for_conflicted_integration_commit_id(
+    workspace_dir: &std::path::Path,
+    home: &std::path::Path,
+) -> String {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let out = common::run_tandem_in(
@@ -36,22 +78,28 @@ fn wait_for_conflicted_integration(workspace_dir: &std::path::Path, home: &std::
             &[
                 "log",
                 "-r",
-                "integration",
+                "bookmarks(integration)",
                 "--no-graph",
                 "-T",
-                "conflict ++ \"\\n\"",
+                "if(conflict, commit_id ++ \"\\n\", \"\")",
             ],
             home,
         );
         if out.status.success() {
-            let value = common::stdout_str(&out).trim().to_string();
-            if value == "true" {
-                return;
+            if let Some(commit_id) = common::stdout_str(&out)
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+            {
+                return commit_id.to_string();
             }
+        } else {
+            let stderr = common::stderr_str(&out);
+            let _ = reconcile_workspace_state(workspace_dir, home, &stderr);
         }
         if Instant::now() > deadline {
             panic!(
-                "integration bookmark did not become conflicted\nstdout:\n{}\nstderr:\n{}",
+                "integration bookmark did not expose conflicted revisions\nstdout:\n{}\nstderr:\n{}",
                 common::stdout_str(&out),
                 common::stderr_str(&out)
             );
@@ -102,8 +150,11 @@ fn slice17_conflicting_workspace_inputs_surface_integration_conflict() {
     let handle_a = thread::spawn(move || {
         std::fs::write(a_dir.join("conflict.txt"), b"value from agent A\n").unwrap();
         barrier_a.wait();
-        run_tandem_in_resilient(&a_dir, &["describe", "-m", "agent-a conflict"], &home_a);
-        run_tandem_in_resilient(&a_dir, &["new"], &home_a);
+        let describe =
+            run_tandem_in_resilient(&a_dir, &["describe", "-m", "agent-a conflict"], &home_a);
+        common::assert_ok(&describe, "agent-a describe");
+        let new = run_tandem_in_resilient(&a_dir, &["new"], &home_a);
+        common::assert_ok(&new, "agent-a new");
     });
 
     let b_dir = ws_b.clone();
@@ -112,19 +163,28 @@ fn slice17_conflicting_workspace_inputs_surface_integration_conflict() {
     let handle_b = thread::spawn(move || {
         std::fs::write(b_dir.join("conflict.txt"), b"value from agent B\n").unwrap();
         barrier_b.wait();
-        run_tandem_in_resilient(&b_dir, &["describe", "-m", "agent-b conflict"], &home_b);
-        run_tandem_in_resilient(&b_dir, &["new"], &home_b);
+        let describe =
+            run_tandem_in_resilient(&b_dir, &["describe", "-m", "agent-b conflict"], &home_b);
+        common::assert_ok(&describe, "agent-b describe");
+        let new = run_tandem_in_resilient(&b_dir, &["new"], &home_b);
+        common::assert_ok(&new, "agent-b new");
     });
 
     handle_a.join().expect("agent-a thread");
     handle_b.join().expect("agent-b thread");
 
-    wait_for_conflicted_integration(&ws_a, &home);
+    let conflicted_integration_commit = wait_for_conflicted_integration_commit_id(&ws_a, &home);
 
     // The conflicted integration commit should materialize conflict markers in file output.
-    let cat = common::run_tandem_in(
+    let cat = run_tandem_in_resilient(
         &ws_a,
-        &["file", "show", "-r", "integration", "conflict.txt"],
+        &[
+            "file",
+            "show",
+            "-r",
+            &conflicted_integration_commit,
+            "conflict.txt",
+        ],
         &home,
     );
     common::assert_ok(&cat, "show conflict file from integration bookmark");

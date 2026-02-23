@@ -46,9 +46,17 @@ pub fn isolate_env(cmd: &mut Command, home: &Path) {
 
 pub fn spawn_server(repo: &Path, addr: &str) -> Child {
     Command::new(tandem_bin())
-        .args(["serve", "--listen", addr, "--repo", repo.to_str().unwrap()])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .args([
+            "serve",
+            "--listen",
+            addr,
+            "--repo",
+            repo.to_str().unwrap(),
+            "--log-level",
+            "warn",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .expect("spawn tandem serve")
 }
@@ -134,6 +142,10 @@ pub fn spawn_server_with_args_and_env(
 ) -> Child {
     let mut cmd = Command::new(tandem_bin());
     cmd.args(["serve", "--listen", addr, "--repo", repo.to_str().unwrap()]);
+    let has_explicit_log_level = extra_args.iter().copied().any(|arg| arg == "--log-level");
+    if !has_explicit_log_level {
+        cmd.args(["--log-level", "warn"]);
+    }
     for arg in extra_args {
         cmd.arg(arg);
     }
@@ -141,8 +153,8 @@ pub fn spawn_server_with_args_and_env(
     for (k, v) in env {
         cmd.env(k, v);
     }
-    cmd.stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+    cmd.stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .expect("spawn tandem serve")
 }

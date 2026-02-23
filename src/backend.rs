@@ -75,9 +75,7 @@ impl TandemBackend {
             .map_err(|e| BackendInitError(e.into()))?;
 
         let client = TandemClient::connect(server_addr).map_err(|e| BackendInitError(e.into()))?;
-        let info = client
-            .get_repo_info()
-            .map_err(|e| BackendInitError(e.into()))?;
+        let info = client.repo_info().clone();
 
         Ok(Self {
             client,
@@ -93,9 +91,7 @@ impl TandemBackend {
     pub fn load(_settings: &UserSettings, store_path: &Path) -> Result<Self, BackendLoadError> {
         let server_addr = read_server_address(store_path)?;
         let client = TandemClient::connect(&server_addr).map_err(|e| BackendLoadError(e.into()))?;
-        let info = client
-            .get_repo_info()
-            .map_err(|e| BackendLoadError(e.into()))?;
+        let info = client.repo_info().clone();
 
         Ok(Self {
             client,
@@ -206,9 +202,20 @@ impl Backend for TandemBackend {
         ))
     }
 
-    async fn get_related_copies(&self, _copy_id: &CopyId) -> BackendResult<Vec<CopyHistory>> {
+    async fn get_related_copies(&self, copy_id: &CopyId) -> BackendResult<Vec<CopyHistory>> {
+        let maybe_wire_copies = self
+            .client
+            .get_related_copies(copy_id.as_bytes())
+            .map_err(to_backend_err)?;
+
+        if maybe_wire_copies.is_none() {
+            return Err(BackendError::Unsupported(
+                "Copy tracking not supported by server capabilities".into(),
+            ));
+        }
+
         Err(BackendError::Unsupported(
-            "Copy tracking not yet supported".into(),
+            "Copy tracking decoding not yet implemented".into(),
         ))
     }
 

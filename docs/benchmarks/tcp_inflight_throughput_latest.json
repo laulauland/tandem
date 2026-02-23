@@ -1,0 +1,35 @@
+{
+  "generated_at_epoch_secs": 1771850732,
+  "agents": 2,
+  "commits_per_agent": 4,
+  "files_per_commit": 32,
+  "results": [
+    {
+      "profile": "p0_loopback",
+      "rtt_ms": 0,
+      "agents": 2,
+      "commits_per_agent": 4,
+      "baseline_commits_per_sec": 3.3865815670533563,
+      "optimized_commits_per_sec": 3.393862637313545,
+      "speedup": 1.0021499763451804
+    },
+    {
+      "profile": "p1_rtt20ms",
+      "rtt_ms": 20,
+      "agents": 2,
+      "commits_per_agent": 4,
+      "baseline_commits_per_sec": 0.13869880811282095,
+      "optimized_commits_per_sec": 0.13883722465069198,
+      "speedup": 1.0009979648690164
+    },
+    {
+      "profile": "p2_rtt50ms",
+      "rtt_ms": 50,
+      "agents": 2,
+      "commits_per_agent": 4,
+      "baseline_commits_per_sec": 0.0659271181844308,
+      "optimized_commits_per_sec": 0.06599902481715303,
+      "speedup": 1.0010906988611434
+    }
+  ]
+}

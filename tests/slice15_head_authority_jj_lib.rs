@@ -36,11 +36,15 @@ fn run_tandem_with_timeout(dir: &Path, args: &[&str], home: &Path) -> Output {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         if let Some(_status) = child.try_wait().expect("try_wait tandem command") {
-            return child.wait_with_output().expect("wait tandem command output");
+            return child
+                .wait_with_output()
+                .expect("wait tandem command output");
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
-            let out = child.wait_with_output().expect("wait timed out tandem command");
+            let out = child
+                .wait_with_output()
+                .expect("wait timed out tandem command");
             panic!(
                 "tandem command timed out: {:?}\nstdout:\n{}\nstderr:\n{}",
                 args,
@@ -86,7 +90,8 @@ fn settle_workspace(dir: &Path, home: &Path) {
 fn server_jj_op_heads(server_repo: &Path) -> BTreeSet<String> {
     let config = jj_lib::config::StackedConfig::with_defaults();
     let settings = jj_lib::settings::UserSettings::from_config(config).expect("create jj settings");
-    let repo_dir = dunce::canonicalize(server_repo.join(".jj/repo")).expect("canonicalize .jj/repo");
+    let repo_dir =
+        dunce::canonicalize(server_repo.join(".jj/repo")).expect("canonicalize .jj/repo");
     let factories = jj_lib::repo::StoreFactories::default();
     let loader = jj_lib::repo::RepoLoader::init_from_file_system(&settings, &repo_dir, &factories)
         .expect("load repo loader");
@@ -103,10 +108,11 @@ fn tandem_get_heads(addr: &str) -> (BTreeSet<String>, u64) {
     let local = tokio::task::LocalSet::new();
 
     local.block_on(&rt, async move {
-        let stream = tokio::time::timeout(Duration::from_secs(5), tokio::net::TcpStream::connect(addr))
-            .await
-            .expect("connect timeout")
-            .expect("connect server");
+        let stream =
+            tokio::time::timeout(Duration::from_secs(5), tokio::net::TcpStream::connect(addr))
+                .await
+                .expect("connect timeout")
+                .expect("connect server");
         stream.set_nodelay(true).ok();
 
         let (reader, writer) = stream.into_split();
@@ -201,7 +207,10 @@ fn v1_slice15_jj_lib_head_authority_consistent_after_retries() {
         jj_heads, rpc_heads,
         "server-local jj op heads must match tandem getHeads"
     );
-    assert!(rpc_version > 0, "version should advance after concurrent updates");
+    assert!(
+        rpc_version > 0,
+        "version should advance after concurrent updates"
+    );
 
     // Re-read repeatedly to ensure no drift after heavy CAS contention.
     for _ in 0..5 {

@@ -13,7 +13,7 @@ use capnp_rpc::pry;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use jj_lib::backend::{CommitId, TreeId};
 use jj_lib::object_id::ObjectId as _;
-use jj_lib::op_store::RefTarget;
+use jj_lib::op_store::{OperationId, RefTarget};
 use jj_lib::repo::Repo as _;
 use jj_lib::repo_path::RepoPath;
 use jj_lib::rewrite::merge_commit_trees;
@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
 
 use crate::control;
@@ -338,6 +338,85 @@ impl Server {
         let mut heads: Vec<String> = ids.into_iter().map(|id| id.hex()).collect();
         heads.sort();
         Ok(heads)
+    }
+
+    fn reconcile_jj_op_heads(
+        &self,
+        workspace_heads: &BTreeMap<String, String>,
+    ) -> Result<(Vec<String>, bool)> {
+        let before = self.read_jj_op_heads()?;
+
+        let mut candidate_hex = before.clone();
+        for op_hex in workspace_heads.values() {
+            if !candidate_hex.contains(op_hex) {
+                candidate_hex.push(op_hex.clone());
+            }
+        }
+        candidate_hex.sort();
+        candidate_hex.dedup();
+
+        if candidate_hex.len() <= 1 {
+            return Ok((before, false));
+        }
+
+        tracing::debug!(
+            heads = candidate_hex.len(),
+            workspace_heads = workspace_heads.len(),
+            "reconciling divergent operation heads"
+        );
+
+        let mut operations = Vec::new();
+        for op_hex in &candidate_hex {
+            let op_id = match from_hex(op_hex) {
+                Ok(bytes) => OperationId::new(bytes),
+                Err(err) => {
+                    tracing::warn!(op_id = %op_hex, error = %err, "skipping invalid workspace head id");
+                    continue;
+                }
+            };
+            match self.repo_loader.load_operation(&op_id) {
+                Ok(op) => operations.push(op),
+                Err(err) => {
+                    tracing::warn!(op_id = %op_id.hex(), error = %err, "skipping missing workspace head operation");
+                }
+            }
+        }
+
+        if operations.len() <= 1 {
+            return Ok((before, false));
+        }
+
+        let merged_op = self
+            .repo_loader
+            .merge_operations(operations, Some("reconcile divergent operations"))
+            .context("reconcile divergent operation heads")?;
+
+        let mut old_ids = Vec::new();
+        for op_hex in candidate_hex {
+            if let Ok(bytes) = from_hex(&op_hex) {
+                let op_id = OperationId::new(bytes);
+                if op_id != *merged_op.id() {
+                    old_ids.push(op_id);
+                }
+            }
+        }
+
+        pollster::block_on(
+            self.op_heads_store
+                .update_op_heads(&old_ids, merged_op.id()),
+        )
+        .map_err(|e| anyhow!("reconcile op heads update failed: {e}"))?;
+
+        let after = self.read_jj_op_heads()?;
+        let changed = after != before;
+        if changed {
+            tracing::debug!(
+                before_heads = before.len(),
+                after_heads = after.len(),
+                "reconciled operation heads"
+            );
+        }
+        Ok((after, changed))
     }
 
     fn integration_metadata_path(&self) -> PathBuf {
@@ -771,8 +850,17 @@ impl Server {
 
     fn get_heads_sync(&self) -> Result<HeadsState> {
         let _guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
-        let metadata = self.read_heads_metadata()?;
-        let heads = self.read_jj_op_heads()?;
+        let mut metadata = self.read_heads_metadata()?;
+        let empty_workspace_heads = BTreeMap::new();
+        let (heads, reconciled) = self.reconcile_jj_op_heads(&empty_workspace_heads)?;
+
+        if reconciled {
+            metadata.version += 1;
+            self.write_heads_metadata(&metadata)?;
+            let heads_bytes: Vec<Vec<u8>> = heads.iter().filter_map(|h| from_hex(h).ok()).collect();
+            self.notify_watchers(metadata.version, &heads_bytes);
+        }
+
         Ok(HeadsState {
             version: metadata.version,
             heads,
@@ -788,10 +876,20 @@ impl Server {
         workspace_id: Option<String>,
     ) -> Result<UpdateResult> {
         let _guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
-        let metadata = self.read_heads_metadata()?;
+        let mut metadata = self.read_heads_metadata()?;
 
         if metadata.version != expected_version {
-            let current_heads = self.read_jj_op_heads()?;
+            let empty_workspace_heads = BTreeMap::new();
+            let (current_heads, reconciled) = self.reconcile_jj_op_heads(&empty_workspace_heads)?;
+            if reconciled {
+                metadata.version += 1;
+                self.write_heads_metadata(&metadata)?;
+                let heads_bytes: Vec<Vec<u8>> = current_heads
+                    .iter()
+                    .filter_map(|h| from_hex(h).ok())
+                    .collect();
+                self.notify_watchers(metadata.version, &heads_bytes);
+            }
             tracing::debug!(
                 expected_version,
                 actual_version = metadata.version,
@@ -808,19 +906,38 @@ impl Server {
             });
         }
 
-        let mut old_op_ids: Vec<jj_lib::op_store::OperationId> = old_ids
+        let provided_old_op_ids: Vec<jj_lib::op_store::OperationId> = old_ids
             .into_iter()
             .map(jj_lib::op_store::OperationId::new)
             .collect();
         let new_op_id = jj_lib::op_store::OperationId::new(new_id.clone());
+
+        let mut old_op_ids = match pollster::block_on(
+            self.repo_loader.op_store().read_operation(&new_op_id),
+        ) {
+            Ok(new_op) => new_op.parents,
+            Err(err) => {
+                tracing::warn!(
+                    new_id = %new_op_id.hex(),
+                    error = %err,
+                    "could not read new operation parents; falling back to client-provided old_ids"
+                );
+                provided_old_op_ids.clone()
+            }
+        };
+
+        if old_op_ids.is_empty() {
+            old_op_ids = provided_old_op_ids;
+        }
+
         old_op_ids.retain(|id| id != &new_op_id);
         pollster::block_on(self.op_heads_store.update_op_heads(&old_op_ids, &new_op_id))
             .map_err(|e| anyhow!("update op heads via jj-lib: {e}"))?;
 
-        let next_heads = self.read_jj_op_heads()?;
         let new_hex = to_hex(&new_id);
         let next_workspace_heads =
             updated_workspace_heads(&metadata.workspace_heads, workspace_id.as_deref(), &new_hex);
+        let (next_heads, _) = self.reconcile_jj_op_heads(&next_workspace_heads)?;
 
         let next_metadata = HeadsMetadata {
             version: metadata.version + 1,
@@ -828,7 +945,7 @@ impl Server {
         };
         self.write_heads_metadata(&next_metadata)?;
 
-        tracing::info!(
+        tracing::debug!(
             previous_version = metadata.version,
             new_version = next_metadata.version,
             heads = next_heads.len(),
@@ -994,6 +1111,43 @@ fn object_kind_str(kind: crate::tandem_capnp::ObjectKind) -> &'static str {
     }
 }
 
+fn test_repo_info_u16(var: &str, default: u16) -> u16 {
+    std::env::var(var)
+        .ok()
+        .and_then(|v| v.trim().parse::<u16>().ok())
+        .unwrap_or(default)
+}
+
+fn test_repo_info_text(var: &str, default: &'static str) -> String {
+    std::env::var(var).unwrap_or_else(|_| default.to_string())
+}
+
+fn test_repo_info_capabilities() -> Vec<crate::tandem_capnp::Capability> {
+    if let Ok(raw) = std::env::var("TANDEM_TEST_REPO_INFO_CAPABILITIES") {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Vec::new();
+        }
+
+        let mut caps = Vec::new();
+        for token in trimmed.split(',') {
+            let normalized = token.trim();
+            let cap = match normalized {
+                "watchHeads" => crate::tandem_capnp::Capability::WatchHeads,
+                "headsSnapshot" => crate::tandem_capnp::Capability::HeadsSnapshot,
+                "copyTracking" => crate::tandem_capnp::Capability::CopyTracking,
+                _ => continue,
+            };
+            if !caps.contains(&cap) {
+                caps.push(cap);
+            }
+        }
+        return caps;
+    }
+
+    vec![crate::tandem_capnp::Capability::WatchHeads]
+}
+
 impl store::Server for StoreImpl {
     fn get_repo_info(
         &mut self,
@@ -1003,20 +1157,32 @@ impl store::Server for StoreImpl {
         tracing::trace!(conn_id = self.conn_id, rpc = "getRepoInfo", "rpc request");
         let backend = self.server.store.backend();
         let mut info = results.get().init_info();
-        info.set_protocol_major(0);
-        info.set_protocol_minor(1);
+        info.set_protocol_major(test_repo_info_u16(
+            "TANDEM_TEST_REPO_INFO_PROTOCOL_MAJOR",
+            0,
+        ));
+        info.set_protocol_minor(test_repo_info_u16(
+            "TANDEM_TEST_REPO_INFO_PROTOCOL_MINOR",
+            1,
+        ));
         info.set_jj_version(env!("CARGO_PKG_VERSION"));
-        info.set_backend_name("tandem");
-        info.set_op_store_name("tandem_op_store");
+        let backend_name = test_repo_info_text("TANDEM_TEST_REPO_INFO_BACKEND_NAME", "tandem");
+        let op_store_name =
+            test_repo_info_text("TANDEM_TEST_REPO_INFO_OP_STORE_NAME", "tandem_op_store");
+        info.set_backend_name(&backend_name);
+        info.set_op_store_name(&op_store_name);
         info.set_commit_id_length(backend.commit_id_length() as u16);
         info.set_change_id_length(backend.change_id_length() as u16);
         info.set_root_commit_id(backend.root_commit_id().as_bytes());
         info.set_root_change_id(backend.root_change_id().as_bytes());
         info.set_empty_tree_id(backend.empty_tree_id().as_bytes());
         info.set_root_operation_id(&[0u8; 64]);
+        let capabilities = test_repo_info_capabilities();
         {
-            let mut caps = info.init_capabilities(1);
-            caps.set(0, crate::tandem_capnp::Capability::WatchHeads);
+            let mut caps = info.init_capabilities(capabilities.len() as u32);
+            for (i, cap) in capabilities.iter().enumerate() {
+                caps.set(i as u32, *cap);
+            }
         }
         Promise::ok(())
     }
@@ -1403,13 +1569,18 @@ impl store::Server for StoreImpl {
             Some(workspace_id_str.to_string())
         };
 
-        tracing::info!(
+        let request_started = Instant::now();
+        tracing::debug!(
             conn_id = self.conn_id,
             rpc = "updateOpHeads",
+            rpc_method = "updateOpHeads",
             expected_version,
             old_ids = old_ids.len(),
             new_id = %to_hex(&new_id),
             workspace_id = workspace_id.as_deref().unwrap_or(""),
+            attempt = 1,
+            cas_retries = 0,
+            queue_depth = 0,
             "rpc request"
         );
 
@@ -1418,13 +1589,18 @@ impl store::Server for StoreImpl {
             .update_op_heads_sync(old_ids, new_id, expected_version, workspace_id)
         {
             Ok(result) => {
-                tracing::info!(
+                tracing::debug!(
                     conn_id = self.conn_id,
                     rpc = "updateOpHeads",
+                    rpc_method = "updateOpHeads",
                     ok = result.ok,
                     version = result.version,
                     heads = result.heads.len(),
                     workspace_heads = result.workspace_heads.len(),
+                    attempt = 1,
+                    cas_retries = 0,
+                    queue_depth = 0,
+                    latency_ms = request_started.elapsed().as_millis() as u64,
                     "rpc response"
                 );
                 let mut r = results.get();
@@ -1452,7 +1628,12 @@ impl store::Server for StoreImpl {
                 tracing::error!(
                     conn_id = self.conn_id,
                     rpc = "updateOpHeads",
+                    rpc_method = "updateOpHeads",
                     expected_version,
+                    attempt = 1,
+                    cas_retries = 0,
+                    queue_depth = 0,
+                    latency_ms = request_started.elapsed().as_millis() as u64,
                     error = %e,
                     "rpc error"
                 );

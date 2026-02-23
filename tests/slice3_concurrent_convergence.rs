@@ -15,25 +15,64 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Output};
 use std::sync::{Arc, Barrier};
 use std::thread;
+use std::time::Duration;
 
 use tempfile::TempDir;
 
-/// Run a tandem command, handling the "working copy is stale" condition
-/// that arises naturally during concurrent operations. If the command
-/// fails with a stale working copy, run `workspace update-stale` and retry.
+/// Run a tandem command and recover from transient workspace-state races that
+/// naturally occur during high-contention slices.
 fn run_tandem_in_resilient(dir: &Path, args: &[&str], home: &Path) -> Output {
-    let output = common::run_tandem_in(dir, args, home);
-    if output.status.success() {
-        return output;
-    }
-    let err = common::stderr_str(&output);
-    if err.contains("working copy is stale") || err.contains("update-stale") {
+    const MAX_RETRIES: usize = 10;
+
+    for attempt in 1..=MAX_RETRIES {
+        let output = common::run_tandem_in(dir, args, home);
+        if output.status.success() {
+            return output;
+        }
+
+        let err = common::stderr_str(&output);
+        if !is_retriable_workspace_state_error(&err) || attempt == MAX_RETRIES {
+            return output;
+        }
+
+        if let Some(op_id) = hinted_op_integrate_id(&err) {
+            let integrate = common::run_tandem_in(dir, &["op", "integrate", &op_id], home);
+            if !integrate.status.success() {
+                return integrate;
+            }
+        }
+
         let update = common::run_tandem_in(dir, &["workspace", "update-stale"], home);
-        common::assert_ok(&update, "workspace update-stale (resilient)");
-        // Retry the original command
-        common::run_tandem_in(dir, args, home)
+        if !update.status.success() {
+            let update_err = common::stderr_str(&update);
+            if !update_err.contains("nothing to do") && !update_err.contains("already up to date") {
+                return update;
+            }
+        }
+
+        thread::sleep(Duration::from_millis(25 * attempt as u64));
+    }
+
+    unreachable!("retry loop must return on success/failure")
+}
+
+fn is_retriable_workspace_state_error(stderr: &str) -> bool {
+    stderr.contains("working copy is stale")
+        || stderr.contains("update-stale")
+        || stderr.contains("seems to be a sibling of the working copy's operation")
+        || (stderr.contains("reconcile divergent operation heads")
+            && stderr.contains("already exists"))
+}
+
+fn hinted_op_integrate_id(stderr: &str) -> Option<String> {
+    let marker = "jj op integrate ";
+    let line = stderr.lines().find(|line| line.contains(marker))?;
+    let after = line.split(marker).nth(1)?;
+    let id = after.split('`').next()?.trim();
+    if id.is_empty() {
+        None
     } else {
-        output
+        Some(id.to_string())
     }
 }
 

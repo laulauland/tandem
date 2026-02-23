@@ -86,11 +86,12 @@ Core capabilities:
   `updateOpHeads(old_ids, new_id, expected_version, workspace_id)` (CAS)
 - **Operation resolution:** `resolveOperationIdPrefix(prefix)`
 - **Watch subscriptions:** `watchHeads(watcher)` — streaming notifications
-- **Optional capabilities:** `snapshot()`, copy tracking (reserved for future)
+- **Optional capabilities:** `getHeadsSnapshot()`, `getRelatedCopies()` (schema-defined; currently unimplemented server-side)
 
 No `repoId` in protocol: one server = one repo.
 
 See `src/server.rs` for server implementation, `src/rpc.rs` for client wrapper.
+For transport compatibility planning (TCP/WSS/SSH-exec), see `docs/design-docs/transport-matrix.md`.
 
 ## Git compatibility
 
@@ -119,7 +120,7 @@ Integration tests across slices 1-14:
 | 1 | `tests/slice1_single_agent_round_trip.rs` | Single agent file round-trip |
 | 2 | `tests/slice2_two_agent_visibility.rs` | Two-agent file visibility |
 | 3 | `tests/slice3_concurrent_convergence.rs` | 2-agent and 5-agent concurrent writes |
-| 4 | `tests/slice4_promise_pipelining.rs` | Cap'n Proto pipelining efficiency |
+| 4 | `tests/slice4_promise_pipelining.rs` | Rapid sequential write correctness/stress over Cap'n Proto transport |
 | 5 | `tests/slice5_watch_heads.rs` | Real-time head notifications |
 | 6 | `tests/slice6_git_round_trip.rs` | Git push/fetch round-trip |
 | 7 | `tests/slice7_end_to_end.rs` | Multi-agent + git + external contributor |
@@ -140,7 +141,7 @@ Run: `cargo test`
 
 - **Language:** Rust
 - **Binary:** Single `tandem` (server + client modes)
-- **RPC:** Cap'n Proto (promise pipelining for efficiency)
+- **RPC:** Cap'n Proto semantics over TCP transport (current); WSS/SSH-exec compatibility path planned
 - **Server storage:** Normal jj+git colocated repo (Git backend)
 - **Serialization:** jj-native protobuf object/op/view bytes (passed through as blobs)
 - **Client CLI:** Stock `jj` via `CliRunner` (not a custom tandem CLI)

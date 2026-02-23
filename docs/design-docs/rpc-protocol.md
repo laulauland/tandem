@@ -27,6 +27,15 @@ Clients must call `getRepoInfo()` on connect and verify:
 
 If incompatible, client should fail fast with a clear error.
 
+## Implementation status (v0.3.2)
+
+- Transport in production is Cap'n Proto twoparty over raw TCP (`host:port`).
+- Current client wrappers are mostly blocking/serialized; Cap'n Proto promise
+  pipelining is not yet fully exploited in end-to-end command paths.
+- Server currently advertises only `watchHeads` capability.
+- `getHeadsSnapshot` and `getRelatedCopies` are schema-defined but currently
+  unimplemented on server; clients must capability-gate optional calls.
+
 ## Data model
 
 ### Backend object kinds
@@ -154,6 +163,23 @@ enum Capability {
   copyTracking @2;
 }
 ```
+
+## Transport bindings
+
+Protocol semantics are transport-independent. Today tandem uses raw TCP for
+Cap'n Proto twoparty connections, but additional bindings (for restricted VM
+network environments) can carry the same RPC contract:
+
+- `tcp://host:port` — current default.
+- `wss://...` (planned) — for HTTP(S)/WebSocket-only egress sandboxes.
+- `ssh-exec://...` (planned) — for environments allowing SSH exec but not
+  arbitrary outbound TCP.
+
+Regardless of transport, correctness invariants stay the same:
+
+- `updateOpHeads` remains the serialization boundary.
+- object/op/view writes remain idempotent and content-addressed.
+- reconnect flows use `afterVersion` + `getHeads()` catch-up.
 
 ## Method semantics
 

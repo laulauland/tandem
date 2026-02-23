@@ -84,17 +84,18 @@ fn v1_slice2_two_agent_file_visibility() {
         "agent-a should read its own auth.rs"
     );
 
-    // Extract Agent A's auth commit change_id for cross-workspace reference
-    let change_a_out = common::run_tandem_in(
+    // Extract Agent A's auth commit commit_id for cross-workspace reference.
+    // change_id can be divergent under concurrent operation reconciliation.
+    let commit_a_out = common::run_tandem_in(
         &agent_a_dir,
-        &["log", "-r", "@-", "--no-graph", "-T", "change_id"],
+        &["log", "-r", "@-", "--no-graph", "-T", "commit_id"],
         &home,
     );
-    common::assert_ok(&change_a_out, "agent-a extract change_id");
-    let change_a_id = common::stdout_str(&change_a_out).trim().to_string();
+    common::assert_ok(&commit_a_out, "agent-a extract commit_id");
+    let commit_a_id = common::stdout_str(&commit_a_out).trim().to_string();
     assert!(
-        !change_a_id.is_empty(),
-        "should extract Agent A's change_id"
+        !commit_a_id.is_empty(),
+        "should extract Agent A's commit_id"
     );
 
     // ── Agent B sees Agent A's commit ─────────────────────────────────────
@@ -109,7 +110,7 @@ fn v1_slice2_two_agent_file_visibility() {
     // ── Agent B reads Agent A's file (exact bytes) ────────────────────────
     let cat_auth = common::run_tandem_in(
         &agent_b_dir,
-        &["file", "show", "-r", &change_a_id, "src/auth.rs"],
+        &["file", "show", "-r", &commit_a_id, "src/auth.rs"],
         &home,
     );
     common::assert_ok(&cat_auth, "agent-b file show auth.rs");
@@ -143,23 +144,23 @@ fn v1_slice2_two_agent_file_visibility() {
         "agent-b should read its own api.rs"
     );
 
-    // Extract Agent B's api commit change_id for cross-workspace reference
-    let change_b_out = common::run_tandem_in(
+    // Extract Agent B's api commit commit_id for cross-workspace reference.
+    let commit_b_out = common::run_tandem_in(
         &agent_b_dir,
-        &["log", "-r", "@-", "--no-graph", "-T", "change_id"],
+        &["log", "-r", "@-", "--no-graph", "-T", "commit_id"],
         &home,
     );
-    common::assert_ok(&change_b_out, "agent-b extract change_id");
-    let change_b_id = common::stdout_str(&change_b_out).trim().to_string();
+    common::assert_ok(&commit_b_out, "agent-b extract commit_id");
+    let commit_b_id = common::stdout_str(&commit_b_out).trim().to_string();
     assert!(
-        !change_b_id.is_empty(),
-        "should extract Agent B's change_id"
+        !commit_b_id.is_empty(),
+        "should extract Agent B's commit_id"
     );
 
     // ── Agent A reads Agent B's file (exact bytes) ────────────────────────
     let cat_api = common::run_tandem_in(
         &agent_a_dir,
-        &["file", "show", "-r", &change_b_id, "src/api.rs"],
+        &["file", "show", "-r", &commit_b_id, "src/api.rs"],
         &home,
     );
     common::assert_ok(&cat_api, "agent-a file show api.rs");
@@ -198,9 +199,9 @@ fn v1_slice2_two_agent_file_visibility() {
     // ── Both agents see both files through tree traversal ─────────────────
     // Agent A's @- has auth.rs, Agent B's @- has api.rs.
     // After the op merge, each agent's tree is independent, but
-    // cross-reading via change_id works (already verified above).
+    // cross-reading via commit_id works (already verified above).
     // Additionally check that diff shows file additions:
-    let diff_a = common::run_tandem_in(&agent_a_dir, &["diff", "-r", &change_a_id], &home);
+    let diff_a = common::run_tandem_in(&agent_a_dir, &["diff", "-r", &commit_a_id], &home);
     common::assert_ok(&diff_a, "agent-a diff on auth commit");
     let diff_a_text = common::stdout_str(&diff_a);
     assert!(
@@ -208,7 +209,7 @@ fn v1_slice2_two_agent_file_visibility() {
         "diff of Agent A's commit should show auth.rs\n{diff_a_text}"
     );
 
-    let diff_b = common::run_tandem_in(&agent_b_dir, &["diff", "-r", &change_b_id], &home);
+    let diff_b = common::run_tandem_in(&agent_b_dir, &["diff", "-r", &commit_b_id], &home);
     common::assert_ok(&diff_b, "agent-b diff on api commit");
     let diff_b_text = common::stdout_str(&diff_b);
     assert!(

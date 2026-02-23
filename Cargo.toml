@@ -21,6 +21,14 @@ exclude = [
 name = "tandem"
 path = "src/main.rs"
 
+[[bench]]
+name = "tcp_commit_path"
+harness = false
+
+[[bench]]
+name = "tcp_inflight_throughput"
+harness = false
+
 [dependencies]
 # jj integration
 jj-lib = { version = "0.38.0", features = ["git"] }

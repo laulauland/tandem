@@ -154,11 +154,10 @@ fn slice10_log_level_flag_accepted() {
     }
 
     let output = server.wait_with_output().expect("wait_with_output");
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    // Should have started (the "listening on" message proves the flag was accepted)
     assert!(
-        stderr.contains("listening on"),
-        "server should start with --log-level debug\nstderr: {stderr}"
+        output.status.success(),
+        "server should start with --log-level debug and shut down cleanly (status {:?})",
+        output.status.code()
     );
 }
 

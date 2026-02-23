@@ -382,7 +382,7 @@ The client registers three jj-lib trait implementations:
 | Trait | What it stores | RPC calls |
 |-------|---------------|-----------|
 | `Backend` | Files, trees, commits, symlinks | `getObject`, `putObject` |
-| `OpStore` | Operations, views | `getObject`, `putObject` |
+| `OpStore` | Operations, views | `getOperation`, `putOperation`, `getView`, `putView`, `resolveOperationIdPrefix` |
 | `OpHeadsStore` | Operation head pointers | `getHeads`, `updateOpHeads` (CAS) |
 
 Concurrent writes use compare-and-swap on operation heads with automatic
@@ -422,7 +422,7 @@ cargo test
 - Single-agent file round-trip (write → commit → read back exact bytes)
 - Two-agent cross-workspace file visibility
 - Concurrent writes from 2 and 5 agents (CAS convergence)
-- Promise pipelining (rapid sequential writes)
+- Cap'n Proto transport correctness under rapid sequential writes (slice 4)
 - WatchHeads real-time notifications
 - Git round-trip (tandem → jj git objects)
 - End-to-end multi-agent with bookmarks
@@ -431,12 +431,23 @@ cargo test
 - Daemon lifecycle (up/down)
 - Log streaming
 
+Performance evidence (latest local benchmark run):
+
+- Commit-path latency under injected RTT now has machine-readable baseline vs optimized data in:
+  - `docs/benchmarks/tcp_commit_path_latest.json`
+- In-flight throughput under concurrent writers is tracked in:
+  - `docs/benchmarks/tcp_inflight_throughput_latest.json`
+- Current status: latest artifacts show modest gains under injected RTT/contention
+  (p95 +3.33%/+4.68% on P1/P2, throughput geometric mean ~1.001x); earlier stretch targets
+  (p95 >=20%, throughput >=1.5x) are deferred follow-on optimization work.
+
 Cross-machine tested with Docker containers — see `qa/v1/cross-machine-report.md`.
 
 ## Known limitations
 
 - **No TLS** — connections are plaintext. Use SSH tunnels or a VPN for untrusted networks.
 - **No auth** — anyone who can reach the port can read/write the repo. Firewall the port and use SSH tunnels for access.
+- **Raw TCP transport only (today)** — store RPC currently runs over Cap'n Proto on TCP. In sandboxed VM environments that restrict outbound traffic to HTTP(S)/WebSocket or SSH exec only, you may need tunneling. Planned transport expansion is documented in `docs/design-docs/transport-matrix.md`.
 - **Unix only for daemon management** — `tandem up`, `tandem down`, `tandem server status`, and `tandem server logs` use Unix domain sockets. macOS and Linux only, not Windows. (`tandem serve` works everywhere.)
 - **No static binary yet** — requires glibc 2.39+. Use matching distro or build locally.
 - **fsmonitor conflict** — if your jj config has `fsmonitor.backend = "watchman"`,

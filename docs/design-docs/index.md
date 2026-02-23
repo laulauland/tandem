@@ -10,6 +10,7 @@ This folder holds stable technical decisions.
 - [RPC protocol](./rpc-protocol.md)
 - [RPC error model](./rpc-error-model.md)
 - [Server lifecycle](./server-lifecycle.md) — `tandem up/down` + `tandem server status/logs`, daemon management
+- [Transport matrix](./transport-matrix.md) — transport compatibility (TCP/WSS/SSH-exec) and sandbox guidance
 
 ## Add a new design doc when
 

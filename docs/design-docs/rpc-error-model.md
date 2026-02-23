@@ -26,6 +26,12 @@ Behavior:
 - usually retriable for reads
 - writes may be retried only if idempotency is guaranteed
 
+Transport-binding note:
+
+- TCP/WSS/SSH-exec connectors should normalize disconnect/timeout/failure into
+  this same transport error class so retry policy stays consistent across
+  transports.
+
 ### 2) Domain/storage errors
 
 Returned by server logic for request-specific failures.

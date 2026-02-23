@@ -3,11 +3,12 @@
 //! Connects via Cap'n Proto, calls watchHeads with a HeadWatcher callback,
 //! and prints each notification as: version=<N> heads=<hex1>,<hex2>,...
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use capnp::capability::Promise;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
+use crate::rpc::{connect_stream, RepoCapability, TandemClient};
 use crate::tandem_capnp::{head_watcher, store};
 
 // ─── HeadWatcher callback implementation ──────────────────────────────────────
@@ -63,15 +64,15 @@ pub fn run_watch(server_addr: &str) -> Result<()> {
 }
 
 async fn watch_loop(addr: &str) -> Result<()> {
-    // Connect to server
-    let stream = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        tokio::net::TcpStream::connect(addr),
-    )
-    .await
-    .map_err(|_| anyhow!("connection timed out after 5s to {addr}"))?
-    .with_context(|| format!("failed to connect to tandem server at {addr}"))?;
-    stream.set_nodelay(true).ok();
+    // Preflight compatibility + required capability before starting long-lived watch.
+    let preflight = TandemClient::connect_with_requirements(addr, &[RepoCapability::WatchHeads])
+        .with_context(|| format!("watch preflight failed for {addr}"))?;
+    drop(preflight);
+
+    // Connect to server using the shared connector abstraction.
+    let stream = connect_stream(addr)
+        .await
+        .with_context(|| format!("watch connection failed for {addr}"))?;
 
     let (reader, writer) = stream.into_split();
     let network = twoparty::VatNetwork::new(
