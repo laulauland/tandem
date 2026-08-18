@@ -447,3 +447,74 @@ fn v1_slice3_five_agents_concurrent_file_writes_all_survive() {
         }
     }
 }
+
+// ─── Test: an idle workspace stays connected to the head ─────────────────────
+
+/// A workspace that publishes nothing while another one publishes many times
+/// must still be able to run.
+///
+/// A client checks its working-copy operation against the operation the repo
+/// loaded at, and it does so with an approximate common-ancestor search. The
+/// approximation holds only while the two are close: let the head run far
+/// enough ahead and the search settles on some older shared ancestor, which the
+/// client reads as "these two are siblings" and refuses to continue with an
+/// internal error. Nothing about the repository is wrong when that happens —
+/// the workspace's operation really is an ancestor of the head — so the server
+/// is the one that has to keep the distance short, by naming the operations it
+/// merged as parents of the head it settles on.
+///
+/// The retry helper in this file treats that internal error as transient, which
+/// is why the other tests here do not notice it. This one runs the commands
+/// plainly, so nothing hides it.
+#[test]
+fn v1_slice3_an_idle_workspace_survives_many_publishes_elsewhere() {
+    // Several workspaces, because the search that goes wrong needs somewhere to
+    // go wrong: each `init` branches off near the root, and those branches are
+    // the short paths that let the search reach past the idle workspace's
+    // operation and meet below it.
+    let harness = TestHarness::new(5);
+    let idle = harness.agent_dirs[0].clone();
+    let home = harness.home.clone();
+
+    // Enough rounds that the idle workspace's operation falls well behind the
+    // head. Each round is a snapshot, a describe and a `new`, so the head moves
+    // several operations at a time.
+    for round in 0..6 {
+        for busy in &harness.agent_dirs[1..] {
+            std::fs::write(
+                busy.join(format!("busy_{round}.txt")),
+                format!("round {round}\n"),
+            )
+            .unwrap();
+            let describe = common::run_tandem_in(
+                busy,
+                &["describe", "-m", &format!("busy round {round}")],
+                &home,
+            );
+            common::assert_ok(&describe, &format!("busy describe round {round}"));
+            let new = common::run_tandem_in(busy, &["new"], &home);
+            common::assert_ok(&new, &format!("busy new round {round}"));
+        }
+    }
+
+    // The idle workspace has not run a command since `init`.
+    let status = common::run_tandem_in(&idle, &["status"], &home);
+    let status_err = common::stderr_str(&status);
+    assert!(
+        !status_err.contains("seems to be a sibling"),
+        "the idle workspace's operation is an ancestor of the head, so no \
+         command may call it a sibling:\n{status_err}"
+    );
+    common::assert_ok(&status, "idle workspace status");
+
+    // And it can still commit.
+    std::fs::write(idle.join("idle.txt"), b"idle at last\n").unwrap();
+    let describe = common::run_tandem_in(&idle, &["describe", "-m", "idle wakes up"], &home);
+    let describe_err = common::stderr_str(&describe);
+    assert!(
+        !describe_err.contains("seems to be a sibling"),
+        "the idle workspace must be able to commit without being called a \
+         sibling of the head:\n{describe_err}"
+    );
+    common::assert_ok(&describe, "idle workspace describe");
+}

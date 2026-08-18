@@ -1,5 +1,5 @@
 //! TandemOpHeadsStore — jj-lib OpHeadsStore impl that routes head
-//! management to a remote tandem server over Cap'n Proto RPC.
+//! management to a remote tandem server over HTTP.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ use jj_lib::op_store::OperationId;
 use jj_lib::settings::UserSettings;
 use prost::Message as _;
 
-use crate::rpc::TandemClient;
+use crate::http_client::TandemClient;
 
 const WORKSPACE_ID_FILE: &str = "workspace_id";
 const CAS_MAX_ATTEMPTS: usize = 80;
@@ -231,7 +231,7 @@ impl TandemOpHeadsStore {
         Some(proto.view_id)
     }
 
-    fn heads_for_workspace(&self, state: crate::rpc::HeadsState) -> Vec<OperationId> {
+    fn heads_for_workspace(&self, state: crate::http_client::HeadsState) -> Vec<OperationId> {
         let mut ids = state.heads;
         let workspace_head = state.workspace_heads.get(&self.workspace_id).cloned();
 

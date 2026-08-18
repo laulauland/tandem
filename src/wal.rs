@@ -14,8 +14,8 @@
 //! mapping between operations and the blobs they introduce. Blobs are
 //! content-addressed, so a duplicate write is a no-op.
 //!
-//! The framing is hand-rolled rather than Cap'n Proto: this is a storage format
-//! that outlives the RPC schema.
+//! The framing is hand-rolled rather than borrowed from the transport: this is
+//! a storage format that outlives the wire protocol.
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};

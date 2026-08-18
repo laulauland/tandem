@@ -1,5 +1,5 @@
 //! TandemBackend — jj-lib Backend impl that routes all object I/O
-//! to a remote tandem server over Cap'n Proto RPC.
+//! to a remote tandem server over HTTP.
 
 use std::fmt;
 use std::io::Cursor;
@@ -18,15 +18,11 @@ use jj_lib::settings::UserSettings;
 use prost::Message as _;
 use tokio::io::AsyncRead;
 
+use crate::http_client::TandemClient;
 use crate::proto_convert;
-use crate::rpc::TandemClient;
-
-// Object kind discriminants matching the Cap'n Proto schema
-const KIND_COMMIT: u16 = 0;
-const KIND_TREE: u16 = 1;
-const KIND_FILE: u16 = 2;
-const KIND_SYMLINK: u16 = 3;
-// const KIND_COPY: u16 = 4;
+// Object kind discriminants. `wire` owns them because they also name the
+// `/api/objects/{kind}` path segments and the batch-frame records.
+use crate::wire::{KIND_COMMIT, KIND_FILE, KIND_SYMLINK, KIND_TREE};
 
 /// Backend implementation that proxies all reads/writes to a tandem server.
 pub struct TandemBackend {

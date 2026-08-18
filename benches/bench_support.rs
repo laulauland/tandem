@@ -1,3 +1,9 @@
+// Every bench binary compiles this module in full but uses only its half of
+// it: `tcp_commit_path` wants the latency measurements, `tcp_inflight_throughput`
+// wants the parallel ones. Each therefore sees the other half as dead code.
+// `tests/common/mod.rs` carries the same attribute for the same reason.
+#![allow(dead_code)]
+
 use std::fs;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};

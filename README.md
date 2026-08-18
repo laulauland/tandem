@@ -16,7 +16,7 @@ jj workspaces over the network. One server, many agents on many machines, real f
 ## Install
 
 Published on [crates.io](https://crates.io/crates/jj-tandem) as `jj-tandem`.
-Requires a Rust toolchain. No system `capnp` binary is required for install/build.
+Requires a Rust toolchain and nothing else — there is no code-generation step.
 
 ```bash
 cargo install jj-tandem
@@ -341,7 +341,7 @@ conflicts on the transport layer. The server ships to GitHub when you're ready.
 
 ```
 ┌──────────────┐                           ┌──────────────────────────┐
-│  Agent A      │    Cap'n Proto RPC        │                          │
+│  Agent A      │    HTTP                   │                          │
 │  (Machine B)  │◄─────────────────────────►│    tandem serve           │
 │               │                           │    (Machine A)            │
 │  ~/work-a/    │                           │                          │
@@ -349,14 +349,14 @@ conflicts on the transport layer. The server ships to GitHub when you're ready.
 │  src/lib.rs   │                           │  │ Content-Addressed  │  │
 └──────────────┘                           │  │ Store              │  │
 ┌──────────────┐                           │  │                    │  │
-│  Agent B      │    Cap'n Proto RPC        │  │  jj+git repo       │  │
+│  Agent B      │    HTTP                   │  │  jj+git repo       │  │
 │  (Machine C)  │◄─────────────────────────►│  │  operations        │  │──► git push
 │               │                           │  │  views             │  │
 │  ~/work-b/    │                           │  │  op heads (CAS)    │  │
 │  src/api.rs   │                           │  └────────────────────┘  │
 └──────────────┘                           │                          │
 ┌──────────────┐                           │                          │
-│  Agent C      │    Cap'n Proto RPC        │                          │
+│  Agent C      │    HTTP                   │                          │
 │  (Machine D)  │◄─────────────────────────►│                          │
 │               │                           │                          │
 │  ~/work-c/    │                           └──────────────────────────┘
@@ -422,8 +422,9 @@ cargo test
 - Single-agent file round-trip (write → commit → read back exact bytes)
 - Two-agent cross-workspace file visibility
 - Concurrent writes from 2 and 5 agents (CAS convergence)
-- Cap'n Proto transport correctness under rapid sequential writes (slice 4)
-- WatchHeads real-time notifications
+- Transport correctness under rapid sequential writes (slice 4)
+- The HTTP API surface itself: cache headers, `ETag`/`If-Match` CAS, malformed frames, SSE
+- Real-time head notifications
 - Git round-trip (tandem → jj git objects)
 - End-to-end multi-agent with bookmarks
 - Signal handling and graceful shutdown
@@ -447,7 +448,7 @@ Cross-machine tested with Docker containers — see `qa/v1/cross-machine-report.
 
 - **No TLS** — connections are plaintext. Use SSH tunnels or a VPN for untrusted networks.
 - **No auth** — anyone who can reach the port can read/write the repo. Firewall the port and use SSH tunnels for access.
-- **Raw TCP transport only (today)** — store RPC currently runs over Cap'n Proto on TCP. In sandboxed VM environments that restrict outbound traffic to HTTP(S)/WebSocket or SSH exec only, you may need tunneling. Planned transport expansion is documented in `docs/design-docs/transport-matrix.md`.
+- **Plain HTTP only (today)** — store calls run over HTTP, so a sandbox that allows outbound HTTP can reach a server directly. TLS termination is not built in yet; put a reverse proxy in front, or tunnel, when the path is untrusted.
 - **Unix only for daemon management** — `tandem up`, `tandem down`, `tandem server status`, and `tandem server logs` use Unix domain sockets. macOS and Linux only, not Windows. (`tandem serve` works everywhere.)
 - **No static binary yet** — requires glibc 2.39+. Use matching distro or build locally.
 - **fsmonitor conflict** — if your jj config has `fsmonitor.backend = "watchman"`,
@@ -460,37 +461,26 @@ Cross-machine tested with Docker containers — see `qa/v1/cross-machine-report.
 - **Monitor disk space** — all agent objects land on the server.
 - **Firewall the port** — no auth means network-level access control is your only defense.
 
-## Maintainer note: schema regeneration
-
-`tandem` checks in generated bindings at `src/tandem_capnp.rs`.
-When you change `schema/tandem.capnp`, regenerate via:
-
-```bash
-TANDEM_REGENERATE_BINDINGS=1 cargo build
-```
-
-(`build.rs` compiles from schema when `capnp` is available, and falls back to
-checked-in bindings otherwise.)
-
 ## Project structure
 
 ```
 src/
   main.rs              CLI dispatch (clap) + jj CliRunner passthrough
-  tandem_capnp.rs      Generated Cap'n Proto bindings (checked in)
-  server.rs            Server — jj Git backend + Cap'n Proto RPC
+  server/
+    mod.rs             Server — jj Git backend, heads authority, lifecycle
+    http.rs            HTTP API surface + server-sent events
+    bucket.rs          Object-store WAL and index
+  wire.rs              Wire types: object kinds, JSON bodies, batch codec
   control.rs           Control socket — daemon management protocol (Unix socket, JSON lines)
-  backend.rs           TandemBackend (jj-lib Backend trait over RPC)
-  op_store.rs          TandemOpStore (jj-lib OpStore trait over RPC)
-  op_heads_store.rs    TandemOpHeadsStore (CAS head management over RPC)
-  rpc.rs               Cap'n Proto RPC client
+  backend.rs           TandemBackend (jj-lib Backend trait over HTTP)
+  op_store.rs          TandemOpStore (jj-lib OpStore trait over HTTP)
+  op_heads_store.rs    TandemOpHeadsStore (CAS head management over HTTP)
+  http_client.rs       HTTP client behind the three store traits
   proto_convert.rs     jj protobuf ↔ Rust struct conversion
-  watch.rs             tandem watch command
-schema/
-  tandem.capnp         Cap'n Proto schema (13 Store methods + HeadWatcher)
-build.rs               Build-time schema generation with checked-in fallback
+  watch.rs             tandem watch command (SSE reader)
 tests/
-  common/mod.rs        Test harness (server spawn, HOME isolation)
+  common/mod.rs        Test harness (server spawn, HOME isolation, HTTP helpers)
+  http_api_surface.rs  The HTTP endpoints, cache headers, CAS and SSE
   slice1-7 tests       Core integration tests (file round-trip, visibility, CAS, git)
   slice10-13 tests     Server lifecycle tests (shutdown, control socket, up/down, logs)
 ```

@@ -1,4 +1,4 @@
-//! tandem serve — Cap'n Proto RPC server hosting a jj+git backend.
+//! tandem serve — HTTP server hosting a jj+git backend.
 //!
 //! The server stores objects through jj's Git backend so that `jj git push`
 //! on the server repo just works. Operations and views are stored in the
@@ -6,32 +6,30 @@
 //! op-heads store; `.jj/repo/tandem/heads.json` stores tandem metadata only
 //! (CAS version + workspace head attribution).
 //!
-//! The durability half — WAL entries, the index object, and the recovery that
-//! replays them — lives in `bucket`, next door.
+//! This file holds the state, the object and operation stores, and the heads
+//! logic. Three siblings hold the rest: `http` is the API that exposes it,
+//! `bucket` is the durability half — WAL entries, the index object, and the
+//! recovery that replays them — and `integration` is the off-request worker
+//! that keeps the `integration` bookmark up to date.
 
 mod bucket;
+mod http;
+mod integration;
 
 use anyhow::{anyhow, bail, Context, Result};
 // blake2 is available if needed for raw hashing, but we use jj_lib::content_hash
-use capnp::capability::Promise;
-use capnp_rpc::pry;
-use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use jj_lib::backend::{CommitId, TreeId};
 use jj_lib::object_id::ObjectId as _;
-use jj_lib::op_store::{OperationId, RefTarget};
-use jj_lib::repo::Repo as _;
+use jj_lib::op_store::OperationId;
 use jj_lib::repo_path::RepoPath;
-use jj_lib::rewrite::merge_commit_trees;
 use prost::Message as _;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
 
 use self::bucket::{crash_point_after_index_write, test_env_u64, DurableOps, PendingBlobs};
@@ -40,8 +38,8 @@ use crate::hex::{from_hex, to_hex};
 use crate::logging;
 use crate::object_store::{self, ObjectStore};
 use crate::proto_convert;
-use crate::tandem_capnp::{cancel, head_watcher, store};
 use crate::wal;
+use crate::wire;
 
 // ─── Public entry point ───────────────────────────────────────────────────────
 
@@ -80,7 +78,7 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
     }
 
     let repo = PathBuf::from(&opts.repo_path);
-    let server = Rc::new(Server::new(
+    let server = Arc::new(Server::new(
         repo,
         opts.enable_integration_workspace,
         opts.bucket.as_deref(),
@@ -149,57 +147,33 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
         }
     });
 
-    // Track in-flight connections
-    let inflight = Rc::new(std::cell::Cell::new(0u32));
-    let connection_ids = Arc::new(AtomicU64::new(1));
+    // Serve until a signal or the control socket asks to stop.
+    let (drain_tx, drain_rx) = tokio::sync::oneshot::channel::<()>();
+    let app = http::router(Arc::clone(&server));
+    let serve = tokio::spawn(std::future::IntoFuture::into_future(
+        axum::serve(listener, app).with_graceful_shutdown(async move {
+            let _ = drain_rx.await;
+        }),
+    ));
 
-    // Accept loop with shutdown
-    loop {
-        tokio::select! {
-            result = listener.accept() => {
-                let (stream, addr) = result?;
-                let server = Rc::clone(&server);
-                let inflight = Rc::clone(&inflight);
-                let conn_id = connection_ids.fetch_add(1, Ordering::Relaxed);
-
-                let next = inflight.get() + 1;
-                inflight.set(next);
-                tracing::info!(conn_id, peer = %addr, inflight = next, "client connected");
-
-                tokio::task::spawn_local(async move {
-                    if let Err(err) = handle_capnp_connection(server, stream, conn_id).await {
-                        tracing::error!(conn_id, peer = %addr, error = %err, "rpc connection error");
-                    }
-                    let remaining = inflight.get().saturating_sub(1);
-                    inflight.set(remaining);
-                    tracing::info!(conn_id, peer = %addr, inflight = remaining, "client disconnected");
-                });
-            }
-            _ = signal_rx.recv() => {
-                tracing::info!("signal received, draining connections");
-                break;
-            }
-            _ = shutdown_rx.recv() => {
-                tracing::info!("shutdown requested via control socket, draining connections");
-                break;
-            }
+    tokio::select! {
+        _ = signal_rx.recv() => {
+            tracing::info!("signal received, draining connections");
+        }
+        _ = shutdown_rx.recv() => {
+            tracing::info!("shutdown requested via control socket, draining connections");
         }
     }
+    let _ = drain_tx.send(());
 
-    // Drain in-flight connections (5s timeout)
-    if inflight.get() > 0 {
-        tracing::info!(
-            inflight = inflight.get(),
-            "waiting for in-flight connections to drain"
-        );
-        let drain_deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
-        while inflight.get() > 0 {
-            if tokio::time::Instant::now() > drain_deadline {
-                tracing::warn!(inflight = inflight.get(), "drain timeout reached");
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        }
+    // Axum finishes the requests already in flight before it returns. A
+    // watcher on `/api/events` holds its connection open indefinitely, so the
+    // drain is capped rather than waited out.
+    match tokio::time::timeout(tokio::time::Duration::from_secs(5), serve).await {
+        Ok(Ok(Ok(()))) => {}
+        Ok(Ok(Err(err))) => tracing::error!(error = %err, "http server error"),
+        Ok(Err(err)) => tracing::error!(error = %err, "http server task failed"),
+        Err(_) => tracing::warn!("drain timeout reached"),
     }
 
     // Clean up control socket
@@ -215,42 +189,15 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
     Ok(())
 }
 
-// ─── Connection handler ───────────────────────────────────────────────────────
-
-async fn handle_capnp_connection(
-    server: Rc<Server>,
-    stream: tokio::net::TcpStream,
-    conn_id: u64,
-) -> Result<()> {
-    use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-
-    let (reader, writer) = stream.into_split();
-    let network = twoparty::VatNetwork::new(
-        reader.compat(),
-        writer.compat_write(),
-        rpc_twoparty_capnp::Side::Server,
-        Default::default(),
-    );
-    let store_impl = StoreImpl {
-        server: server.clone(),
-        conn_id,
-    };
-    let store_client: store::Client = capnp_rpc::new_client(store_impl);
-    let rpc_system = RpcSystem::new(Box::new(network), Some(store_client.client));
-    tracing::debug!(conn_id, "rpc session started");
-    rpc_system.await?;
-    tracing::debug!(conn_id, "rpc session ended");
-    Ok(())
-}
-
 // ─── Server state ─────────────────────────────────────────────────────────────
 
-struct WatcherEntry {
-    watcher: head_watcher::Client,
-    after_version: u64,
-}
+/// How many wake-ups a watcher may fall behind before the oldest are dropped.
+///
+/// Dropping them is safe: an event says only that a version happened, and the
+/// watcher's next read of `/api/heads` carries everything it missed.
+const HEADS_EVENT_BUFFER: usize = 64;
 
-struct Server {
+pub struct Server {
     /// jj Store wrapping the GitBackend — used for all object I/O.
     store: Arc<jj_lib::store::Store>,
     /// Repo loader for jj-lib reads/transactions.
@@ -283,7 +230,73 @@ struct Server {
     integration_enabled: bool,
     integration_trigger: Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>,
     lock: Mutex<()>,
-    watchers: Mutex<Vec<WatcherEntry>>,
+    /// Wake-ups for every `/api/events` subscriber.
+    heads_events: broadcast::Sender<u64>,
+}
+
+// ─── Read failures worth telling apart ────────────────────────────────────────
+
+/// The thing a read asked for is not here.
+///
+/// Every other read failure — a permission denied, a short read, a corrupt
+/// file — is the server's fault, and the two must not answer alike. A 404
+/// under the immutable-cache model is a conclusion a client may keep, so a
+/// disk fault that wore one would poison a cache with "this object does not
+/// exist". Reads raise this marker, `http::ApiError::from_read` matches on it,
+/// and everything else becomes a 500 the caller can retry.
+#[derive(Debug)]
+pub struct NotFound(pub String);
+
+impl std::fmt::Display for NotFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for NotFound {}
+
+/// The id a read was given cannot name an object in this backend.
+///
+/// A wrong-length hash is a malformed request, not a missing object: no
+/// amount of writing will ever make that id resolve.
+#[derive(Debug)]
+pub struct MalformedId(pub String);
+
+impl std::fmt::Display for MalformedId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for MalformedId {}
+
+/// Classify a backend read failure so the API can answer it honestly.
+fn backend_read_error(
+    error: jj_lib::backend::BackendError,
+    what: &str,
+    id: &[u8],
+) -> anyhow::Error {
+    use jj_lib::backend::BackendError;
+    let hex = to_hex(id);
+    match error {
+        BackendError::ObjectNotFound { .. } => {
+            anyhow::Error::new(NotFound(format!("{what} not found: {hex}")))
+        }
+        BackendError::InvalidHashLength { .. } => {
+            anyhow::Error::new(MalformedId(format!("{what} id is not a {what} id: {hex}")))
+        }
+        other => anyhow::Error::new(other).context(format!("read {what} {hex}")),
+    }
+}
+
+/// The same classification for the operation and view stores, which are plain
+/// files rather than a jj backend.
+fn file_read_error(error: std::io::Error, what: &str, hex: &str) -> anyhow::Error {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        anyhow::Error::new(NotFound(format!("{what} not found: {hex}")))
+    } else {
+        anyhow::Error::new(error).context(format!("read {what} {hex}"))
+    }
 }
 
 /// Operation ids for an RPC response.
@@ -344,8 +357,9 @@ impl Server {
         }
 
         let bucket = match bucket_spec {
-            Some(spec) => object_store::open(spec)
-                .with_context(|| format!("open bucket {spec}"))?,
+            Some(spec) => {
+                object_store::open(spec).with_context(|| format!("open bucket {spec}"))?
+            }
             None => object_store::open_filesystem(&tandem_dir.join("bucket"))
                 .context("open repo-local bucket")?,
         };
@@ -394,7 +408,7 @@ impl Server {
             integration_enabled,
             integration_trigger: Mutex::new(None),
             lock: Mutex::new(()),
-            watchers: Mutex::new(Vec::new()),
+            heads_events: broadcast::channel(HEADS_EVENT_BUFFER).0,
         };
         server.initialize_integration_metadata()?;
         if bootstrapped {
@@ -449,6 +463,13 @@ impl Server {
         Ok(heads)
     }
 
+    /// Merge every operation head into one, and record that one as the head.
+    ///
+    /// The candidates are the operations the op-heads store holds plus the last
+    /// operation each workspace published. The second half matters because a
+    /// head the store has lost — a crash between two writes, a client that
+    /// published and never came back — is otherwise unreachable, and the
+    /// workspace record is the only place it is still named.
     fn reconcile_jj_op_heads(
         &self,
         workspace_heads: &BTreeMap<String, String>,
@@ -489,31 +510,107 @@ impl Server {
             return Ok(before);
         }
 
-        tracing::debug!(
-            candidates = candidate_hex.len(),
-            workspace_heads = workspace_heads.len(),
-            "reconciling divergent operation heads"
-        );
-
-        let merged_op = match self
-            .repo_loader
-            .merge_operations(operations, Some("reconcile divergent operations"))
-        {
-            Ok(op) => op,
-            // Merging views is a convenience, not a correctness requirement:
-            // multiple op heads are a state every jj client already resolves on
-            // its own. Some head pairs cannot be merged at all — a workspace
-            // whose working-copy commit differs across the two sides and is the
-            // root commit on one of them needs a merge commit the git backend
-            // refuses to write. Failing here would fail the publish that has
-            // already been made durable and already been applied, and the
-            // client's retry would rewrite the same change a second time, which
-            // is how a change id goes divergent. Hand back the unmerged heads.
+        // ── Ancestors first, then the merge ──
+        //
+        // A candidate that another candidate already descends from is not a
+        // branch; it is the same branch seen earlier. `workspace_heads` is full
+        // of those, because it records the operation each workspace published
+        // last and the server has usually merged that operation since.
+        //
+        // Merging an operation with its own descendant is what jj-lib's head
+        // resolution goes out of its way to avoid, and for good reason: the
+        // merge is computed against a base that is older than the rewrite the
+        // descendant carries, so a commit the descendant replaced comes back
+        // beside its replacement — two commits, one change id, a divergent
+        // change. That is the whole of the slice14 flake.
+        //
+        // So the candidates are filtered down to real heads, exactly as
+        // `jj_lib::op_heads_store` does it. What is emphatically *not* dropped
+        // is the removal: every candidate that is not the settled head is still
+        // named to `update_op_heads`, so an ancestor that is sitting in the
+        // op-heads store is taken out of it. Filtering the merge without
+        // filtering the removal is what leaves stale heads in the store, and
+        // that is what makes clients see a divergent operation history.
+        let ordered = match order_op_heads(operations) {
+            Ok(ordered) => ordered,
             Err(err) => {
                 tracing::warn!(
                     candidates = candidate_hex.len(),
                     error = %err,
-                    "could not merge divergent operation heads; leaving them unmerged"
+                    "could not order divergent operation heads; leaving them unmerged"
+                );
+                return Ok(before);
+            }
+        };
+
+        tracing::debug!(
+            candidates = candidate_hex.len(),
+            heads = ordered.len(),
+            workspace_heads = workspace_heads.len(),
+            "reconciling divergent operation heads"
+        );
+
+        let settled_op = if ordered.len() == 1 {
+            // One real head, and every other candidate is behind it. There is
+            // nothing to merge, but there may still be stale ids to retire.
+            ordered.into_iter().next().expect("one head")
+        } else {
+            match self
+                .repo_loader
+                .merge_operations(ordered, Some("reconcile divergent operations"))
+            {
+                Ok(op) => op,
+                // Merging views is a convenience, not a correctness requirement:
+                // multiple op heads are a state every jj client already resolves on
+                // its own. Some head pairs cannot be merged at all — a workspace
+                // whose working-copy commit differs across the two sides and is the
+                // root commit on one of them needs a merge commit the git backend
+                // refuses to write. Failing here would fail the publish that has
+                // already been made durable and already been applied, and the
+                // client's retry would rewrite the same change a second time, which
+                // is how a change id goes divergent. Hand back the unmerged heads.
+                Err(err) => {
+                    tracing::warn!(
+                        candidates = candidate_hex.len(),
+                        error = %err,
+                        "could not merge divergent operation heads; leaving them unmerged"
+                    );
+                    return Ok(before);
+                }
+            }
+        };
+
+        // ── Keep every workspace operation next to the head ──
+        //
+        // A client refuses to run when its working-copy operation is neither
+        // the operation the repo loaded at nor an ancestor of it. It decides
+        // which by `dag_walk::closest_common_node_ok`, a breadth-first search
+        // from both ends that returns the first node the two sides have both
+        // seen. That is an approximation: when the working-copy operation is a
+        // *distant* ancestor of the head, the search from the working-copy side
+        // reaches the operation's own ancestors before the search from the head
+        // side has walked back far enough, so it settles on a common ancestor
+        // that is neither end, and the client calls a plain ancestor a sibling:
+        //
+        //   Internal error: The repo was loaded at operation X, which seems to
+        //   be a sibling of the working copy's operation Y
+        //
+        // A workspace that sits idle while other workspaces publish drifts
+        // exactly that far. So the settled head records the merged-away
+        // candidates as extra parents, which puts every workspace's last
+        // operation one step from the head and inside what the search can see.
+        // The operation's view is the settled view unchanged — these parents
+        // were already merged, so there is nothing left to merge, and building
+        // it by hand rather than through another `merge_operations` is what
+        // keeps a view merge against an outdated base from resurrecting the
+        // commits that base has since had rewritten.
+        let settled_op = match self.record_merged_parents(settled_op, &candidate_hex) {
+            Ok(op) => op,
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "could not record the merged operations as parents; \
+                     acknowledging the merge without them"
                 );
                 return Ok(before);
             }
@@ -523,15 +620,19 @@ impl Server {
         for op_hex in candidate_hex {
             if let Ok(bytes) = from_hex(&op_hex) {
                 let op_id = OperationId::new(bytes);
-                if op_id != *merged_op.id() {
+                if op_id != *settled_op.id() {
                     old_ids.push(op_id);
                 }
             }
         }
 
+        if old_ids.is_empty() && before == [settled_op.id().hex()] {
+            return Ok(before);
+        }
+
         pollster::block_on(
             self.op_heads_store
-                .update_op_heads(&old_ids, merged_op.id()),
+                .update_op_heads(&old_ids, settled_op.id()),
         )
         .map_err(|e| anyhow!("reconcile op heads update failed: {e}"))?;
 
@@ -546,254 +647,59 @@ impl Server {
         Ok(after)
     }
 
-    fn integration_metadata_path(&self) -> PathBuf {
-        self.tandem_dir.join("integration.json")
-    }
-
-    fn initialize_integration_metadata(&mut self) -> Result<()> {
-        let mut metadata =
-            self.read_integration_metadata()
-                .unwrap_or_else(|_| IntegrationMetadata {
-                    enabled: self.integration_enabled,
-                    last_input_fingerprint: None,
-                    last_integration_commit: None,
-                    last_status: if self.integration_enabled {
-                        "idle".to_string()
-                    } else {
-                        "disabled".to_string()
-                    },
-                    last_error: None,
-                    updated_at: Some(now_epoch_secs_string()),
-                    workspace_commit_count: Some(0),
-                });
-        metadata.enabled = self.integration_enabled;
-        if !self.integration_enabled {
-            metadata.last_status = "disabled".to_string();
-        }
-        self.write_integration_metadata(&metadata)
-    }
-
-    fn read_integration_metadata(&self) -> Result<IntegrationMetadata> {
-        let bytes = fs::read(self.integration_metadata_path())?;
-        Ok(serde_json::from_slice(&bytes)?)
-    }
-
-    fn write_integration_metadata(&self, metadata: &IntegrationMetadata) -> Result<()> {
-        fs::write(
-            self.integration_metadata_path(),
-            serde_json::to_vec_pretty(metadata)?,
-        )?;
-        Ok(())
-    }
-
-    fn record_integration_error(&self, err: &anyhow::Error) {
-        let mut metadata = self
-            .read_integration_metadata()
-            .unwrap_or(IntegrationMetadata {
-                enabled: true,
-                last_input_fingerprint: None,
-                last_integration_commit: None,
-                last_status: "error".to_string(),
-                last_error: None,
-                updated_at: None,
-                workspace_commit_count: None,
-            });
-        metadata.enabled = self.integration_enabled;
-        metadata.last_status = "error".to_string();
-        metadata.last_error = Some(format!("{err:#}"));
-        metadata.updated_at = Some(now_epoch_secs_string());
-        if let Err(write_err) = self.write_integration_metadata(&metadata) {
-            tracing::error!(error = %write_err, "failed to persist integration error metadata");
-        }
-    }
-
-    fn start_integration_worker(self: &Rc<Self>) {
-        if !self.integration_enabled {
-            return;
-        }
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
-        {
-            let mut slot = self.integration_trigger.lock().unwrap();
-            *slot = Some(tx);
-        }
-        let server = Rc::clone(self);
-        tokio::task::spawn_local(async move {
-            tracing::info!("integration worker started");
-            while rx.recv().await.is_some() {
-                tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
-                while rx.try_recv().is_ok() {}
-                if let Err(err) = server.recompute_integration_bookmark() {
-                    tracing::error!(error = %err, "integration recompute failed");
-                    server.record_integration_error(&err);
-                }
-            }
-            tracing::info!("integration worker stopped");
-        });
-    }
-
-    fn enqueue_integration_recompute(&self) {
-        let sender = self.integration_trigger.lock().unwrap().clone();
-        if let Some(tx) = sender {
-            let _ = tx.send(());
-        }
-    }
-
-    fn recompute_integration_bookmark(&self) -> Result<()> {
-        if !self.integration_enabled {
-            return Ok(());
-        }
-
-        let workspace_heads = {
-            let _guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
-            self.read_heads_metadata()?.workspace_heads
-        };
-        let workspace_commits = self.resolve_workspace_commits(&workspace_heads)?;
-        let input_fingerprint = fingerprint_workspace_commits(&workspace_commits);
-
-        let mut metadata =
-            self.read_integration_metadata()
-                .unwrap_or_else(|_| IntegrationMetadata {
-                    enabled: true,
-                    last_input_fingerprint: None,
-                    last_integration_commit: None,
-                    last_status: "idle".to_string(),
-                    last_error: None,
-                    updated_at: None,
-                    workspace_commit_count: Some(0),
-                });
-        metadata.enabled = true;
-
-        if workspace_commits.is_empty() {
-            metadata.last_input_fingerprint = Some(input_fingerprint);
-            metadata.last_status = "idle".to_string();
-            metadata.last_error = None;
-            metadata.workspace_commit_count = Some(0);
-            metadata.updated_at = Some(now_epoch_secs_string());
-            self.write_integration_metadata(&metadata)?;
-            tracing::debug!("integration recompute skipped: no workspace commits");
-            return Ok(());
-        }
-
-        let already_current = metadata.last_input_fingerprint.as_deref()
-            == Some(&input_fingerprint)
-            && matches!(metadata.last_status.as_str(), "clean" | "conflicted");
-        if already_current {
-            return Ok(());
-        }
-
-        let mut parent_hexes: Vec<String> = workspace_commits.values().cloned().collect();
-        parent_hexes.sort();
-        parent_hexes.dedup();
-
-        let readonly_repo = self
-            .repo_loader
-            .load_at_head()
-            .context("load repo at head")?;
-        let parent_ids: Vec<CommitId> = parent_hexes
-            .iter()
-            .map(|hex| from_hex(hex).map(CommitId::new))
-            .collect::<Result<Vec<_>>>()?;
-        let parent_commits: Vec<_> = parent_ids
-            .iter()
-            .map(|id| readonly_repo.store().get_commit(id))
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|e| anyhow!("load parent commit: {e}"))?;
-
-        let merged_tree =
-            pollster::block_on(merge_commit_trees(readonly_repo.as_ref(), &parent_commits))
-                .map_err(|e| anyhow!("merge workspace commits: {e}"))?;
-
-        let mut tx = readonly_repo.start_transaction();
-        let mut commit_builder = tx.repo_mut().new_commit(parent_ids, merged_tree).detach();
-        commit_builder.set_description("integration workspace recompute");
-        let integration_commit = commit_builder
-            .write(tx.repo_mut())
-            .map_err(|e| anyhow!("write integration commit: {e}"))?;
-        tx.repo_mut().set_local_bookmark_target(
-            "integration".as_ref(),
-            RefTarget::normal(integration_commit.id().clone()),
-        );
-
-        let unpublished = tx
-            .write("integration workspace recompute")
-            .map_err(|e| anyhow!("write integration operation: {e}"))?;
-
-        {
-            let _guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
-            unpublished
-                .publish()
-                .map_err(|e| anyhow!("publish integration operation: {e}"))?;
-
-            let heads_metadata = self.read_heads_metadata()?;
-            let next_heads = self.read_jj_op_heads()?;
-            let next_metadata = HeadsMetadata {
-                version: heads_metadata.version + 1,
-                workspace_heads: heads_metadata.workspace_heads,
-            };
-            self.write_heads_metadata(&next_metadata)?;
-            let heads_bytes: Vec<Vec<u8>> =
-                next_heads.iter().filter_map(|h| from_hex(h).ok()).collect();
-            self.notify_watchers(next_metadata.version, &heads_bytes);
-        }
-
-        metadata.last_input_fingerprint = Some(input_fingerprint);
-        metadata.last_integration_commit = Some(integration_commit.id().hex());
-        metadata.last_status = if integration_commit.has_conflict() {
-            "conflicted".to_string()
-        } else {
-            "clean".to_string()
-        };
-        metadata.last_error = None;
-        metadata.workspace_commit_count = Some(workspace_commits.len());
-        metadata.updated_at = Some(now_epoch_secs_string());
-        self.write_integration_metadata(&metadata)?;
-
-        tracing::info!(
-            status = %metadata.last_status,
-            integration_commit = %integration_commit.id().hex(),
-            workspace_commits = workspace_commits.len(),
-            "integration recompute completed"
-        );
-        Ok(())
-    }
-
-    fn resolve_workspace_commits(
+    /// Name the already-merged candidates as parents of the settled head.
+    ///
+    /// The written operation carries the settled operation's view byte for
+    /// byte. Nothing about the repository changes; what changes is how far a
+    /// client has to walk to find its own working-copy operation, which is the
+    /// whole point (see the caller). If every candidate is already the head or
+    /// one of its parents, the head is handed back untouched.
+    fn record_merged_parents(
         &self,
-        workspace_heads: &BTreeMap<String, String>,
-    ) -> Result<BTreeMap<String, String>> {
-        let op_store = self.repo_loader.op_store();
-        let mut workspace_commits = BTreeMap::new();
-
-        for (workspace_id, op_hex) in workspace_heads {
-            let op_bytes = match from_hex(op_hex) {
-                Ok(bytes) => bytes,
-                Err(err) => {
-                    tracing::warn!(workspace_id = %workspace_id, op_id = %op_hex, error = %err, "bad workspace op id");
-                    continue;
-                }
+        settled: jj_lib::operation::Operation,
+        candidate_hex: &[String],
+    ) -> Result<jj_lib::operation::Operation> {
+        let mut parents = vec![settled.id().clone()];
+        for op_hex in candidate_hex {
+            let Ok(bytes) = from_hex(op_hex) else {
+                continue;
             };
-            let op_id = jj_lib::op_store::OperationId::new(op_bytes);
-            let operation = match pollster::block_on(op_store.read_operation(&op_id)) {
-                Ok(op) => op,
-                Err(err) => {
-                    tracing::warn!(workspace_id = %workspace_id, op_id = %op_hex, error = %err, "operation missing for workspace");
-                    continue;
-                }
-            };
-            let view = match pollster::block_on(op_store.read_view(&operation.view_id)) {
-                Ok(view) => view,
-                Err(err) => {
-                    tracing::warn!(workspace_id = %workspace_id, op_id = %op_hex, error = %err, "view missing for workspace operation");
-                    continue;
-                }
-            };
-            let key = jj_lib::ref_name::WorkspaceNameBuf::from(workspace_id.clone());
-            if let Some(commit_id) = view.wc_commit_ids.get(&key) {
-                workspace_commits.insert(workspace_id.clone(), commit_id.hex());
+            let op_id = OperationId::new(bytes);
+            if op_id == *settled.id()
+                || settled.parent_ids().contains(&op_id)
+                || parents.contains(&op_id)
+            {
+                continue;
             }
+            parents.push(op_id);
+        }
+        if parents.len() == 1 {
+            return Ok(settled);
         }
 
-        Ok(workspace_commits)
+        let now = jj_lib::backend::Timestamp::now();
+        let metadata = jj_lib::op_store::OperationMetadata {
+            time: jj_lib::op_store::TimestampRange {
+                start: now,
+                end: now,
+            },
+            description: "record merged operations".to_string(),
+            hostname: settled.metadata().hostname.clone(),
+            username: settled.metadata().username.clone(),
+            is_snapshot: false,
+            tags: std::collections::HashMap::new(),
+        };
+        let data = jj_lib::op_store::Operation {
+            view_id: settled.view_id().clone(),
+            parents,
+            metadata,
+            commit_predecessors: None,
+        };
+
+        let op_store = self.repo_loader.op_store().clone();
+        let id = pollster::block_on(op_store.write_operation(&data))
+            .map_err(|e| anyhow!("write the operation recording merged parents: {e}"))?;
+        Ok(jj_lib::operation::Operation::new(op_store, id, data))
     }
 
     // ─── Object operations (through git backend) ─────────────────────
@@ -804,8 +710,8 @@ impl Server {
         match kind {
             "file" => {
                 let file_id = jj_lib::backend::FileId::new(id.to_vec());
-                let mut reader = pollster::block_on(backend.read_file(&RepoPath::root(), &file_id))
-                    .map_err(|e| anyhow!("read file {}: {e}", to_hex(id)))?;
+                let mut reader = pollster::block_on(backend.read_file(RepoPath::root(), &file_id))
+                    .map_err(|e| backend_read_error(e, "file", id))?;
                 let mut buf = Vec::new();
                 pollster::block_on(tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut buf))
                     .map_err(|e| anyhow!("read file bytes: {e}"))?;
@@ -813,8 +719,8 @@ impl Server {
             }
             "tree" => {
                 let tree_id = TreeId::new(id.to_vec());
-                let tree = pollster::block_on(backend.read_tree(&RepoPath::root(), &tree_id))
-                    .map_err(|e| anyhow!("read tree {}: {e}", to_hex(id)))?;
+                let tree = pollster::block_on(backend.read_tree(RepoPath::root(), &tree_id))
+                    .map_err(|e| backend_read_error(e, "tree", id))?;
                 let proto = proto_convert::tree_to_proto(&tree);
                 Ok(proto.encode_to_vec())
             }
@@ -829,15 +735,15 @@ impl Server {
                     return Ok(proto.encode_to_vec());
                 }
                 let commit = pollster::block_on(backend.read_commit(&commit_id))
-                    .map_err(|e| anyhow!("read commit {}: {e}", to_hex(id)))?;
+                    .map_err(|e| backend_read_error(e, "commit", id))?;
                 let proto = jj_lib::simple_backend::commit_to_proto(&commit);
                 Ok(proto.encode_to_vec())
             }
             "symlink" => {
                 let symlink_id = jj_lib::backend::SymlinkId::new(id.to_vec());
                 let target =
-                    pollster::block_on(backend.read_symlink(&RepoPath::root(), &symlink_id))
-                        .map_err(|e| anyhow!("read symlink {}: {e}", to_hex(id)))?;
+                    pollster::block_on(backend.read_symlink(RepoPath::root(), &symlink_id))
+                        .map_err(|e| backend_read_error(e, "symlink", id))?;
                 Ok(target.into_bytes())
             }
             "copy" => {
@@ -872,16 +778,15 @@ impl Server {
         match kind {
             "file" => {
                 let mut cursor = Cursor::new(data.to_vec());
-                let file_id =
-                    pollster::block_on(backend.write_file(&RepoPath::root(), &mut cursor))
-                        .map_err(|e| anyhow!("write file: {e}"))?;
+                let file_id = pollster::block_on(backend.write_file(RepoPath::root(), &mut cursor))
+                    .map_err(|e| anyhow!("write file: {e}"))?;
                 Ok((file_id.as_bytes().to_vec(), data.to_vec()))
             }
             "tree" => {
                 let proto = jj_lib::protos::simple_store::Tree::decode(data)
                     .context("decode tree proto")?;
                 let tree = proto_convert::tree_from_proto(proto);
-                let tree_id = pollster::block_on(backend.write_tree(&RepoPath::root(), &tree))
+                let tree_id = pollster::block_on(backend.write_tree(RepoPath::root(), &tree))
                     .map_err(|e| anyhow!("write tree: {e}"))?;
                 // Return the original proto data as normalized (the tree is the same)
                 Ok((tree_id.as_bytes().to_vec(), data.to_vec()))
@@ -902,7 +807,7 @@ impl Server {
                 let target =
                     std::str::from_utf8(data).context("symlink target is not valid UTF-8")?;
                 let symlink_id =
-                    pollster::block_on(backend.write_symlink(&RepoPath::root(), target))
+                    pollster::block_on(backend.write_symlink(RepoPath::root(), target))
                         .map_err(|e| anyhow!("write symlink: {e}"))?;
                 Ok((symlink_id.as_bytes().to_vec(), data.to_vec()))
             }
@@ -921,7 +826,7 @@ impl Server {
     fn get_operation_sync(&self, id: &[u8]) -> Result<Vec<u8>> {
         let hex = to_hex(id);
         let path = self.op_store_path.join("operations").join(&hex);
-        fs::read(&path).with_context(|| format!("operation not found: {hex}"))
+        fs::read(&path).map_err(|e| file_read_error(e, "operation", &hex))
     }
 
     fn put_operation_sync(&self, data: &[u8]) -> Result<Vec<u8>> {
@@ -944,7 +849,7 @@ impl Server {
     fn get_view_sync(&self, id: &[u8]) -> Result<Vec<u8>> {
         let hex = to_hex(id);
         let path = self.op_store_path.join("views").join(&hex);
-        fs::read(&path).with_context(|| format!("view not found: {hex}"))
+        fs::read(&path).map_err(|e| file_read_error(e, "view", &hex))
     }
 
     fn put_view_sync(&self, data: &[u8]) -> Result<Vec<u8>> {
@@ -1175,7 +1080,7 @@ impl Server {
 
         let heads_bytes = head_ids_for_wire(&acked_heads);
 
-        self.notify_watchers(next_metadata.version, &heads_bytes);
+        self.notify_watchers(next_metadata.version);
         if self.integration_enabled {
             self.enqueue_integration_recompute();
         }
@@ -1188,47 +1093,57 @@ impl Server {
         })
     }
 
-    fn register_watcher(&self, watcher: head_watcher::Client, after_version: u64) {
-        let mut watchers = self.watchers.lock().unwrap();
-        watchers.push(WatcherEntry {
-            watcher,
-            after_version,
-        });
-        tracing::debug!(
-            watchers = watchers.len(),
-            after_version,
-            "watcher registered"
-        );
+    /// A new subscriber on `/api/events`.
+    fn subscribe_heads(&self) -> broadcast::Receiver<u64> {
+        self.heads_events.subscribe()
     }
 
-    fn notify_watchers(&self, version: u64, heads: &[Vec<u8>]) {
-        let mut watchers = self.watchers.lock().unwrap();
-        tracing::trace!(
-            watchers = watchers.len(),
-            version,
-            heads = heads.len(),
-            "notifying watchers"
-        );
-        for entry in watchers.iter_mut() {
-            if entry.after_version >= version {
-                continue;
+    /// Tell every watcher that the head set moved.
+    ///
+    /// The event carries the version and nothing else. A watcher answers it
+    /// by reading `/api/heads`, which is why a wake-up that is dropped, or
+    /// coalesced with the one behind it, costs a watcher nothing.
+    fn notify_watchers(&self, version: u64) {
+        match self.heads_events.send(version) {
+            Ok(watchers) => {
+                tracing::trace!(watchers, version, "woke watchers");
             }
-            let watcher = entry.watcher.clone();
-            let heads_clone: Vec<Vec<u8>> = heads.to_vec();
-            entry.after_version = version;
+            // No subscribers is the normal case, not a failure.
+            Err(_) => tracing::trace!(version, "no watchers to wake"),
+        }
+    }
 
-            tokio::task::spawn_local(async move {
-                let mut req = watcher.notify_request();
-                {
-                    let mut params = req.get();
-                    params.set_version(version);
-                    let mut heads_builder = params.init_heads(heads_clone.len() as u32);
-                    for (i, head) in heads_clone.iter().enumerate() {
-                        heads_builder.set(i as u32, head);
-                    }
-                }
-                let _ = req.send().promise.await;
-            });
+    /// What a client checks before it trusts this server with its repo.
+    ///
+    /// The `TANDEM_TEST_REPO_INFO_*` variables let a test stand up a server
+    /// that claims to be something a client must refuse.
+    fn repo_info_body(&self) -> wire::RepoInfoBody {
+        let backend = self.store.backend();
+        wire::RepoInfoBody {
+            protocol_major: test_repo_info_u16(
+                "TANDEM_TEST_REPO_INFO_PROTOCOL_MAJOR",
+                wire::PROTOCOL_MAJOR,
+            ),
+            protocol_minor: test_repo_info_u16(
+                "TANDEM_TEST_REPO_INFO_PROTOCOL_MINOR",
+                wire::PROTOCOL_MINOR,
+            ),
+            tandem_version: env!("CARGO_PKG_VERSION").to_string(),
+            backend_name: test_repo_info_text(
+                "TANDEM_TEST_REPO_INFO_BACKEND_NAME",
+                wire::BACKEND_NAME,
+            ),
+            op_store_name: test_repo_info_text(
+                "TANDEM_TEST_REPO_INFO_OP_STORE_NAME",
+                wire::OP_STORE_NAME,
+            ),
+            commit_id_length: backend.commit_id_length() as u32,
+            change_id_length: backend.change_id_length() as u32,
+            root_commit_id: to_hex(backend.root_commit_id().as_bytes()),
+            root_change_id: to_hex(backend.root_change_id().as_bytes()),
+            empty_tree_id: to_hex(backend.empty_tree_id().as_bytes()),
+            root_operation_id: to_hex(&[0u8; 64]),
+            capabilities: test_repo_info_capabilities(),
         }
     }
 
@@ -1270,63 +1185,11 @@ struct HeadsState {
     workspace_heads: BTreeMap<String, String>, // hex-encoded
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct IntegrationMetadata {
-    enabled: bool,
-    #[serde(default)]
-    last_input_fingerprint: Option<String>,
-    #[serde(default)]
-    last_integration_commit: Option<String>,
-    #[serde(default = "default_integration_status")]
-    last_status: String,
-    #[serde(default)]
-    last_error: Option<String>,
-    #[serde(default)]
-    updated_at: Option<String>,
-    #[serde(default)]
-    workspace_commit_count: Option<usize>,
-}
-
-fn default_integration_status() -> String {
-    "idle".to_string()
-}
-
-fn now_epoch_secs_string() -> String {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs().to_string())
-        .unwrap_or_else(|_| "0".to_string())
-}
-
-fn fingerprint_workspace_commits(workspace_commits: &BTreeMap<String, String>) -> String {
-    workspace_commits
-        .iter()
-        .map(|(workspace, commit)| format!("{workspace}:{commit}"))
-        .collect::<Vec<_>>()
-        .join("|")
-}
-
-// ─── Cap'n Proto Store implementation ─────────────────────────────────────────
-
-struct StoreImpl {
-    server: Rc<Server>,
-    conn_id: u64,
-}
-
-fn capnp_err(e: anyhow::Error) -> capnp::Error {
-    capnp::Error::failed(format!("{e:#}"))
-}
-
-fn object_kind_str(kind: crate::tandem_capnp::ObjectKind) -> &'static str {
-    match kind {
-        crate::tandem_capnp::ObjectKind::Commit => "commit",
-        crate::tandem_capnp::ObjectKind::Tree => "tree",
-        crate::tandem_capnp::ObjectKind::File => "file",
-        crate::tandem_capnp::ObjectKind::Symlink => "symlink",
-        crate::tandem_capnp::ObjectKind::Copy => "copy",
-    }
-}
+// ─── Repo-info test hooks ─────────────────────────────────────────────────────
+//
+// The compatibility handshake is the one place a client refuses a server
+// outright, so a test needs a way to make a server claim to be the wrong
+// thing. These read the claim out of the environment.
 
 fn test_repo_info_u16(var: &str, default: u16) -> u16 {
     std::env::var(var)
@@ -1339,643 +1202,62 @@ fn test_repo_info_text(var: &str, default: &'static str) -> String {
     std::env::var(var).unwrap_or_else(|_| default.to_string())
 }
 
-fn test_repo_info_capabilities() -> Vec<crate::tandem_capnp::Capability> {
-    if let Ok(raw) = std::env::var("TANDEM_TEST_REPO_INFO_CAPABILITIES") {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            return Vec::new();
-        }
+/// What this server advertises. `watchHeads` is the only one it implements;
+/// the rest are here so a test can make a server claim otherwise.
+const ADVERTISED_CAPABILITIES: &[wire::RepoCapability] = &[wire::RepoCapability::WatchHeads];
 
-        let mut caps = Vec::new();
-        for token in trimmed.split(',') {
-            let normalized = token.trim();
-            let cap = match normalized {
-                "watchHeads" => crate::tandem_capnp::Capability::WatchHeads,
-                "headsSnapshot" => crate::tandem_capnp::Capability::HeadsSnapshot,
-                "copyTracking" => crate::tandem_capnp::Capability::CopyTracking,
-                _ => continue,
-            };
-            if !caps.contains(&cap) {
-                caps.push(cap);
-            }
-        }
-        return caps;
+fn test_repo_info_capabilities() -> Vec<String> {
+    let Ok(raw) = std::env::var("TANDEM_TEST_REPO_INFO_CAPABILITIES") else {
+        return ADVERTISED_CAPABILITIES
+            .iter()
+            .map(|cap| cap.as_str().to_string())
+            .collect();
+    };
+
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
     }
 
-    vec![crate::tandem_capnp::Capability::WatchHeads]
-}
-
-impl store::Server for StoreImpl {
-    fn get_repo_info(
-        &mut self,
-        _params: store::GetRepoInfoParams,
-        mut results: store::GetRepoInfoResults,
-    ) -> Promise<(), capnp::Error> {
-        tracing::trace!(conn_id = self.conn_id, rpc = "getRepoInfo", "rpc request");
-        let backend = self.server.store.backend();
-        let mut info = results.get().init_info();
-        info.set_protocol_major(test_repo_info_u16(
-            "TANDEM_TEST_REPO_INFO_PROTOCOL_MAJOR",
-            0,
-        ));
-        info.set_protocol_minor(test_repo_info_u16(
-            "TANDEM_TEST_REPO_INFO_PROTOCOL_MINOR",
-            1,
-        ));
-        info.set_jj_version(env!("CARGO_PKG_VERSION"));
-        let backend_name = test_repo_info_text("TANDEM_TEST_REPO_INFO_BACKEND_NAME", "tandem");
-        let op_store_name =
-            test_repo_info_text("TANDEM_TEST_REPO_INFO_OP_STORE_NAME", "tandem_op_store");
-        info.set_backend_name(&backend_name);
-        info.set_op_store_name(&op_store_name);
-        info.set_commit_id_length(backend.commit_id_length() as u16);
-        info.set_change_id_length(backend.change_id_length() as u16);
-        info.set_root_commit_id(backend.root_commit_id().as_bytes());
-        info.set_root_change_id(backend.root_change_id().as_bytes());
-        info.set_empty_tree_id(backend.empty_tree_id().as_bytes());
-        info.set_root_operation_id(&[0u8; 64]);
-        let capabilities = test_repo_info_capabilities();
-        {
-            let mut caps = info.init_capabilities(capabilities.len() as u32);
-            for (i, cap) in capabilities.iter().enumerate() {
-                caps.set(i as u32, *cap);
-            }
-        }
-        Promise::ok(())
-    }
-
-    fn get_object(
-        &mut self,
-        params: store::GetObjectParams,
-        mut results: store::GetObjectResults,
-    ) -> Promise<(), capnp::Error> {
-        let reader = pry!(params.get());
-        let kind = pry!(reader.get_kind());
-        let id_bytes = pry!(reader.get_id());
-        let kind_str = object_kind_str(kind);
-
-        tracing::debug!(
-            conn_id = self.conn_id,
-            rpc = "getObject",
-            kind = kind_str,
-            object_id = %to_hex(id_bytes),
-            "rpc request"
-        );
-
-        match self.server.get_object_sync(kind_str, id_bytes) {
-            Ok(data) => {
-                tracing::debug!(
-                    conn_id = self.conn_id,
-                    rpc = "getObject",
-                    kind = kind_str,
-                    object_id = %to_hex(id_bytes),
-                    bytes = data.len(),
-                    "rpc response"
-                );
-                results.get().set_data(&data);
-                Promise::ok(())
-            }
-            Err(e) => {
-                tracing::error!(
-                    conn_id = self.conn_id,
-                    rpc = "getObject",
-                    kind = kind_str,
-                    object_id = %to_hex(id_bytes),
-                    error = %e,
-                    "rpc error"
-                );
-                Promise::err(capnp_err(e))
-            }
-        }
-    }
-
-    fn put_object(
-        &mut self,
-        params: store::PutObjectParams,
-        mut results: store::PutObjectResults,
-    ) -> Promise<(), capnp::Error> {
-        let reader = pry!(params.get());
-        let kind = pry!(reader.get_kind());
-        let data = pry!(reader.get_data()).to_vec();
-        let kind_str = object_kind_str(kind);
-
-        tracing::info!(
-            conn_id = self.conn_id,
-            rpc = "putObject",
-            kind = kind_str,
-            bytes = data.len(),
-            "rpc request"
-        );
-
-        match self.server.put_object_sync(kind_str, &data) {
-            Ok((id, normalized)) => {
-                tracing::info!(
-                    conn_id = self.conn_id,
-                    rpc = "putObject",
-                    kind = kind_str,
-                    object_id = %to_hex(&id),
-                    bytes = data.len(),
-                    normalized_bytes = normalized.len(),
-                    "rpc response"
-                );
-                let mut r = results.get();
-                r.set_id(&id);
-                r.set_normalized_data(&normalized);
-                Promise::ok(())
-            }
-            Err(e) => {
-                tracing::error!(
-                    conn_id = self.conn_id,
-                    rpc = "putObject",
-                    kind = kind_str,
-                    bytes = data.len(),
-                    error = %e,
-                    "rpc error"
-                );
-                Promise::err(capnp_err(e))
-            }
-        }
-    }
-
-    fn get_operation(
-        &mut self,
-        params: store::GetOperationParams,
-        mut results: store::GetOperationResults,
-    ) -> Promise<(), capnp::Error> {
-        let reader = pry!(params.get());
-        let id_bytes = pry!(reader.get_id());
-
-        tracing::debug!(
-            conn_id = self.conn_id,
-            rpc = "getOperation",
-            operation_id = %to_hex(id_bytes),
-            "rpc request"
-        );
-
-        match self.server.get_operation_sync(id_bytes) {
-            Ok(data) => {
-                tracing::debug!(
-                    conn_id = self.conn_id,
-                    rpc = "getOperation",
-                    operation_id = %to_hex(id_bytes),
-                    bytes = data.len(),
-                    "rpc response"
-                );
-                results.get().set_data(&data);
-                Promise::ok(())
-            }
-            Err(e) => {
-                tracing::error!(
-                    conn_id = self.conn_id,
-                    rpc = "getOperation",
-                    operation_id = %to_hex(id_bytes),
-                    error = %e,
-                    "rpc error"
-                );
-                Promise::err(capnp_err(e))
-            }
-        }
-    }
-
-    fn put_operation(
-        &mut self,
-        params: store::PutOperationParams,
-        mut results: store::PutOperationResults,
-    ) -> Promise<(), capnp::Error> {
-        let reader = pry!(params.get());
-        let data = pry!(reader.get_data()).to_vec();
-
-        tracing::info!(
-            conn_id = self.conn_id,
-            rpc = "putOperation",
-            bytes = data.len(),
-            "rpc request"
-        );
-
-        match self.server.put_operation_sync(&data) {
-            Ok(id) => {
-                tracing::info!(
-                    conn_id = self.conn_id,
-                    rpc = "putOperation",
-                    operation_id = %to_hex(&id),
-                    bytes = data.len(),
-                    "rpc response"
-                );
-                results.get().set_id(&id);
-                Promise::ok(())
-            }
-            Err(e) => {
-                tracing::error!(
-                    conn_id = self.conn_id,
-                    rpc = "putOperation",
-                    bytes = data.len(),
-                    error = %e,
-                    "rpc error"
-                );
-                Promise::err(capnp_err(e))
-            }
-        }
-    }
-
-    fn get_view(
-        &mut self,
-        params: store::GetViewParams,
-        mut results: store::GetViewResults,
-    ) -> Promise<(), capnp::Error> {
-        let reader = pry!(params.get());
-        let id_bytes = pry!(reader.get_id());
-
-        tracing::debug!(
-            conn_id = self.conn_id,
-            rpc = "getView",
-            view_id = %to_hex(id_bytes),
-            "rpc request"
-        );
-
-        match self.server.get_view_sync(id_bytes) {
-            Ok(data) => {
-                tracing::debug!(
-                    conn_id = self.conn_id,
-                    rpc = "getView",
-                    view_id = %to_hex(id_bytes),
-                    bytes = data.len(),
-                    "rpc response"
-                );
-                results.get().set_data(&data);
-                Promise::ok(())
-            }
-            Err(e) => {
-                tracing::error!(
-                    conn_id = self.conn_id,
-                    rpc = "getView",
-                    view_id = %to_hex(id_bytes),
-                    error = %e,
-                    "rpc error"
-                );
-                Promise::err(capnp_err(e))
-            }
-        }
-    }
-
-    fn put_view(
-        &mut self,
-        params: store::PutViewParams,
-        mut results: store::PutViewResults,
-    ) -> Promise<(), capnp::Error> {
-        let reader = pry!(params.get());
-        let data = pry!(reader.get_data()).to_vec();
-
-        tracing::info!(
-            conn_id = self.conn_id,
-            rpc = "putView",
-            bytes = data.len(),
-            "rpc request"
-        );
-
-        match self.server.put_view_sync(&data) {
-            Ok(id) => {
-                tracing::info!(
-                    conn_id = self.conn_id,
-                    rpc = "putView",
-                    view_id = %to_hex(&id),
-                    bytes = data.len(),
-                    "rpc response"
-                );
-                results.get().set_id(&id);
-                Promise::ok(())
-            }
-            Err(e) => {
-                tracing::error!(
-                    conn_id = self.conn_id,
-                    rpc = "putView",
-                    bytes = data.len(),
-                    error = %e,
-                    "rpc error"
-                );
-                Promise::err(capnp_err(e))
-            }
-        }
-    }
-
-    fn resolve_operation_id_prefix(
-        &mut self,
-        params: store::ResolveOperationIdPrefixParams,
-        mut results: store::ResolveOperationIdPrefixResults,
-    ) -> Promise<(), capnp::Error> {
-        let reader = pry!(params.get());
-        let prefix = pry!(reader.get_hex_prefix()).to_string().unwrap();
-        tracing::debug!(
-            conn_id = self.conn_id,
-            rpc = "resolveOperationIdPrefix",
-            prefix = %prefix,
-            "rpc request"
-        );
-
-        match self.server.resolve_operation_id_prefix_sync(&prefix) {
-            Ok((resolution, matched)) => {
-                tracing::debug!(
-                    conn_id = self.conn_id,
-                    rpc = "resolveOperationIdPrefix",
-                    prefix = %prefix,
-                    resolution = %resolution,
-                    "rpc response"
-                );
-                let mut r = results.get();
-                match resolution.as_str() {
-                    "noMatch" => r.set_resolution(crate::tandem_capnp::PrefixResolution::NoMatch),
-                    "singleMatch" => {
-                        r.set_resolution(crate::tandem_capnp::PrefixResolution::SingleMatch);
-                        if let Some(m) = matched {
-                            r.set_match(&m);
-                        }
-                    }
-                    "ambiguous" => {
-                        r.set_resolution(crate::tandem_capnp::PrefixResolution::Ambiguous)
-                    }
-                    _ => r.set_resolution(crate::tandem_capnp::PrefixResolution::NoMatch),
-                }
-                Promise::ok(())
-            }
-            Err(e) => {
-                tracing::error!(
-                    conn_id = self.conn_id,
-                    rpc = "resolveOperationIdPrefix",
-                    prefix = %prefix,
-                    error = %e,
-                    "rpc error"
-                );
-                Promise::err(capnp_err(e))
-            }
-        }
-    }
-
-    fn get_heads(
-        &mut self,
-        _params: store::GetHeadsParams,
-        mut results: store::GetHeadsResults,
-    ) -> Promise<(), capnp::Error> {
-        tracing::debug!(conn_id = self.conn_id, rpc = "getHeads", "rpc request");
-        match self.server.get_heads_sync() {
-            Ok(state) => {
-                tracing::debug!(
-                    conn_id = self.conn_id,
-                    rpc = "getHeads",
-                    version = state.version,
-                    heads = state.heads.len(),
-                    workspace_heads = state.workspace_heads.len(),
-                    "rpc response"
-                );
-                let mut r = results.get();
-                // Convert hex heads to raw bytes
-                let head_bytes: Vec<Vec<u8>> = state
-                    .heads
-                    .iter()
-                    .filter_map(|h| from_hex(h).ok())
-                    .collect();
-                {
-                    let mut heads = r.reborrow().init_heads(head_bytes.len() as u32);
-                    for (i, head) in head_bytes.iter().enumerate() {
-                        heads.set(i as u32, head);
-                    }
-                }
-                r.set_version(state.version);
-                {
-                    let mut wh = r.init_workspace_heads(state.workspace_heads.len() as u32);
-                    for (i, (ws_id, commit_hex)) in state.workspace_heads.iter().enumerate() {
-                        let mut entry = wh.reborrow().get(i as u32);
-                        entry.set_workspace_id(ws_id);
-                        if let Ok(commit_bytes) = from_hex(commit_hex) {
-                            entry.set_commit_id(&commit_bytes);
-                        }
-                    }
-                }
-                Promise::ok(())
-            }
-            Err(e) => {
-                tracing::error!(
-                    conn_id = self.conn_id,
-                    rpc = "getHeads",
-                    error = %e,
-                    "rpc error"
-                );
-                Promise::err(capnp_err(e))
-            }
-        }
-    }
-
-    fn update_op_heads(
-        &mut self,
-        params: store::UpdateOpHeadsParams,
-        mut results: store::UpdateOpHeadsResults,
-    ) -> Promise<(), capnp::Error> {
-        let reader = pry!(params.get());
-
-        let old_ids_reader = pry!(reader.get_old_ids());
-        let mut old_ids = Vec::new();
-        for i in 0..old_ids_reader.len() {
-            old_ids.push(pry!(old_ids_reader.get(i)).to_vec());
-        }
-
-        let new_id = pry!(reader.get_new_id()).to_vec();
-        let expected_version = reader.get_expected_version();
-        let workspace_id_text = pry!(reader.get_workspace_id());
-        let workspace_id_str = workspace_id_text.to_str().unwrap_or("");
-        let workspace_id = if workspace_id_str.is_empty() {
-            None
-        } else {
-            Some(workspace_id_str.to_string())
+    // Parsing through the same enum the client parses with is the point: a
+    // name neither side knows is dropped here rather than advertised.
+    let mut caps: Vec<String> = Vec::new();
+    for token in trimmed.split(',') {
+        let Some(capability) = wire::RepoCapability::from_name(token.trim()) else {
+            continue;
         };
-
-        let request_started = Instant::now();
-        tracing::debug!(
-            conn_id = self.conn_id,
-            rpc = "updateOpHeads",
-            rpc_method = "updateOpHeads",
-            expected_version,
-            old_ids = old_ids.len(),
-            new_id = %to_hex(&new_id),
-            workspace_id = workspace_id.as_deref().unwrap_or(""),
-            attempt = 1,
-            cas_retries = 0,
-            queue_depth = 0,
-            "rpc request"
-        );
-
-        match self
-            .server
-            .update_op_heads_sync(old_ids, new_id, expected_version, workspace_id)
-        {
-            Ok(result) => {
-                tracing::debug!(
-                    conn_id = self.conn_id,
-                    rpc = "updateOpHeads",
-                    rpc_method = "updateOpHeads",
-                    ok = result.ok,
-                    version = result.version,
-                    heads = result.heads.len(),
-                    workspace_heads = result.workspace_heads.len(),
-                    attempt = 1,
-                    cas_retries = 0,
-                    queue_depth = 0,
-                    latency_ms = request_started.elapsed().as_millis() as u64,
-                    "rpc response"
-                );
-                let mut r = results.get();
-                r.set_ok(result.ok);
-                {
-                    let mut heads = r.reborrow().init_heads(result.heads.len() as u32);
-                    for (i, head) in result.heads.iter().enumerate() {
-                        heads.set(i as u32, head);
-                    }
-                }
-                r.set_version(result.version);
-                {
-                    let mut wh = r.init_workspace_heads(result.workspace_heads.len() as u32);
-                    for (i, (ws_id, commit_hex)) in result.workspace_heads.iter().enumerate() {
-                        let mut entry = wh.reborrow().get(i as u32);
-                        entry.set_workspace_id(ws_id);
-                        if let Ok(commit_bytes) = from_hex(commit_hex) {
-                            entry.set_commit_id(&commit_bytes);
-                        }
-                    }
-                }
-                Promise::ok(())
-            }
-            Err(e) => {
-                tracing::error!(
-                    conn_id = self.conn_id,
-                    rpc = "updateOpHeads",
-                    rpc_method = "updateOpHeads",
-                    expected_version,
-                    attempt = 1,
-                    cas_retries = 0,
-                    queue_depth = 0,
-                    latency_ms = request_started.elapsed().as_millis() as u64,
-                    error = %e,
-                    "rpc error"
-                );
-                Promise::err(capnp_err(e))
-            }
+        let name = capability.as_str().to_string();
+        if !caps.contains(&name) {
+            caps.push(name);
         }
     }
-
-    fn watch_heads(
-        &mut self,
-        params: store::WatchHeadsParams,
-        mut results: store::WatchHeadsResults,
-    ) -> Promise<(), capnp::Error> {
-        let reader = pry!(params.get());
-        let watcher = pry!(reader.get_watcher());
-        let after_version = reader.get_after_version();
-
-        tracing::info!(
-            conn_id = self.conn_id,
-            rpc = "watchHeads",
-            after_version,
-            "rpc request"
-        );
-
-        let current_state = match self.server.get_heads_sync() {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!(
-                    conn_id = self.conn_id,
-                    rpc = "watchHeads",
-                    error = %e,
-                    "rpc error"
-                );
-                return Promise::err(capnp_err(e));
-            }
-        };
-
-        if after_version < current_state.version {
-            tracing::debug!(
-                conn_id = self.conn_id,
-                rpc = "watchHeads",
-                after_version,
-                current_version = current_state.version,
-                "sending catch-up notification"
-            );
-            let catch_up_watcher = watcher.clone();
-            let heads: Vec<Vec<u8>> = current_state
-                .heads
-                .iter()
-                .filter_map(|h| from_hex(h).ok())
-                .collect();
-            let version = current_state.version;
-            tokio::task::spawn_local(async move {
-                let mut req = catch_up_watcher.notify_request();
-                {
-                    let mut p = req.get();
-                    p.set_version(version);
-                    let mut h = p.init_heads(heads.len() as u32);
-                    for (i, head) in heads.iter().enumerate() {
-                        h.set(i as u32, head);
-                    }
-                }
-                let _ = req.send().promise.await;
-            });
-        }
-
-        self.server.register_watcher(watcher, current_state.version);
-        tracing::info!(
-            conn_id = self.conn_id,
-            rpc = "watchHeads",
-            version = current_state.version,
-            "watcher registered"
-        );
-
-        let cancel_impl = CancelImpl {
-            server: self.server.clone(),
-        };
-        let cancel_client: cancel::Client = capnp_rpc::new_client(cancel_impl);
-        results.get().set_cancel(cancel_client);
-
-        Promise::ok(())
-    }
-
-    fn get_heads_snapshot(
-        &mut self,
-        _params: store::GetHeadsSnapshotParams,
-        _results: store::GetHeadsSnapshotResults,
-    ) -> Promise<(), capnp::Error> {
-        Promise::err(capnp::Error::unimplemented(
-            "getHeadsSnapshot not yet implemented".to_string(),
-        ))
-    }
-
-    fn get_related_copies(
-        &mut self,
-        _params: store::GetRelatedCopiesParams,
-        _results: store::GetRelatedCopiesResults,
-    ) -> Promise<(), capnp::Error> {
-        Promise::err(capnp::Error::unimplemented(
-            "getRelatedCopies not yet implemented".to_string(),
-        ))
-    }
-}
-
-// ─── Cancel implementation ────────────────────────────────────────────────────
-
-struct CancelImpl {
-    server: Rc<Server>,
-}
-
-impl cancel::Server for CancelImpl {
-    fn cancel(
-        &mut self,
-        _params: cancel::CancelParams,
-        _results: cancel::CancelResults,
-    ) -> Promise<(), capnp::Error> {
-        let mut watchers = self.server.watchers.lock().unwrap();
-        let count = watchers.len();
-        watchers.clear();
-        tracing::info!(cleared_watchers = count, "watchers cancelled");
-        Promise::ok(())
-    }
+    caps
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Keep the operations nothing else in the set descends from, oldest first.
+///
+/// Both halves come from `jj_lib::op_heads_store::resolve_op_heads`, which is
+/// the reference implementation for this: ancestors are dropped so that no
+/// operation is ever merged with its own descendant, and what is left is
+/// ordered by end time so the merge starts from the oldest state and applies
+/// the later ones onto it. `merge_operations` takes the first entry as the
+/// base, so the order is not cosmetic.
+fn order_op_heads(
+    operations: Vec<jj_lib::operation::Operation>,
+) -> Result<Vec<jj_lib::operation::Operation>> {
+    let heads = jj_lib::dag_walk::heads_ok(
+        operations.into_iter().map(Ok),
+        |op: &jj_lib::operation::Operation| op.id().clone(),
+        |op: &jj_lib::operation::Operation| op.parents().collect::<Vec<_>>(),
+    )
+    .map_err(|e: jj_lib::op_store::OpStoreError| anyhow!("walk operation parents: {e}"))?;
+
+    let mut heads: Vec<_> = heads.into_iter().collect();
+    heads.sort_by_key(|op| op.metadata().time.end.timestamp);
+    Ok(heads)
+}
 
 fn updated_workspace_heads(
     current: &BTreeMap<String, String>,
@@ -1997,15 +1279,39 @@ fn is_root_operation_hex(op_hex: &str) -> bool {
     !op_hex.is_empty() && op_hex.bytes().all(|b| b == b'0')
 }
 
+/// Write a content-addressed file, once.
+///
+/// Requests now run in parallel, so two clients can write the same operation
+/// at the same moment while a third reads it. The write therefore lands in a
+/// scratch file and is renamed into place: a reader sees either no file or
+/// the whole file, never half of one.
 fn write_bytes_if_missing(path: &Path, bytes: &[u8]) -> Result<()> {
     if path.exists() {
         return Ok(());
     }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+    let Some(parent) = path.parent() else {
+        bail!(
+            "cannot write {} — it has no parent directory",
+            path.display()
+        );
+    };
+    fs::create_dir_all(parent)?;
+
+    static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let scratch = parent.join(format!(
+        ".{}.{}.{}.tmp",
+        path.file_name().unwrap_or_default().to_string_lossy(),
+        std::process::id(),
+        SCRATCH_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    fs::write(&scratch, bytes)?;
+    match fs::rename(&scratch, path) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            let _ = fs::remove_file(&scratch);
+            Err(err.into())
+        }
     }
-    fs::write(path, bytes)?;
-    Ok(())
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

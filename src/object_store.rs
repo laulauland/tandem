@@ -172,8 +172,7 @@ impl FsObjectStore {
 
     fn write_atomic(&self, path: &Path, data: &[u8]) -> Result<()> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("create {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
         }
         // The temp name appends to the full file name instead of replacing the
         // extension: `with_extension` would map both `heads.json` and
@@ -187,13 +186,9 @@ impl FsObjectStore {
             .to_string_lossy()
             .into_owned();
         let serial = NEXT_TMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let tmp = path.with_file_name(format!(
-            "{file_name}.tmp-{}-{serial}",
-            std::process::id()
-        ));
+        let tmp = path.with_file_name(format!("{file_name}.tmp-{}-{serial}", std::process::id()));
         fs::write(&tmp, data).with_context(|| format!("write {}", tmp.display()))?;
-        fs::rename(&tmp, path)
-            .with_context(|| format!("rename into {}", path.display()))?;
+        fs::rename(&tmp, path).with_context(|| format!("rename into {}", path.display()))?;
         Ok(())
     }
 }
@@ -340,9 +335,29 @@ impl Drop for FileLock {
 /// Any S3-compatible endpoint, driven through the `object_store` crate.
 pub struct S3ObjectStore {
     inner: Arc<dyn object_store::ObjectStore>,
-    runtime: tokio::runtime::Runtime,
+    /// `Some` for the whole life of the store; `None` only inside `drop`.
+    /// See the `Drop` impl below for why it has to be takeable.
+    runtime: Option<tokio::runtime::Runtime>,
     prefix: String,
     description: String,
+}
+
+/// Shut the private runtime down without waiting for it.
+///
+/// Dropping a `Runtime` the ordinary way blocks until its worker threads stop,
+/// and tokio panics rather than block when the drop happens on a reactor
+/// thread. The server builds this store inside `run_serve`, which is such a
+/// thread, so an error anywhere after the store is open would end as
+/// "Cannot drop a runtime in a context where blocking is not allowed" — a
+/// panic with none of the information the real error carried. Handing the
+/// threads to `shutdown_background` lets the drop return at once, so the
+/// error that started it survives to be reported.
+impl Drop for S3ObjectStore {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown_background();
+        }
+    }
 }
 
 impl fmt::Debug for S3ObjectStore {
@@ -461,7 +476,7 @@ impl S3ObjectStore {
 
         Ok(Self {
             inner: Arc::new(inner),
-            runtime,
+            runtime: Some(runtime),
             prefix: spec.prefix,
             description,
         })
@@ -486,7 +501,11 @@ impl S3ObjectStore {
         T: Send + 'static,
     {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
-        self.runtime.spawn(async move {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .expect("bucket runtime is only taken while dropping the store");
+        runtime.spawn(async move {
             let _ = tx.send(future.await);
         });
         rx.recv().expect("bucket runtime stopped unexpectedly")
@@ -751,5 +770,24 @@ mod tests {
                 .as_nanos()
         );
         assert_bucket_contract(store.as_ref(), &salt);
+    }
+
+    /// The server opens its bucket from inside the HTTP runtime, so the store
+    /// is also dropped there whenever startup fails afterwards. A blocking
+    /// drop turns that failure into a tokio panic and throws the real error
+    /// away, so the drop must not block. No endpoint is contacted here:
+    /// opening the store only builds the config and the private runtime.
+    #[test]
+    fn an_s3_store_can_be_dropped_from_inside_an_async_context() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let store = open("s3://tandem-drop-probe?endpoint=http://127.0.0.1:1&anonymous=true")
+                .expect("open S3 bucket");
+            drop(store);
+        });
     }
 }

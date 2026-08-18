@@ -255,3 +255,36 @@ pub fn run_git_in(dir: &Path, args: &[&str]) -> Output {
         .output()
         .expect("run git command")
 }
+
+// ─── HTTP API helpers ─────────────────────────────────────────────────────────
+
+/// A blocking HTTP client aimed at a tandem server under test.
+///
+/// `no_proxy` matters: a developer machine with a system proxy set would
+/// otherwise route a request for 127.0.0.1 through it.
+pub fn http_client() -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(30))
+        .no_proxy()
+        .build()
+        .expect("build test HTTP client")
+}
+
+pub fn api_url(addr: &str, path: &str) -> String {
+    format!("http://{addr}{path}")
+}
+
+/// `GET` one of the server's endpoints and insist it answered.
+pub fn api_get(addr: &str, path: &str) -> reqwest::blocking::Response {
+    let response = http_client()
+        .get(api_url(addr, path))
+        .send()
+        .unwrap_or_else(|err| panic!("GET {path} on {addr}: {err}"));
+    assert!(
+        response.status().is_success(),
+        "GET {path} answered HTTP {}",
+        response.status().as_u16()
+    );
+    response
+}

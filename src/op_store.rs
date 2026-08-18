@@ -1,5 +1,5 @@
 //! TandemOpStore — jj-lib OpStore impl that routes operations and views
-//! to a remote tandem server over Cap'n Proto RPC.
+//! to a remote tandem server over HTTP.
 
 use std::fmt;
 use std::path::Path;
@@ -13,8 +13,8 @@ use jj_lib::op_store::*;
 use jj_lib::settings::UserSettings;
 use prost::Message as _;
 
+use crate::http_client::{PrefixResult, TandemClient};
 use crate::proto_convert;
-use crate::rpc::{PrefixResult, TandemClient};
 
 const OPERATION_ID_LENGTH: usize = 64;
 const VIEW_ID_LENGTH: usize = 64;

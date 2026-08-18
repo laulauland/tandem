@@ -5,23 +5,19 @@
 //!   tandem init --server <addr> [path]           → initialize tandem workspace
 //!   tandem <jj args>                             → stock jj via CliRunner
 
-#[allow(unused_parens, dead_code)]
-mod tandem_capnp {
-    include!(concat!(env!("OUT_DIR"), "/tandem_capnp.rs"));
-}
-
 mod backend;
 mod control;
 mod hex;
+mod http_client;
 mod logging;
 mod object_store;
 mod op_heads_store;
 mod op_store;
 mod proto_convert;
-mod rpc;
 mod server;
 mod wal;
 mod watch;
+mod wire;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -331,11 +327,13 @@ fn run_serve(
     // In daemon mode, stdout/stderr are already redirected to the log file
     // by `run_up` before spawning this process. Nothing extra needed here.
 
-    let rt = tokio::runtime::Builder::new_current_thread()
+    // A multi-threaded runtime, because the HTTP handlers hand their work to
+    // blocking threads: a jj-lib read or a bucket write must not sit on the
+    // reactor while another request waits behind it.
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap();
-    let local = tokio::task::LocalSet::new();
 
     let opts = server::ServeOptions {
         listen_addr: listen_addr.to_string(),
@@ -351,7 +349,7 @@ fn run_serve(
         bucket: bucket.map(|s| s.to_string()),
     };
 
-    if let Err(err) = local.block_on(&rt, server::run_serve(opts)) {
+    if let Err(err) = rt.block_on(server::run_serve(opts)) {
         eprintln!("error: {err:#}");
         return ExitCode::FAILURE;
     }

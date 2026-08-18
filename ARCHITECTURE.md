@@ -28,7 +28,7 @@ a control socket so `tandem down`, `tandem server status`, and
 - Server hosts a **normal jj+git colocated repo** (uses jj's Git backend)
 - Server is a **long-running service**, typically on a VM/VPS — it holds the canonical repo. If lost without backups, the data is gone (unless mirrored to GitHub via `jj git push`).
 - Client keeps **working copy local** (real files on disk)
-- Client store calls are remote via Cap'n Proto RPC
+- Client store calls are remote over HTTP
 - Backend/OpStore/OpHeadsStore trait implementations route to server
 - Server op-head authority is jj-lib's op-heads store (no manual op-head file sync)
 - `.jj/repo/tandem/heads.json` is metadata sidecar only (`version`, `workspace_heads`)
@@ -50,7 +50,7 @@ the server just works.
 
 1. Read/write jj backend + op-store objects (commit/tree/file/symlink/copy/operation/view)
 2. Coordinate op heads with atomic compare-and-swap (CAS metadata) while mutating heads via jj-lib op-heads APIs
-3. Notify watchers on head changes (`watchHeads`)
+3. Notify watchers on head changes (`GET /api/events`, server-sent events)
 4. (Optional) run integration recompute worker and maintain bookmark `integration`
 5. Host the jj+git colocated repo for git interop
 
@@ -61,11 +61,11 @@ The `tandem` binary is `CliRunner::init().add_store_factories(tandem_factories()
 Tandem-provided trait implementations:
 
 - **`TandemBackend`** (`src/backend.rs`) — implements jj-lib's `Backend` trait
-  - `read_file/write_file`, `read_tree/write_tree`, `read_commit/write_commit` → `getObject/putObject` RPC
+  - `read_file/write_file`, `read_tree/write_tree`, `read_commit/write_commit` → `/api/objects`
 - **`TandemOpStore`** (`src/op_store.rs`) — implements jj-lib's `OpStore` trait
-  - `read_operation/write_operation`, `read_view/write_view` → RPC calls
+  - `read_operation/write_operation`, `read_view/write_view` → `/api/ops`, `/api/views`
 - **`TandemOpHeadsStore`** (`src/op_heads_store.rs`) — implements jj-lib's `OpHeadsStore` trait
-  - `get_op_heads/update_op_heads` → `getHeads/updateOpHeads` RPC with CAS
+  - `get_op_heads/update_op_heads` → `GET/POST /api/heads` with `ETag`/`If-Match` CAS
 
 On CAS failure, jj's existing transaction retry flow handles convergence automatically.
 
@@ -75,23 +75,37 @@ etc.) — tandem is invisible.
 
 ## Protocol
 
-Cap'n Proto `Store` service defined in `schema/tandem.capnp`.
+An HTTP API. `--server host:port` means `http://host:port`; an explicit
+`http://` or `https://` URL works too.
 
-Core capabilities:
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/info` | Compatibility handshake: protocol version, id lengths, root ids, capabilities |
+| `GET /api/objects/{kind}/{id}` | Read one object; `kind` is `commit`, `tree`, `file`, `symlink` or `copy` |
+| `POST /api/objects/{kind}` | Write one object; answers the id in `tandem-object-id` |
+| `POST /api/objects:batch` | Write many objects in one round trip (`application/vnd.tandem.batch`) |
+| `GET /api/ops/{id}`, `POST /api/ops` | Read/write operations |
+| `GET /api/ops?prefix=<hex>` | Resolve an operation id prefix |
+| `GET /api/views/{id}`, `POST /api/views` | Read/write views |
+| `GET /api/heads` | Current heads; the CAS version is the `ETag` |
+| `POST /api/heads` | Publish heads; requires `If-Match`, answers `412` on a lost race |
+| `GET /api/events` | Server-sent events; each event says a version happened |
 
-- **Object I/O:** `getObject(kind, id)`, `putObject(kind, data)`
-  - Kinds: commit, tree, file, symlink
-- **Operation I/O:** `getOperation(id)`, `putOperation(data)`, `getView(id)`, `putView(data)`
-- **Op head coordination:** `getHeads()`,
-  `updateOpHeads(old_ids, new_id, expected_version, workspace_id)` (CAS)
-- **Operation resolution:** `resolveOperationIdPrefix(prefix)`
-- **Watch subscriptions:** `watchHeads(watcher)` — streaming notifications
-- **Optional capabilities:** `getHeadsSnapshot()`, `getRelatedCopies()` (schema-defined; currently unimplemented server-side)
+Objects, operations and views are content-addressed, so their reads carry
+`Cache-Control: public, max-age=31536000, immutable`. Heads are the one
+mutable resource and carry `Cache-Control: no-store`.
 
-No `repoId` in protocol: one server = one repo.
+`/api/events` is a wake-up channel, not a data channel: an event names a
+version, and the watcher reads `/api/heads` to learn what changed. Wake-ups
+may therefore coalesce.
 
-See `src/server.rs` for server implementation, `src/rpc.rs` for client wrapper.
-For transport compatibility planning (TCP/WSS/SSH-exec), see `docs/design-docs/transport-matrix.md`.
+Optional capabilities `headsSnapshot` and `getRelatedCopies` have no endpoint
+yet; the server does not advertise them.
+
+No `repoId` in the protocol: one server = one repo.
+
+See `src/server/http.rs` for the API surface, `src/wire.rs` for the
+serialization layer, and `src/http_client.rs` for the client wrapper.
 
 ## Git compatibility
 
@@ -120,7 +134,7 @@ Integration tests across slices 1-14:
 | 1 | `tests/slice1_single_agent_round_trip.rs` | Single agent file round-trip |
 | 2 | `tests/slice2_two_agent_visibility.rs` | Two-agent file visibility |
 | 3 | `tests/slice3_concurrent_convergence.rs` | 2-agent and 5-agent concurrent writes |
-| 4 | `tests/slice4_promise_pipelining.rs` | Rapid sequential write correctness/stress over Cap'n Proto transport |
+| 4 | `tests/slice4_rapid_successive_writes.rs` | Rapid sequential write correctness/stress |
 | 5 | `tests/slice5_watch_heads.rs` | Real-time head notifications |
 | 6 | `tests/slice6_git_round_trip.rs` | Git push/fetch round-trip |
 | 7 | `tests/slice7_end_to_end.rs` | Multi-agent + git + external contributor |
@@ -133,6 +147,12 @@ Integration tests across slices 1-14:
 | 16 | `tests/slice16_integration_workspace_flag.rs` | Integration workspace mode flag plumbing + status visibility |
 | 17 | `tests/slice17_integration_conflict_visibility.rs` | Conflicted integration commit visibility |
 
+Transport-level coverage lives in `tests/http_api_surface.rs`: every endpoint,
+the immutable cache headers, the `ETag`/`If-Match`/`412` CAS, malformed batch
+frames, and the SSE wake-up. `src/wire.rs` carries proptest properties for the
+serialization layer (round-trip, and no panic or over-allocation on arbitrary
+bytes).
+
 All tests assert on **file byte content**, not just commit descriptions.
 
 Run: `cargo test`
@@ -141,29 +161,29 @@ Run: `cargo test`
 
 - **Language:** Rust
 - **Binary:** Single `tandem` (server + client modes)
-- **RPC:** Cap'n Proto semantics over TCP transport (current); WSS/SSH-exec compatibility path planned
+- **Transport:** HTTP, with server-sent events for head wake-ups
 - **Server storage:** Normal jj+git colocated repo (Git backend)
-- **Serialization:** jj-native protobuf object/op/view bytes (passed through as blobs)
+- **Serialization:** jj-native protobuf object/op/view bytes (passed through as blobs); JSON for metadata, a small hand-rolled frame for batches
 - **Client CLI:** Stock `jj` via `CliRunner` (not a custom tandem CLI)
-- **Dependencies:** `jj-lib`, `jj-cli`, `capnp`, `capnp-rpc`, `tokio`, `prost`
+- **Dependencies:** `jj-lib`, `jj-cli`, `axum`, `reqwest`, `tokio`, `prost`
 
 ## Project Structure
 
 ```
 src/
   main.rs              CLI dispatch (clap) + CliRunner passthrough
-  tandem_capnp.rs      Generated Cap'n Proto bindings (checked in)
-  server.rs            Server — jj Git backend + Cap'n Proto RPC
+  server/
+    mod.rs             Server — jj Git backend, heads authority, lifecycle
+    http.rs            HTTP API surface + SSE
+    bucket.rs          Object-store WAL and index
+  wire.rs              Wire types: object kinds, JSON bodies, batch codec
   control.rs           Control socket — daemon management (Unix socket, JSON lines)
   backend.rs           TandemBackend (jj-lib Backend trait)
   op_store.rs          TandemOpStore (jj-lib OpStore trait)
   op_heads_store.rs    TandemOpHeadsStore (jj-lib OpHeadsStore trait)
-  rpc.rs               Cap'n Proto RPC client wrapper
+  http_client.rs       HTTP client behind the three store traits
   proto_convert.rs     jj protobuf ↔ Rust struct conversion
-  watch.rs             tandem watch command
-schema/
-  tandem.capnp         Cap'n Proto schema (Store + HeadWatcher)
-build.rs               Build-time schema generation with checked-in fallback
+  watch.rs             tandem watch command (SSE reader)
 tests/
   common/mod.rs        Test harness (server spawn, HOME isolation)
   slice1-7 tests       Core integration tests (file round-trip, visibility, CAS, git)

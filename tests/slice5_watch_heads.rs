@@ -4,6 +4,81 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 use tempfile::TempDir;
 
+/// A watcher says on stderr that it is watching, and then prints what it
+/// sees on stdout.
+///
+/// This assertion arrived from slice 19, which used to check that the TCP
+/// connector registered a watch. There is one client path now, so what is
+/// left worth checking is that `tandem watch` reports the subscription it
+/// opened and then reports the head changes that follow it.
+#[test]
+fn slice5_watch_reports_its_registration_and_then_notifies() {
+    let tmp = TempDir::new().unwrap();
+    let home = common::isolated_home(tmp.path());
+    let server_repo = tmp.path().join("server-repo");
+    std::fs::create_dir_all(&server_repo).unwrap();
+    let workspace = tmp.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+
+    let addr = common::free_addr();
+    let mut server = common::spawn_server(&server_repo, &addr);
+    common::wait_for_server(&addr, &mut server);
+
+    let init = common::run_tandem_in(&workspace, &["init", "--server", &addr, "."], &home);
+    common::assert_ok(&init, "tandem init");
+
+    let mut watch_cmd = Command::new(common::tandem_bin());
+    watch_cmd
+        .current_dir(tmp.path())
+        .args(["watch", "--server", &addr])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    common::isolate_env(&mut watch_cmd, &home);
+    let mut watch = watch_cmd.spawn().expect("spawn tandem watch");
+
+    std::thread::sleep(Duration::from_millis(500));
+
+    std::fs::write(workspace.join("watch.txt"), b"watch event\n").unwrap();
+    let new_commit = common::run_tandem_in(&workspace, &["new", "-m", "watch registration"], &home);
+    common::assert_ok(&new_commit, "jj new for watch registration");
+
+    std::thread::sleep(Duration::from_millis(800));
+
+    let _ = watch.kill();
+    let output = watch.wait_with_output().expect("collect watch output");
+
+    let stdout = common::stdout_str(&output);
+    let stderr = common::stderr_str(&output);
+    assert!(
+        stderr.contains("watching heads on"),
+        "watch stderr should confirm registration\nstderr:\n{stderr}"
+    );
+
+    // `tandem watch` prints the head state it starts from before it reads a
+    // single event, so one `version=` line proves nothing about the stream.
+    // The commit above moved the heads; a working subscription therefore owes
+    // a second line at a higher version.
+    let versions: Vec<u64> = stdout
+        .lines()
+        .filter_map(|line| line.strip_prefix("version="))
+        .filter_map(|rest| rest.split_whitespace().next())
+        .filter_map(|value| value.parse().ok())
+        .collect();
+    assert!(
+        versions.len() >= 2,
+        "watch should print the state it started from and then the commit's \
+         version, got {versions:?}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        versions.last() > versions.first(),
+        "the notification after the commit should carry a higher version than \
+         the one watch started from, got {versions:?}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    let _ = server.kill();
+    let _ = server.wait();
+}
+
 #[test]
 fn slice5_watch_heads_notifications() {
     let tmp = TempDir::new().unwrap();

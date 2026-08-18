@@ -37,12 +37,15 @@ jj-cli = { version = "0.38.0", default-features = false, features = ["git"] }
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
 
-# RPC
-capnp = "0.20"
-capnp-rpc = "0.20"
+# HTTP transport — axum serves the API, reqwest is the client behind the
+# store traits. reqwest is already in the tree through object_store's aws
+# feature; this pins it as a direct dependency and adds the blocking client.
+axum = "0.8"
+reqwest = { version = "0.13", features = ["blocking", "json"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 
 # Trait / stream / proto support
@@ -68,13 +71,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "json", "registry"] }
 object_store = { version = "0.14.1", features = ["aws"] }
 
-[build-dependencies]
-capnpc = "0.20"
-
 [dev-dependencies]
 tempfile = "3"
 libc = "0.2"
 serde_json = "1"
+proptest = "1"
 
 # Dependencies (jj-lib especially) are far too slow unoptimized for the
 # process-heavy integration tests; the tandem crate itself stays at opt 0

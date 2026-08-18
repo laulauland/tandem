@@ -13,17 +13,8 @@ use std::process::{Command, Output};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use jj_lib::object_id::ObjectId as _;
 use tempfile::TempDir;
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-
-#[path = "../src/tandem_capnp.rs"]
-mod tandem_capnp;
-
-fn to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
 
 fn run_tandem_with_timeout(dir: &Path, args: &[&str], home: &Path) -> Output {
     let mut cmd = Command::new(common::tandem_bin());
@@ -100,48 +91,25 @@ fn server_jj_op_heads(server_repo: &Path) -> BTreeSet<String> {
     heads.into_iter().map(|id| id.hex()).collect()
 }
 
+/// Read the head set straight off the API, without going through jj.
 fn tandem_get_heads(addr: &str) -> (BTreeSet<String>, u64) {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("build rpc runtime");
-    let local = tokio::task::LocalSet::new();
+    let body: serde_json::Value = common::api_get(addr, "/api/heads")
+        .json()
+        .expect("decode /api/heads");
 
-    local.block_on(&rt, async move {
-        let stream =
-            tokio::time::timeout(Duration::from_secs(5), tokio::net::TcpStream::connect(addr))
-                .await
-                .expect("connect timeout")
-                .expect("connect server");
-        stream.set_nodelay(true).ok();
+    let version = body
+        .get("version")
+        .and_then(|v| v.as_u64())
+        .expect("version in /api/heads");
+    let heads = body
+        .get("heads")
+        .and_then(|v| v.as_array())
+        .expect("heads in /api/heads")
+        .iter()
+        .map(|head| head.as_str().expect("head is hex text").to_string())
+        .collect();
 
-        let (reader, writer) = stream.into_split();
-        let network = twoparty::VatNetwork::new(
-            reader.compat(),
-            writer.compat_write(),
-            rpc_twoparty_capnp::Side::Client,
-            Default::default(),
-        );
-        let mut rpc_system = RpcSystem::new(Box::new(network), None);
-        let client: tandem_capnp::store::Client =
-            rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
-        let rpc_task = tokio::task::spawn_local(rpc_system);
-
-        let request = client.get_heads_request();
-        let response = request.send().promise.await.expect("getHeads RPC");
-        let result = response.get().expect("getHeads result");
-
-        let version = result.get_version();
-        let mut heads = BTreeSet::new();
-        let heads_reader = result.get_heads().expect("get heads list");
-        for i in 0..heads_reader.len() {
-            let bytes = heads_reader.get(i).expect("head bytes");
-            heads.insert(to_hex(bytes));
-        }
-
-        rpc_task.abort();
-        (heads, version)
-    })
+    (heads, version)
 }
 
 #[test]

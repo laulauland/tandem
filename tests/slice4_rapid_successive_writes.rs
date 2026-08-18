@@ -1,25 +1,17 @@
-//! Slice 4: Promise pipelining for object writes
+//! Slice 4: rapid successive writes round-trip byte for byte.
 //!
-//! Acceptance criteria:
-//! - Commit with files completes in fewer RTTs than sequential calls
-//! - Latency benchmark under artificial RPC delay proves pipelining
-//! - All slice 1-3 tests still pass
-//!
-//! This test proves pipelining works by writing 10 files in rapid succession,
-//! committing each, and verifying all round-trip correctly via `jj file show`.
-//! Cap'n Proto pipelining allows putObject(file) → putObject(tree) →
-//! putObject(commit) → putOperation → putView → updateOpHeads to pipeline
-//! without waiting for each response.
+//! This file used to be about Cap'n Proto promise pipelining, which the HTTP
+//! transport has no equivalent of. What survives is the part that was never
+//! about the wire: writing many files back to back and getting every byte of
+//! every one back, from the client and from the server's own repo.
 
 mod common;
 
 use std::time::Instant;
 use tempfile::TempDir;
 
-/// Write N files, each in its own commit, and verify all round-trip correctly.
-/// The rapid-fire pattern exercises Cap'n Proto promise pipelining: each commit
-/// involves multiple RPC calls (putObject for file, tree, commit, plus op/view
-/// updates) that can be pipelined.
+/// Write N files, each in its own commit, and verify all round-trip
+/// correctly — through the workspace and through the server repo.
 #[test]
 fn slice4_ten_files_rapid_fire_round_trip() {
     let file_count = 10;
@@ -46,7 +38,7 @@ fn slice4_ten_files_rapid_fire_round_trip() {
         .map(|i| {
             format!(
                 "pub fn file_{i}() -> &'static str {{\n    \
-                 \"content from file {i} — pipelining test\"\n}}\n"
+                 \"content from file {i} — rapid-write test\"\n}}\n"
             )
             .into_bytes()
         })
@@ -87,8 +79,6 @@ fn slice4_ten_files_rapid_fire_round_trip() {
     }
 
     // ── Verify every file round-trips with exact bytes ───────────────
-    // Walk backwards: @- is the last commit, @-- is the one before, etc.
-    // But it's cleaner to use description-based revsets.
     for i in 0..file_count {
         let revset = format!("description(substring:\"{}\")", descriptions[i]);
         let cat = common::run_tandem_in(
@@ -141,10 +131,10 @@ fn slice4_ten_files_rapid_fire_round_trip() {
     let _ = server.wait();
 }
 
-/// Verify that pipelining handles larger files efficiently.
-/// Writes files with substantial content to exercise blob transfer pipelining.
+/// Bigger payloads round-trip too: a ~10KB blob is a different code path in
+/// the transport than a two-line one.
 #[test]
-fn slice4_large_files_pipelining() {
+fn slice4_large_files_round_trip() {
     let tmp = TempDir::new().unwrap();
     let home = common::isolated_home(tmp.path());
     let server_repo = tmp.path().join("server-repo");
@@ -166,7 +156,7 @@ fn slice4_large_files_pipelining() {
     let file_count = 5;
     let contents: Vec<Vec<u8>> = (0..file_count)
         .map(|i| {
-            let mut content = format!("// Large file {i} for pipelining test\n");
+            let mut content = format!("// Large file {i}\n");
             for line in 0..200 {
                 content.push_str(&format!(
                     "pub const LINE_{line}: &str = \"file {i} line {line} padding\";\n"
@@ -176,12 +166,10 @@ fn slice4_large_files_pipelining() {
         })
         .collect();
 
-    // Write all files at once (single commit with multiple files)
     for i in 0..file_count {
         std::fs::write(src_dir.join(format!("large_{i}.rs")), &contents[i]).unwrap();
     }
 
-    let start = Instant::now();
     let describe = common::run_tandem_in(
         &workspace_dir,
         &["describe", "-m", "add large files"],
@@ -191,14 +179,7 @@ fn slice4_large_files_pipelining() {
 
     let new = common::run_tandem_in(&workspace_dir, &["new"], &home);
     common::assert_ok(&new, "new after large files");
-    let elapsed = start.elapsed();
 
-    eprintln!(
-        "committed {file_count} large files (~10KB each) in {:.2}s",
-        elapsed.as_secs_f64()
-    );
-
-    // Verify all files round-trip with exact bytes
     for i in 0..file_count {
         let path = format!("src/large_{i}.rs");
         let cat =
@@ -211,8 +192,8 @@ fn slice4_large_files_pipelining() {
     let _ = server.wait();
 }
 
-/// Verify that files accumulate correctly across multiple pipelined commits.
-/// Each commit adds a new file while keeping all previous files in the tree.
+/// Files accumulate across successive commits: each commit adds a file and
+/// keeps the ones before it.
 #[test]
 fn slice4_cumulative_tree_growth() {
     let file_count = 5;
@@ -237,7 +218,6 @@ fn slice4_cumulative_tree_growth() {
         .map(|i| format!("pub fn cumulative_{i}() {{}}\n").into_bytes())
         .collect();
 
-    // Write files one at a time, each building on the previous tree
     for i in 0..file_count {
         std::fs::write(src_dir.join(format!("mod_{i}.rs")), &contents[i]).unwrap();
 
@@ -252,12 +232,8 @@ fn slice4_cumulative_tree_growth() {
         common::assert_ok(&new, &format!("new after mod_{i}"));
     }
 
-    // The last commit (before current working copy) should have ALL files
-    // because each `new` creates a child that inherits the parent's tree.
-    // @- is the last described commit which has all files in the working copy.
-    // Actually, each file was added cumulatively because the workspace retains
-    // files. The last described commit (at @- relative to the final `new`)
-    // should contain all files.
+    // The last described commit should hold every file, because each `new`
+    // creates a child that inherits its parent's tree.
     let revset = format!("description(substring:\"add mod_{}\")", file_count - 1);
     for i in 0..file_count {
         let path = format!("src/mod_{i}.rs");
