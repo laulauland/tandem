@@ -11,11 +11,13 @@
 //! call.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 
+use crate::cache::{DiskCache, NAMESPACE_OPERATION, NAMESPACE_VIEW};
 use crate::hex::{from_hex, to_hex};
 use crate::wire;
 
@@ -140,6 +142,18 @@ pub struct TandemClient {
     target: ConnectorTarget,
     repo_info: RepoInfoResponse,
     injected_rtt: Duration,
+    /// Where an id that has already been fetched on this machine comes from
+    /// the second time. `None` when the cache is switched off or the machine
+    /// has nowhere to put one.
+    ///
+    /// The three jj store traits each build their own client, so nothing is
+    /// shared between them in memory — the sharing is the directory, which is
+    /// also what makes it survive the end of the process and reach the next
+    /// command and the next workspace.
+    cache: Option<Arc<DiskCache>>,
+    /// How many requests have left this client. Tests assert on it: "served
+    /// from cache" has to mean no request happened, not that one was fast.
+    requests_sent: AtomicU64,
 }
 
 impl std::fmt::Debug for TandemClient {
@@ -193,6 +207,17 @@ impl TandemClient {
         addr: &str,
         required_capabilities: &[RepoCapability],
     ) -> Result<Arc<Self>> {
+        Self::connect_with_cache(addr, required_capabilities, DiskCache::from_environment())
+    }
+
+    /// The same connection with a cache the caller chose, rather than the one
+    /// the environment names. Tests use it to keep a cache directory per test
+    /// without writing to a process-wide environment.
+    pub fn connect_with_cache(
+        addr: &str,
+        required_capabilities: &[RepoCapability],
+        cache: Option<Arc<DiskCache>>,
+    ) -> Result<Arc<Self>> {
         let target = ConnectorTarget::parse(addr)?;
         let http = build_http_client(Some(REQUEST_TIMEOUT))?;
 
@@ -202,6 +227,8 @@ impl TandemClient {
             // Filled in by the handshake immediately below.
             repo_info: RepoInfoResponse::default(),
             injected_rtt: bench_injected_rtt_delay(),
+            cache,
+            requests_sent: AtomicU64::new(0),
         };
 
         let repo_info = client
@@ -240,11 +267,14 @@ impl TandemClient {
     }
 
     /// The one place a request leaves. Benches inject a round-trip delay here
-    /// so that a latency profile can be measured without a real network.
+    /// so that a latency profile can be measured without a real network, and
+    /// the counter is here for the same reason it is the only honest place for
+    /// it: nothing reaches the server without passing through.
     fn send(
         &self,
         request: reqwest::blocking::RequestBuilder,
     ) -> Result<reqwest::blocking::Response> {
+        self.requests_sent.fetch_add(1, Ordering::Relaxed);
         if !self.injected_rtt.is_zero() {
             std::thread::sleep(self.injected_rtt);
         }
@@ -275,6 +305,39 @@ impl TandemClient {
     fn get_bytes(&self, path: &str, what: &str) -> Result<Vec<u8>> {
         let response = Self::check(self.send(self.http.get(self.url(path)))?, what)?;
         Ok(response.bytes()?.to_vec())
+    }
+
+    /// The same read, but the disk answers first.
+    ///
+    /// Only a body the server actually returned is cached. A 404 and a failed
+    /// read are both left uncached on purpose: the server takes care to keep
+    /// "this object does not exist" and "this disk would not answer" apart,
+    /// and a client that wrote either to disk would turn a fault into a fact.
+    fn cached_get(&self, namespace: &str, id: &[u8], path: &str, what: &str) -> Result<Vec<u8>> {
+        if let Some(cache) = &self.cache {
+            if let Some(data) = cache.get(namespace, id) {
+                return Ok(data);
+            }
+        }
+
+        let data = self.get_bytes(path, what)?;
+        self.store_in_cache(namespace, id, &data);
+        Ok(data)
+    }
+
+    /// Put bytes in the cache if this client has one. Both the read that had
+    /// to go to the server and the write that already knows the id fill the
+    /// cache through here.
+    fn store_in_cache(&self, namespace: &str, id: &[u8], data: &[u8]) {
+        if let Some(cache) = &self.cache {
+            cache.put(namespace, id, data);
+        }
+    }
+
+    /// How many requests this client has sent, cache hits excluded by
+    /// construction.
+    pub fn requests_sent(&self) -> u64 {
+        self.requests_sent.load(Ordering::Relaxed)
     }
 
     /// Write opaque bytes and hand back the checked response, which still
@@ -335,19 +398,33 @@ impl TandemClient {
     pub fn get_object(&self, kind: u16, id: &[u8]) -> Result<Vec<u8>> {
         let kind_name =
             wire::kind_name(kind).ok_or_else(|| anyhow!("unknown object kind: {kind}"))?;
-        self.get_bytes(
+        // The kind is part of the cache key, not decoration: a file and a
+        // symlink holding the same bytes are the same git blob and so share an
+        // id. The URL separates them for the same reason.
+        self.cached_get(
+            kind_name,
+            id,
             &format!("/api/objects/{kind_name}/{}", to_hex(id)),
             "get object",
         )
     }
 
+    /// Write an object and hand back its id and the bytes the server settled
+    /// on.
+    ///
+    /// What goes into the cache is the response body, not what the caller
+    /// handed in: the server normalizes some kinds on the way through, and a
+    /// cache that answered with the pre-normalized form would be answering a
+    /// different question than the reader asked.
     pub fn put_object(&self, kind: u16, data: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
         let kind_name =
             wire::kind_name(kind).ok_or_else(|| anyhow!("unknown object kind: {kind}"))?;
         let response =
             self.post_octets(&format!("/api/objects/{kind_name}"), data, "put object")?;
         let id = header_id(&response, wire::HEADER_OBJECT_ID)?;
-        Ok((id, response.bytes()?.to_vec()))
+        let normalized = response.bytes()?.to_vec();
+        self.store_in_cache(kind_name, &id, &normalized);
+        Ok((id, normalized))
     }
 
     /// Write several objects in one round trip.
@@ -370,22 +447,46 @@ impl TandemClient {
             .map_err(|e| anyhow!("decode batch response: {e}"))
     }
 
+    // Operations and views are content-addressed too — the server hashes each
+    // one and answers with `Cache-Control: immutable`, exactly as it does for
+    // objects — so they are cached on the same terms. Leaving them out would
+    // have left most of the chatter uncached: every command walks operation
+    // ancestry before it reads a single file.
+    //
+    // The write path stores the bytes that were sent rather than a response
+    // body, because there is none: the server keeps what it was given and
+    // answers with the id alone.
+
     pub fn get_operation(&self, id: &[u8]) -> Result<Vec<u8>> {
-        self.get_bytes(&format!("/api/ops/{}", to_hex(id)), "get operation")
+        self.cached_get(
+            NAMESPACE_OPERATION,
+            id,
+            &format!("/api/ops/{}", to_hex(id)),
+            "get operation",
+        )
     }
 
     pub fn put_operation(&self, data: &[u8]) -> Result<Vec<u8>> {
         let response = self.post_octets("/api/ops", data, "put operation")?;
-        header_id(&response, wire::HEADER_OPERATION_ID)
+        let id = header_id(&response, wire::HEADER_OPERATION_ID)?;
+        self.store_in_cache(NAMESPACE_OPERATION, &id, data);
+        Ok(id)
     }
 
     pub fn get_view(&self, id: &[u8]) -> Result<Vec<u8>> {
-        self.get_bytes(&format!("/api/views/{}", to_hex(id)), "get view")
+        self.cached_get(
+            NAMESPACE_VIEW,
+            id,
+            &format!("/api/views/{}", to_hex(id)),
+            "get view",
+        )
     }
 
     pub fn put_view(&self, data: &[u8]) -> Result<Vec<u8>> {
         let response = self.post_octets("/api/views", data, "put view")?;
-        header_id(&response, wire::HEADER_VIEW_ID)
+        let id = header_id(&response, wire::HEADER_VIEW_ID)?;
+        self.store_in_cache(NAMESPACE_VIEW, &id, data);
+        Ok(id)
     }
 
     pub fn get_heads_state(&self) -> Result<HeadsState> {
@@ -616,6 +717,367 @@ fn validate_repo_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::collections::HashMap;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::AtomicBool;
+
+    use crate::wire::KIND_FILE;
+
+    // ─── A server that counts ─────────────────────────────────────────
+    //
+    // The cache's whole claim is that a hit costs nothing, and "nothing" is a
+    // statement about the network, not about the clock. Counting at the far
+    // end of a real socket is the only way to say it without believing the
+    // client's own bookkeeping. Fifty lines of HTTP/1.1 is cheaper than a
+    // mocking crate, and the tree has no mocking crate for a reason.
+
+    struct CountingServer {
+        addr: String,
+        requests: Arc<AtomicU64>,
+        stop: Arc<AtomicBool>,
+        acceptor: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl CountingServer {
+        fn start(objects: HashMap<String, Vec<u8>>) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind the counting server");
+            let addr = listener.local_addr().expect("local addr").to_string();
+            listener
+                .set_nonblocking(true)
+                .expect("nonblocking listener");
+
+            let requests = Arc::new(AtomicU64::new(0));
+            let stop = Arc::new(AtomicBool::new(false));
+            let objects = Arc::new(objects);
+
+            let acceptor = {
+                let requests = Arc::clone(&requests);
+                let stop = Arc::clone(&stop);
+                std::thread::spawn(move || {
+                    while !stop.load(Ordering::Relaxed) {
+                        match listener.accept() {
+                            Ok((stream, _)) => {
+                                let requests = Arc::clone(&requests);
+                                let objects = Arc::clone(&objects);
+                                std::thread::spawn(move || serve(stream, requests, objects));
+                            }
+                            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                                std::thread::sleep(Duration::from_millis(2));
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                })
+            };
+
+            Self {
+                addr,
+                requests,
+                stop,
+                acceptor: Some(acceptor),
+            }
+        }
+
+        fn requests(&self) -> u64 {
+            self.requests.load(Ordering::Relaxed)
+        }
+    }
+
+    impl Drop for CountingServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(handle) = self.acceptor.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+
+    fn serve(
+        stream: std::net::TcpStream,
+        requests: Arc<AtomicU64>,
+        objects: Arc<HashMap<String, Vec<u8>>>,
+    ) {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read timeout");
+        let mut writer = stream.try_clone().expect("clone the stream");
+        let mut reader = BufReader::new(stream);
+
+        loop {
+            let mut request_line = String::new();
+            match reader.read_line(&mut request_line) {
+                Ok(0) => return,
+                Ok(_) => {}
+                Err(_) => return,
+            }
+            let Some(path) = request_line.split_whitespace().nth(1).map(str::to_string) else {
+                return;
+            };
+
+            // Headers, so the body length is known and the connection stays
+            // framed for the next request on it.
+            let mut content_length = 0usize;
+            loop {
+                let mut header = String::new();
+                match reader.read_line(&mut header) {
+                    Ok(0) => return,
+                    Ok(_) => {}
+                    Err(_) => return,
+                }
+                let header = header.trim_end();
+                if header.is_empty() {
+                    break;
+                }
+                if let Some(value) = header
+                    .split_once(':')
+                    .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                    .map(|(_, value)| value.trim())
+                {
+                    content_length = value.parse().unwrap_or(0);
+                }
+            }
+            if content_length > 0 {
+                let mut body = vec![0u8; content_length];
+                if reader.read_exact(&mut body).is_err() {
+                    return;
+                }
+            }
+
+            requests.fetch_add(1, Ordering::Relaxed);
+
+            let response = if path == "/api/info" {
+                let body = serde_json::to_vec(&repo_info_body()).expect("encode repo info");
+                http_response(200, "application/json", &body)
+            } else if let Some(body) = objects.get(&path) {
+                http_response(200, wire::CONTENT_TYPE_OCTETS, body)
+            } else {
+                http_response(404, "application/json", br#"{"error":"not found"}"#)
+            };
+
+            if writer.write_all(&response).is_err() || writer.flush().is_err() {
+                return;
+            }
+        }
+    }
+
+    fn http_response(status: u16, content_type: &str, body: &[u8]) -> Vec<u8> {
+        let reason = if status == 200 { "OK" } else { "Not Found" };
+        let mut out = format!(
+            "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        out.extend_from_slice(body);
+        out
+    }
+
+    fn repo_info_body() -> wire::RepoInfoBody {
+        wire::RepoInfoBody {
+            protocol_major: PROTOCOL_MAJOR,
+            protocol_minor: PROTOCOL_MINOR,
+            tandem_version: "test".to_string(),
+            backend_name: EXPECTED_BACKEND_NAME.to_string(),
+            op_store_name: EXPECTED_OP_STORE_NAME.to_string(),
+            commit_id_length: 20,
+            change_id_length: 16,
+            root_commit_id: to_hex(&[0u8; 20]),
+            root_change_id: to_hex(&[0u8; 16]),
+            empty_tree_id: to_hex(&[1u8; 20]),
+            root_operation_id: to_hex(&[0u8; ROOT_OPERATION_ID_LENGTH]),
+            capabilities: Vec::new(),
+        }
+    }
+
+    /// Every file under a directory, so a test can reach into the cache
+    /// without the cache having to expose where it put things.
+    fn files_under(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut found = Vec::new();
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return found;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                found.extend(files_under(&path));
+            } else {
+                found.push(path);
+            }
+        }
+        found
+    }
+
+    fn cache_at(dir: &std::path::Path) -> Option<Arc<DiskCache>> {
+        Some(Arc::new(DiskCache::open(dir)))
+    }
+
+    // ─── Cache behaviour at the client boundary ───────────────────────
+
+    #[test]
+    fn a_cached_object_is_served_with_no_request_at_all() {
+        let id = vec![0xab, 0xcd, 0xef];
+        let payload = b"the bytes of one file object".to_vec();
+        let server = CountingServer::start(HashMap::from([(
+            format!("/api/objects/file/{}", to_hex(&id)),
+            payload.clone(),
+        )]));
+        let tmp = tempfile::tempdir().expect("temp dir");
+
+        let client = TandemClient::connect_with_cache(&server.addr, &[], cache_at(tmp.path()))
+            .expect("connect");
+        assert_eq!(client.requests_sent(), 1, "the handshake, and nothing else");
+
+        let cold = client.get_object(KIND_FILE, &id).expect("cold read");
+        assert_eq!(cold, payload);
+        assert_eq!(client.requests_sent(), 2, "a cold read has to ask");
+
+        let warm = client.get_object(KIND_FILE, &id).expect("warm read");
+        assert_eq!(warm, payload);
+        assert_eq!(
+            client.requests_sent(),
+            2,
+            "a warm read must not send a request"
+        );
+        assert_eq!(server.requests(), 2, "and none must arrive either");
+    }
+
+    #[test]
+    fn a_second_command_on_the_same_machine_reads_from_the_cache() {
+        // Two clients over one directory is what two `tandem` commands are,
+        // and what the three jj store traits are within one command: nothing
+        // is shared in memory, only the cache directory.
+        let id = vec![0x11, 0x22];
+        let payload = b"shared between commands".to_vec();
+        let server = CountingServer::start(HashMap::from([(
+            format!("/api/objects/file/{}", to_hex(&id)),
+            payload.clone(),
+        )]));
+        let tmp = tempfile::tempdir().expect("temp dir");
+
+        let first = TandemClient::connect_with_cache(&server.addr, &[], cache_at(tmp.path()))
+            .expect("connect the first client");
+        assert_eq!(
+            first.get_object(KIND_FILE, &id).expect("cold read"),
+            payload
+        );
+        let after_warming = server.requests();
+
+        let second = TandemClient::connect_with_cache(&server.addr, &[], cache_at(tmp.path()))
+            .expect("connect the second client");
+        assert_eq!(
+            second.get_object(KIND_FILE, &id).expect("warm read"),
+            payload
+        );
+        assert_eq!(
+            second.requests_sent(),
+            1,
+            "the second client's only request must be its handshake"
+        );
+        assert_eq!(
+            server.requests(),
+            after_warming + 1,
+            "the handshake arrived; the object read did not"
+        );
+    }
+
+    #[test]
+    fn a_corrupt_cache_entry_is_refetched_rather_than_believed() {
+        let id = vec![0x5a];
+        let payload = b"the true bytes".to_vec();
+        let server = CountingServer::start(HashMap::from([(
+            format!("/api/objects/file/{}", to_hex(&id)),
+            payload.clone(),
+        )]));
+        let tmp = tempfile::tempdir().expect("temp dir");
+
+        let client = TandemClient::connect_with_cache(&server.addr, &[], cache_at(tmp.path()))
+            .expect("connect");
+        assert_eq!(
+            client.get_object(KIND_FILE, &id).expect("cold read"),
+            payload
+        );
+
+        let entries = files_under(tmp.path());
+        assert_eq!(entries.len(), 1, "one read, one entry: {entries:?}");
+        let mut raw = std::fs::read(&entries[0]).expect("read the entry");
+        let last = raw.len() - 1;
+        raw[last] ^= 0xff;
+        std::fs::write(&entries[0], &raw).expect("corrupt the entry");
+
+        let before = client.requests_sent();
+        let repaired = client
+            .get_object(KIND_FILE, &id)
+            .expect("read past the corruption");
+        assert_eq!(repaired, payload, "corruption must not reach the caller");
+        assert_eq!(
+            client.requests_sent(),
+            before + 1,
+            "a corrupt entry must cost exactly one refetch"
+        );
+
+        let before = client.requests_sent();
+        assert_eq!(
+            client.get_object(KIND_FILE, &id).expect("warm read"),
+            payload
+        );
+        assert_eq!(
+            client.requests_sent(),
+            before,
+            "and the refetch must have repaired the entry"
+        );
+    }
+
+    #[test]
+    fn a_missing_object_is_not_remembered_as_missing() {
+        // The server keeps "there is no such object" and "this disk would not
+        // answer" apart on purpose. A client that wrote either to disk would
+        // remember a fault as a fact, so nothing but a body gets cached.
+        let id = vec![0x77];
+        let server = CountingServer::start(HashMap::new());
+        let tmp = tempfile::tempdir().expect("temp dir");
+
+        let client = TandemClient::connect_with_cache(&server.addr, &[], cache_at(tmp.path()))
+            .expect("connect");
+        assert!(client.get_object(KIND_FILE, &id).is_err());
+        assert!(
+            files_under(tmp.path()).is_empty(),
+            "a 404 must leave nothing on disk"
+        );
+
+        let before = client.requests_sent();
+        assert!(client.get_object(KIND_FILE, &id).is_err());
+        assert_eq!(
+            client.requests_sent(),
+            before + 1,
+            "the second attempt must ask the server again"
+        );
+    }
+
+    #[test]
+    fn a_client_without_a_cache_still_reads() {
+        let id = vec![0x01];
+        let payload = b"no cache here".to_vec();
+        let server = CountingServer::start(HashMap::from([(
+            format!("/api/objects/file/{}", to_hex(&id)),
+            payload.clone(),
+        )]));
+
+        let client = TandemClient::connect_with_cache(&server.addr, &[], None).expect("connect");
+        assert_eq!(
+            client.get_object(KIND_FILE, &id).expect("first read"),
+            payload
+        );
+        assert_eq!(
+            client.get_object(KIND_FILE, &id).expect("second read"),
+            payload
+        );
+        assert_eq!(
+            server.requests(),
+            3,
+            "every read asks when there is no cache"
+        );
+    }
 
     #[test]
     fn connector_target_parses_raw_host_port_as_http() {

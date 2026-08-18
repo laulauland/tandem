@@ -496,6 +496,10 @@ fn isolated_home(root: &Path) -> Result<PathBuf> {
 fn isolate_env(cmd: &mut Command, home: &Path) {
     cmd.env("HOME", home);
     cmd.env("XDG_CONFIG_HOME", home.join(".config"));
+    // Inside the run's own home, so one bench run never reads what an earlier
+    // one left warm. A profile measured against somebody else's cache is a
+    // measurement of the disk.
+    cmd.env("TANDEM_CACHE_DIR", home.join(".cache").join("tandem"));
 }
 
 fn free_addr() -> Result<String> {

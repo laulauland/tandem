@@ -57,9 +57,17 @@ pub fn isolated_home(tmp: &Path) -> PathBuf {
 /// Apply test isolation env vars to a Command.
 /// Sets HOME and XDG_CONFIG_HOME to a temp dir so jj doesn't
 /// pollute the real ~/.config/jj/repos/ registry.
+///
+/// `TANDEM_CACHE_DIR` is pinned for the same reason, one level deeper: the
+/// client cache falls back through `XDG_CACHE_HOME` and then `HOME`, and a
+/// developer with `XDG_CACHE_HOME` set would otherwise have every test in the
+/// suite writing into their real cache — and reading each other's entries out
+/// of it. A test that wants a cache shared between two workspaces overrides
+/// this with an explicit value.
 pub fn isolate_env(cmd: &mut Command, home: &Path) {
     cmd.env("HOME", home);
     cmd.env("XDG_CONFIG_HOME", home.join(".config"));
+    cmd.env("TANDEM_CACHE_DIR", home.join(".cache").join("tandem"));
     // Write a minimal jj config if not present
     let config_dir = home.join(".config").join("jj");
     if !config_dir.exists() {

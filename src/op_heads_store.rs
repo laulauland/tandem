@@ -15,6 +15,7 @@ use jj_lib::op_store::OperationId;
 use jj_lib::settings::UserSettings;
 use prost::Message as _;
 
+use crate::env::env_flag_enabled;
 use crate::http_client::TandemClient;
 
 const WORKSPACE_ID_FILE: &str = "workspace_id";
@@ -105,12 +106,7 @@ fn cas_retry_backoff(attempt: usize, new_id: &[u8]) -> Duration {
 }
 
 fn optimistic_version_cache_enabled() -> bool {
-    !std::env::var(BENCH_DISABLE_OPTIMISTIC_VERSION_ENV)
-        .map(|value| {
-            let normalized = value.trim().to_ascii_lowercase();
-            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
-        })
-        .unwrap_or(false)
+    !env_flag_enabled(BENCH_DISABLE_OPTIMISTIC_VERSION_ENV)
 }
 
 fn load_cached_version(path: &Path) -> Option<u64> {

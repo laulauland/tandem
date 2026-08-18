@@ -72,7 +72,9 @@ materialization — kill the server, `tandem up --bucket` anywhere, it replays.
   Rework direction: on-demand conflict query over ready bookmarks, writable
   nowhere, runnable by any actor.
 - Cache CLI surface: none. `tandem clone` warms the cache; image baking is
-  running `tandem clone` at image build time.
+  running `tandem clone` at image build time. The location is environment
+  only: `TANDEM_CACHE_DIR` (default `$XDG_CACHE_HOME/tandem`, else
+  `$HOME/.cache/tandem`), with `TANDEM_DISABLE_CACHE=1` as the kill switch.
 
 ## Validation infra
 

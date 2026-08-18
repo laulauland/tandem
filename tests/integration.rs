@@ -12,6 +12,8 @@ mod common;
 mod bucket_durability;
 #[path = "integration/bucket_replay.rs"]
 mod bucket_replay;
+#[path = "integration/client_cache.rs"]
+mod client_cache;
 #[path = "integration/contention.rs"]
 mod contention;
 #[path = "integration/control_socket.rs"]

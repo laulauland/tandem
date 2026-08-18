@@ -54,6 +54,13 @@ pub fn isolate_process_environment() {
         // of them, so there must be no value at all.
         std::env::remove_var("TANDEM_SERVER");
         std::env::remove_var("TANDEM_WORKSPACE");
+        // No client disk cache in this process. The oracle's strongest
+        // invariant is that every byte an agent wrote reads back *over the
+        // wire, out of a store that has not seen it before*; a cache shared by
+        // every client in the address space could answer those reads from disk
+        // and the invariant would stop meaning anything. The cache has its own
+        // tests, where it is the subject rather than the scenery.
+        std::env::set_var(jj_tandem::cache::CACHE_DISABLE_ENV, "1");
         home
     });
 }

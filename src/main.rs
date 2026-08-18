@@ -5,6 +5,7 @@
 //!   tandem init --server <addr> [path]           → initialize tandem workspace
 //!   tandem <jj args>                             → stock jj via CliRunner
 
+use jj_tandem::env::env_flag_enabled;
 use jj_tandem::{control, server, watch, workspace_init};
 
 use std::path::Path;
@@ -38,6 +39,13 @@ ENVIRONMENT:
     TANDEM_LISTEN           Listen address for `tandem up` (host:port).
                             If unset, tandem auto-selects a free port
                             in 0.0.0.0:13013-13063
+    TANDEM_CACHE_DIR        Where the client keeps its cache of objects,
+                            operations and views. Everything in it is named by
+                            a hash of its contents, so the directory can be
+                            shared between workspaces and baked into an image.
+                            Defaults to $XDG_CACHE_HOME/tandem, else
+                            $HOME/.cache/tandem
+    TANDEM_DISABLE_CACHE    Set to 1/true to read everything from the server
 
 SETUP:
     # Start a server
@@ -357,18 +365,6 @@ fn resolve_control_socket(explicit: Option<&str>) -> String {
     explicit
         .map(|s| s.to_string())
         .unwrap_or_else(default_control_socket)
-}
-
-fn env_flag_enabled(name: &str) -> bool {
-    std::env::var(name)
-        .ok()
-        .map(|v| {
-            matches!(
-                v.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or(false)
 }
 
 fn resolve_integration_workspace_enabled(flag: bool) -> bool {

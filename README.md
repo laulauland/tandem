@@ -323,6 +323,8 @@ the remote store.
 | `TANDEM_WORKSPACE` | Workspace name fallback for `tandem init` when `--workspace` is not provided. |
 | `TANDEM_LISTEN` | Listen address fallback for `tandem up --listen`. |
 | `TANDEM_ENABLE_INTEGRATION_WORKSPACE` | Set to `1`/`true` to enable integration workspace mode when `--enable-integration-workspace` is not passed. |
+| `TANDEM_CACHE_DIR` | Where the client caches objects, operations and views. Everything in it is named by a hash of its own contents, so one directory can be shared by every workspace on a machine — or baked into an image. Defaults to `$XDG_CACHE_HOME/tandem`, else `$HOME/.cache/tandem`. |
+| `TANDEM_DISABLE_CACHE` | Set to `1`/`true` to read everything from the server. |
 
 ---
 

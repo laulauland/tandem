@@ -17,7 +17,7 @@ use tempfile::TempDir;
 
 use super::{
     assert_ok, control_socket_path, free_addr, isolated_home, run_tandem_in,
-    spawn_server_with_args_and_env, wait_for_server, wait_for_socket,
+    spawn_server_with_args_env_and_log, wait_for_server, wait_for_socket,
 };
 
 pub struct ServerFixture {
@@ -33,6 +33,7 @@ pub struct ServerFixture {
     args: Vec<String>,
     env: Vec<(String, String)>,
     has_socket: bool,
+    log: Option<PathBuf>,
 }
 
 impl ServerFixture {
@@ -72,15 +73,48 @@ impl ServerFixture {
     /// `workspace` names it on the server; `None` leaves the name to the
     /// server, which is what a person who did not pass `--workspace` gets.
     pub fn init_workspace(&self, dir_name: &str, workspace: Option<&str>) -> PathBuf {
+        self.init_workspace_with_env(dir_name, workspace, &[])
+    }
+
+    /// The same, with extra environment for the `tandem init` — for the test
+    /// that has to say which cache directory the new workspace uses.
+    pub fn init_workspace_with_env(
+        &self,
+        dir_name: &str,
+        workspace: Option<&str>,
+        env: &[(&str, &str)],
+    ) -> PathBuf {
         let dir = self.dir(dir_name);
         let mut args = vec!["init", "--server", &self.addr];
         if let Some(name) = workspace {
             args.extend(["--workspace", name]);
         }
         args.push(".");
-        let out = run_tandem_in(&dir, &args, &self.home);
+        let out = super::run_tandem_in_with_env(&dir, &args, env, &self.home);
         assert_ok(&out, &format!("initialize workspace in {dir_name}"));
         dir
+    }
+
+    /// What the server has logged so far, for a test that counts what it was
+    /// asked for. Empty unless the fixture was built with `log_to_file()`.
+    pub fn log_text(&self) -> String {
+        match &self.log {
+            Some(path) => std::fs::read_to_string(path).unwrap_or_default(),
+            None => String::new(),
+        }
+    }
+
+    /// How many requests for one RPC method the server has logged.
+    ///
+    /// Two substrings rather than one: the text log paints field names with
+    /// ANSI escapes, so `rpc_method="getObject"` never appears as a contiguous
+    /// run of characters even though both halves of it do.
+    pub fn rpc_request_count(&self, method: &str) -> usize {
+        let quoted = format!("\"{method}\"");
+        self.log_text()
+            .lines()
+            .filter(|line| line.contains("rpc request") && line.contains(&quoted))
+            .count()
     }
 
     /// Stop this server and start another over the same repo, on a new address.
@@ -91,7 +125,14 @@ impl ServerFixture {
     pub fn restart_on_new_addr(&mut self) {
         self.stop();
         self.addr = free_addr();
-        let mut server = spawn(&self.repo, &self.addr, &self.args, &self.env, &self.home);
+        let mut server = spawn(
+            &self.repo,
+            &self.addr,
+            &self.args,
+            &self.env,
+            &self.home,
+            self.log.as_deref(),
+        );
         wait_for_server(&self.addr, &mut server);
         if self.has_socket {
             wait_for_socket(&self.socket, Duration::from_secs(5));
@@ -120,6 +161,7 @@ pub struct ServerBuilder {
     env: Vec<(String, String)>,
     control_socket: bool,
     home: Option<(TempDir, PathBuf)>,
+    log_to_file: bool,
 }
 
 impl ServerBuilder {
@@ -150,6 +192,14 @@ impl ServerBuilder {
         self
     }
 
+    /// Keep the server's log in a file under the fixture, and turn the level
+    /// up far enough that reads appear in it. For tests that assert on what
+    /// the server was asked for rather than on what it answered.
+    pub fn log_to_file(mut self) -> Self {
+        self.log_to_file = true;
+        self
+    }
+
     pub fn start(self) -> ServerFixture {
         let (tmp, home) = self.home.unwrap_or_else(|| {
             let tmp = TempDir::new().expect("create the fixture's temp directory");
@@ -166,8 +216,13 @@ impl ServerBuilder {
             args.push(socket.to_string_lossy().into_owned());
         }
 
+        let log = self.log_to_file.then(|| {
+            args.extend(["--log-level".to_string(), "debug".to_string()]);
+            tmp.path().join("server.log")
+        });
+
         let addr = free_addr();
-        let mut server = spawn(&repo, &addr, &args, &self.env, &home);
+        let mut server = spawn(&repo, &addr, &args, &self.env, &home, log.as_deref());
         wait_for_server(&addr, &mut server);
         if self.control_socket {
             wait_for_socket(&socket, Duration::from_secs(5));
@@ -183,6 +238,7 @@ impl ServerBuilder {
             args,
             env: self.env,
             has_socket: self.control_socket,
+            log,
         }
     }
 }
@@ -193,8 +249,9 @@ fn spawn(
     args: &[String],
     env: &[(String, String)],
     home: &Path,
+    log: Option<&Path>,
 ) -> Child {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-    spawn_server_with_args_and_env(repo, addr, &args, &env, home)
+    spawn_server_with_args_env_and_log(repo, addr, &args, &env, home, log)
 }

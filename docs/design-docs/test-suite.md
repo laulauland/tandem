@@ -25,6 +25,14 @@ retry/settle, bucket harness, deadline line reads).
   written" is not.
 - No fixed sleeps. Wait for the thing: `common::lines::Lines` for a child's
   output, `common::workspace::wait_for` for server-side state.
+- The client disk cache is **off** in the in-process suites
+  (`support::isolate_process_environment` sets `TANDEM_DISABLE_CACHE`). One
+  address space holds every client of every server, so a cache shared by all of
+  them could answer the oracle's "every byte reads back over the wire, out of a
+  store that has not seen it before" from local disk, and the invariant would
+  stop meaning anything. The integration suite keeps it on and pins
+  `TANDEM_CACHE_DIR` inside each test's home; `integration/client_cache.rs` is
+  where the cache itself is the subject.
 
 ## What the oracle cannot see, and what closes every schedule
 

@@ -7,7 +7,9 @@
 //! from its seed.
 
 pub mod backend;
+pub mod cache;
 pub mod control;
+pub mod env;
 pub mod hex;
 pub mod http_client;
 pub mod logging;
