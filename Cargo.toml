@@ -66,6 +66,7 @@ dunce = "1"
 libc = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "json", "registry"] }
+object_store = { version = "0.14.1", features = ["aws"] }
 
 [build-dependencies]
 capnpc = "0.20"

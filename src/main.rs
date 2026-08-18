@@ -12,12 +12,15 @@ mod tandem_capnp {
 
 mod backend;
 mod control;
+mod hex;
 mod logging;
+mod object_store;
 mod op_heads_store;
 mod op_store;
 mod proto_convert;
 mod rpc;
 mod server;
+mod wal;
 mod watch;
 
 use std::path::Path;
@@ -125,6 +128,11 @@ enum Commands {
         /// Enable server-side integration workspace recompute mode
         #[arg(long)]
         enable_integration_workspace: bool,
+        /// Bucket holding the write-ahead log: a directory path, file://…, or
+        /// s3://<bucket>[/<prefix>][?endpoint=…&region=…&anonymous=true].
+        /// Defaults to a directory inside the repo.
+        #[arg(long, env = "TANDEM_BUCKET")]
+        bucket: Option<String>,
     },
 
     /// Initialize a tandem-backed workspace
@@ -168,6 +176,9 @@ enum Commands {
         /// Enable server-side integration workspace recompute mode
         #[arg(long)]
         enable_integration_workspace: bool,
+        /// Bucket holding the write-ahead log (see `tandem serve --bucket`)
+        #[arg(long, env = "TANDEM_BUCKET")]
+        bucket: Option<String>,
     },
 
     /// Stop the tandem daemon
@@ -241,6 +252,7 @@ fn main() -> ExitCode {
             daemon,
             log_file,
             enable_integration_workspace,
+            bucket,
         }) => run_serve(
             &listen,
             &repo,
@@ -250,6 +262,7 @@ fn main() -> ExitCode {
             daemon,
             log_file.as_deref(),
             enable_integration_workspace,
+            bucket.as_deref(),
         ),
         Some(Commands::Init {
             server,
@@ -267,6 +280,7 @@ fn main() -> ExitCode {
             log_file,
             control_socket,
             enable_integration_workspace,
+            bucket,
         }) => run_up(
             &repo,
             listen.as_deref(),
@@ -274,6 +288,7 @@ fn main() -> ExitCode {
             log_file.as_deref(),
             control_socket.as_deref(),
             enable_integration_workspace,
+            bucket.as_deref(),
         ),
         Some(Commands::Down { control_socket }) => run_down(control_socket.as_deref()),
         Some(Commands::Server { command }) => match command {
@@ -311,6 +326,7 @@ fn run_serve(
     daemon: bool,
     log_file: Option<&str>,
     enable_integration_workspace_flag: bool,
+    bucket: Option<&str>,
 ) -> ExitCode {
     // In daemon mode, stdout/stderr are already redirected to the log file
     // by `run_up` before spawning this process. Nothing extra needed here.
@@ -332,6 +348,7 @@ fn run_serve(
         enable_integration_workspace: resolve_integration_workspace_enabled(
             enable_integration_workspace_flag,
         ),
+        bucket: bucket.map(|s| s.to_string()),
     };
 
     if let Err(err) = local.block_on(&rt, server::run_serve(opts)) {
@@ -452,6 +469,7 @@ fn run_up(
     log_file: Option<&str>,
     control_socket: Option<&str>,
     enable_integration_workspace_flag: bool,
+    bucket: Option<&str>,
 ) -> ExitCode {
     let sock_path = resolve_control_socket(control_socket);
     let enable_integration_workspace =
@@ -508,6 +526,9 @@ fn run_up(
     ]);
     if enable_integration_workspace {
         cmd.arg("--enable-integration-workspace");
+    }
+    if let Some(bucket) = bucket {
+        cmd.args(["--bucket", bucket]);
     }
 
     // Redirect stdout/stderr to log file for daemon

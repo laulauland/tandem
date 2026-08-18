@@ -140,6 +140,21 @@ pub fn spawn_server_with_args_and_env(
     env: &[(&str, &str)],
     home: &Path,
 ) -> Child {
+    spawn_server_with_args_env_and_log(repo, addr, extra_args, env, home, None)
+}
+
+/// Same, but with the server's log written to a file the test can read.
+///
+/// Used by tests that assert on what the server did rather than only on what
+/// it left behind — how many bucket writes a publish made, for one.
+pub fn spawn_server_with_args_env_and_log(
+    repo: &Path,
+    addr: &str,
+    extra_args: &[&str],
+    env: &[(&str, &str)],
+    home: &Path,
+    log_path: Option<&Path>,
+) -> Child {
     let mut cmd = Command::new(tandem_bin());
     cmd.args(["serve", "--listen", addr, "--repo", repo.to_str().unwrap()]);
     let has_explicit_log_level = extra_args.iter().copied().any(|arg| arg == "--log-level");
@@ -153,10 +168,17 @@ pub fn spawn_server_with_args_and_env(
     for (k, v) in env {
         cmd.env(k, v);
     }
-    cmd.stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn tandem serve")
+    cmd.stdout(Stdio::null());
+    match log_path {
+        Some(path) => {
+            let file = std::fs::File::create(path).expect("create server log file");
+            cmd.stderr(Stdio::from(file));
+        }
+        None => {
+            cmd.stderr(Stdio::null());
+        }
+    }
+    cmd.spawn().expect("spawn tandem serve")
 }
 
 /// Generate a unique control socket path inside a temp directory.

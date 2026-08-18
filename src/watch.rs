@@ -37,10 +37,7 @@ impl head_watcher::Server for WatcherImpl {
         let mut hex_heads = Vec::with_capacity(heads_reader.len() as usize);
         for i in 0..heads_reader.len() {
             match heads_reader.get(i) {
-                Ok(bytes) => {
-                    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-                    hex_heads.push(hex);
-                }
+                Ok(bytes) => hex_heads.push(crate::hex::to_hex(bytes)),
                 Err(e) => return Promise::err(e),
             }
         }

@@ -5,6 +5,11 @@
 //! standard jj op_store directory. Op heads are managed through jj-lib's
 //! op-heads store; `.jj/repo/tandem/heads.json` stores tandem metadata only
 //! (CAS version + workspace head attribution).
+//!
+//! The durability half — WAL entries, the index object, and the recovery that
+//! replays them — lives in `bucket`, next door.
+
+mod bucket;
 
 use anyhow::{anyhow, bail, Context, Result};
 // blake2 is available if needed for raw hashing, but we use jj_lib::content_hash
@@ -29,10 +34,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
 
+use self::bucket::{crash_point_after_index_write, test_env_u64, DurableOps, PendingBlobs};
 use crate::control;
+use crate::hex::{from_hex, to_hex};
 use crate::logging;
+use crate::object_store::{self, ObjectStore};
 use crate::proto_convert;
 use crate::tandem_capnp::{cancel, head_watcher, store};
+use crate::wal;
 
 // ─── Public entry point ───────────────────────────────────────────────────────
 
@@ -46,6 +55,10 @@ pub struct ServeOptions {
     pub daemon: bool,
     pub log_file: Option<String>,
     pub enable_integration_workspace: bool,
+    /// Bucket location: a directory path, `file://…`, or `s3://…`. When absent
+    /// the server keeps its bucket inside the repo, which is enough for dev
+    /// and tests but gives up the durability inversion.
+    pub bucket: Option<String>,
 }
 
 pub async fn run_serve(opts: ServeOptions) -> Result<()> {
@@ -59,6 +72,7 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
         log_level = %opts.log_level,
         log_format = %opts.log_format,
         integration_workspace = opts.enable_integration_workspace,
+        bucket = opts.bucket.as_deref().unwrap_or("<repo-local>"),
         "starting tandem server"
     );
     if let Some(path) = opts.log_file.as_deref() {
@@ -66,7 +80,11 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
     }
 
     let repo = PathBuf::from(&opts.repo_path);
-    let server = Rc::new(Server::new(repo, opts.enable_integration_workspace)?);
+    let server = Rc::new(Server::new(
+        repo,
+        opts.enable_integration_workspace,
+        opts.bucket.as_deref(),
+    )?);
     server.start_integration_worker();
     let listener = tokio::net::TcpListener::bind(&opts.listen_addr)
         .await
@@ -242,30 +260,44 @@ struct Server {
     op_heads_store: Arc<dyn jj_lib::op_heads_store::OpHeadsStore>,
     /// Path to `.jj/repo/tandem/` for tandem metadata sidecar (CAS/workspace map).
     tandem_dir: PathBuf,
+    /// The durable source of truth: WAL entries plus the CAS'd index object.
+    bucket: Arc<dyn ObjectStore>,
+    /// Whether the bucket was proven to enforce conditional puts at startup.
+    bucket_conditional_put: bool,
+    /// Etag of the index object as this server last saw it.
+    index_etag: Mutex<Option<String>>,
+    /// Objects written since the last publish, drained into the next WAL entry.
+    pending_blobs: Mutex<PendingBlobs>,
+    /// Operation ids this process has already written a WAL entry for.
+    durable_ops: Mutex<DurableOps>,
+    /// Test hook: index writes still to be failed artificially.
+    test_index_conflicts: AtomicU64,
     integration_enabled: bool,
     integration_trigger: Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>,
     lock: Mutex<()>,
     watchers: Mutex<Vec<WatcherEntry>>,
 }
 
-/// Convert raw bytes to hex string (for filesystem paths)
-fn to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-/// Convert hex string to raw bytes
-fn from_hex(hex: &str) -> Result<Vec<u8>> {
-    if !hex.len().is_multiple_of(2) {
-        bail!("odd-length hex string");
-    }
-    (0..hex.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|e| anyhow!("bad hex: {e}")))
+/// Operation ids for an RPC response.
+///
+/// A head that will not parse is dropped with a warning rather than sent as a
+/// zero-length operation id: an empty id fails the client somewhere far from
+/// the corrupt string that caused it.
+fn head_ids_for_wire(heads: &[String]) -> Vec<Vec<u8>> {
+    heads
+        .iter()
+        .filter_map(|hex| match from_hex(hex) {
+            Ok(bytes) => Some(bytes),
+            Err(err) => {
+                tracing::warn!(head = %hex, error = %err, "dropping an unreadable op head id from the response");
+                None
+            }
+        })
         .collect()
 }
 
 impl Server {
-    fn new(repo: PathBuf, integration_enabled: bool) -> Result<Self> {
+    fn new(repo: PathBuf, integration_enabled: bool, bucket_spec: Option<&str>) -> Result<Self> {
         fs::create_dir_all(&repo)?;
 
         if !repo.join(".jj").exists() {
@@ -295,6 +327,38 @@ impl Server {
             fs::write(&metadata_path, serde_json::to_vec_pretty(&initial)?)?;
         }
 
+        let bucket = match bucket_spec {
+            Some(spec) => object_store::open(spec)
+                .with_context(|| format!("open bucket {spec}"))?,
+            None => object_store::open_filesystem(&tandem_dir.join("bucket"))
+                .context("open repo-local bucket")?,
+        };
+
+        let bucket_conditional_put = match object_store::probe_conditional_put(bucket.as_ref()) {
+            Ok(supported) => supported,
+            Err(err) => {
+                tracing::warn!(
+                    bucket = %bucket.describe(),
+                    error = %err,
+                    "conditional-put probe failed; assuming unsupported"
+                );
+                false
+            }
+        };
+        tracing::info!(
+            bucket = %bucket.describe(),
+            backend = bucket.backend_name(),
+            conditional_put = bucket_conditional_put,
+            "bucket ready"
+        );
+        if !bucket_conditional_put {
+            tracing::warn!(
+                bucket = %bucket.describe(),
+                "bucket does not enforce conditional puts; index writes rely on \
+                 this server being the only writer"
+            );
+        }
+
         let op_heads_store = loader.op_heads_store().clone();
         let mut server = Self {
             store: loader.store().clone(),
@@ -302,12 +366,19 @@ impl Server {
             op_store_path,
             op_heads_store,
             tandem_dir,
+            bucket,
+            bucket_conditional_put,
+            index_etag: Mutex::new(None),
+            pending_blobs: Mutex::new(PendingBlobs::default()),
+            durable_ops: Mutex::new(DurableOps::default()),
+            test_index_conflicts: AtomicU64::new(test_env_u64("TANDEM_TEST_INDEX_CAS_CONFLICTS")),
             integration_enabled,
             integration_trigger: Mutex::new(None),
             lock: Mutex::new(()),
             watchers: Mutex::new(Vec::new()),
         };
         server.initialize_integration_metadata()?;
+        server.recover_from_bucket()?;
         Ok(server)
     }
 
@@ -343,7 +414,7 @@ impl Server {
     fn reconcile_jj_op_heads(
         &self,
         workspace_heads: &BTreeMap<String, String>,
-    ) -> Result<(Vec<String>, bool)> {
+    ) -> Result<Vec<String>> {
         let before = self.read_jj_op_heads()?;
 
         let mut candidate_hex = before.clone();
@@ -356,14 +427,8 @@ impl Server {
         candidate_hex.dedup();
 
         if candidate_hex.len() <= 1 {
-            return Ok((before, false));
+            return Ok(before);
         }
-
-        tracing::debug!(
-            heads = candidate_hex.len(),
-            workspace_heads = workspace_heads.len(),
-            "reconciling divergent operation heads"
-        );
 
         let mut operations = Vec::new();
         for op_hex in &candidate_hex {
@@ -383,13 +448,38 @@ impl Server {
         }
 
         if operations.len() <= 1 {
-            return Ok((before, false));
+            return Ok(before);
         }
 
-        let merged_op = self
+        tracing::debug!(
+            candidates = candidate_hex.len(),
+            workspace_heads = workspace_heads.len(),
+            "reconciling divergent operation heads"
+        );
+
+        let merged_op = match self
             .repo_loader
             .merge_operations(operations, Some("reconcile divergent operations"))
-            .context("reconcile divergent operation heads")?;
+        {
+            Ok(op) => op,
+            // Merging views is a convenience, not a correctness requirement:
+            // multiple op heads are a state every jj client already resolves on
+            // its own. Some head pairs cannot be merged at all — a workspace
+            // whose working-copy commit differs across the two sides and is the
+            // root commit on one of them needs a merge commit the git backend
+            // refuses to write. Failing here would fail the publish that has
+            // already been made durable and already been applied, and the
+            // client's retry would rewrite the same change a second time, which
+            // is how a change id goes divergent. Hand back the unmerged heads.
+            Err(err) => {
+                tracing::warn!(
+                    candidates = candidate_hex.len(),
+                    error = %err,
+                    "could not merge divergent operation heads; leaving them unmerged"
+                );
+                return Ok(before);
+            }
+        };
 
         let mut old_ids = Vec::new();
         for op_hex in candidate_hex {
@@ -408,15 +498,14 @@ impl Server {
         .map_err(|e| anyhow!("reconcile op heads update failed: {e}"))?;
 
         let after = self.read_jj_op_heads()?;
-        let changed = after != before;
-        if changed {
+        if after != before {
             tracing::debug!(
                 before_heads = before.len(),
                 after_heads = after.len(),
                 "reconciled operation heads"
             );
         }
-        Ok((after, changed))
+        Ok(after)
     }
 
     fn integration_metadata_path(&self) -> PathBuf {
@@ -720,7 +809,26 @@ impl Server {
         }
     }
 
+    /// Write an object and stage it for the next WAL entry.
     fn put_object_sync(&self, kind: &str, data: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+        let (id, normalized) = self.write_object_sync(kind, data)?;
+        if let Some(record_kind) = wal::RecordKind::from_object_kind(kind) {
+            self.pending_blobs
+                .lock()
+                .map_err(|e| anyhow!("pending blobs lock: {e}"))?
+                .stage(wal::WalRecord {
+                    kind: record_kind,
+                    id: id.clone(),
+                    data: normalized.clone(),
+                })
+                .context("stage the object for the next WAL entry")?;
+        }
+        Ok((id, normalized))
+    }
+
+    /// Write an object to the local git backend. Content-addressed, so writing
+    /// the same bytes twice is a no-op.
+    fn write_object_sync(&self, kind: &str, data: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
         let backend = self.store.backend();
 
         match kind {
@@ -848,19 +956,25 @@ impl Server {
 
     // ─── Heads management ─────────────────────────────────────────────
 
+    /// Read the head state. A read only reads: it does not reconcile.
+    ///
+    /// Reconciling here used to mint a merge operation, bump the version and
+    /// write the index, all inside a call a client makes in the middle of a
+    /// command. The command that then published its own operation found the
+    /// version moved, retried its transaction, and rewrote the same change a
+    /// second time — which is how a change id ends up divergent. Multiple heads
+    /// are not an error state: every jj client resolves them itself and
+    /// publishes the merge back through `update_op_heads`, where the head set
+    /// is reconciled on the write path, in the bucket, before the ack.
     fn get_heads_sync(&self) -> Result<HeadsState> {
         let _guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
-        let mut metadata = self.read_heads_metadata()?;
-        let empty_workspace_heads = BTreeMap::new();
-        let (heads, reconciled) = self.reconcile_jj_op_heads(&empty_workspace_heads)?;
+        let metadata = self.read_heads_metadata()?;
+        let heads = self.read_jj_op_heads()?;
 
-        if reconciled {
-            metadata.version += 1;
-            self.write_heads_metadata(&metadata)?;
-            let heads_bytes: Vec<Vec<u8>> = heads.iter().filter_map(|h| from_hex(h).ok()).collect();
-            self.notify_watchers(metadata.version, &heads_bytes);
-        }
-
+        // The workspace entries are reported as recorded. A client uses its own
+        // entry to find the operation its working copy was written at, and that
+        // operation is not always a head — dropping it makes the client load a
+        // repo that its own working copy is a sibling of.
         Ok(HeadsState {
             version: metadata.version,
             heads,
@@ -876,20 +990,13 @@ impl Server {
         workspace_id: Option<String>,
     ) -> Result<UpdateResult> {
         let _guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
-        let mut metadata = self.read_heads_metadata()?;
+        let metadata = self.read_heads_metadata()?;
 
         if metadata.version != expected_version {
-            let empty_workspace_heads = BTreeMap::new();
-            let (current_heads, reconciled) = self.reconcile_jj_op_heads(&empty_workspace_heads)?;
-            if reconciled {
-                metadata.version += 1;
-                self.write_heads_metadata(&metadata)?;
-                let heads_bytes: Vec<Vec<u8>> = current_heads
-                    .iter()
-                    .filter_map(|h| from_hex(h).ok())
-                    .collect();
-                self.notify_watchers(metadata.version, &heads_bytes);
-            }
+            // Same rule as get_heads: reporting a stale version is a read, and
+            // a read does not reconcile. The client is about to retry, and the
+            // retry's publish reconciles on the write path.
+            let current_heads = self.read_jj_op_heads()?;
             tracing::debug!(
                 expected_version,
                 actual_version = metadata.version,
@@ -897,10 +1004,7 @@ impl Server {
             );
             return Ok(UpdateResult {
                 ok: false,
-                heads: current_heads
-                    .iter()
-                    .map(|h| from_hex(h).unwrap_or_default())
-                    .collect(),
+                heads: head_ids_for_wire(&current_heads),
                 version: metadata.version,
                 workspace_heads: metadata.workspace_heads,
             });
@@ -931,32 +1035,107 @@ impl Server {
         }
 
         old_op_ids.retain(|id| id != &new_op_id);
-        pollster::block_on(self.op_heads_store.update_op_heads(&old_op_ids, &new_op_id))
-            .map_err(|e| anyhow!("update op heads via jj-lib: {e}"))?;
 
         let new_hex = to_hex(&new_id);
         let next_workspace_heads =
             updated_workspace_heads(&metadata.workspace_heads, workspace_id.as_deref(), &new_hex);
-        let (next_heads, _) = self.reconcile_jj_op_heads(&next_workspace_heads)?;
+        let next_version = metadata.version + 1;
+
+        // ── Durable before ack ──
+        //
+        // 1. The WAL entry: this operation, its view, and every blob written
+        //    since the last publish.
+        if let Err(err) = self.write_publish_wal_entry(&new_hex) {
+            // Nothing was acknowledged and nothing was applied locally, so the
+            // client's transaction retry is free to start over.
+            return Err(err.context("write WAL entry before acknowledging head update"));
+        }
+
+        // 2. The index object, naming the head set this update produces. The
+        //    set is computed before the local apply so the bucket commits
+        //    first: a crash after this point is replayed at the next start.
+        let prospective_heads = self.prospective_op_heads(&old_op_ids, &new_op_id)?;
+        if self.inject_index_conflict()
+            || !self.publish_index(next_version, &prospective_heads, &next_workspace_heads)?
+        {
+            return self.index_conflict_result(metadata);
+        }
+
+        crash_point_after_index_write();
+
+        // ── Local apply ──
+        //
+        // This is the last step that may still fail the RPC, and it is the
+        // boundary on purpose. The bucket has committed, so nothing is lost:
+        // the failure leaves exactly the state the crash window leaves, which
+        // the next start replays. Acknowledging instead would promise a head
+        // the local repo cannot serve, since recovery runs only at startup.
+        pollster::block_on(self.op_heads_store.update_op_heads(&old_op_ids, &new_op_id))
+            .map_err(|e| anyhow!("update op heads via jj-lib: {e}"))?;
+
+        // ── Past the point of no return ──
+        //
+        // The update is durable in the bucket and applied to the local repo.
+        // Everything below only tidies up, so nothing below may return an
+        // error: the client would see a failed RPC for an operation that had
+        // already landed, retry its transaction, and rewrite the same change —
+        // which is how a change id goes divergent. Each step degrades to the
+        // last state known to be both durable and correct, and says so.
+        let next_heads = match self.reconcile_jj_op_heads(&next_workspace_heads) {
+            Ok(heads) => heads,
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "could not reconcile heads after publishing; acknowledging the unmerged set"
+                );
+                self.read_jj_op_heads().unwrap_or_else(|err| {
+                    tracing::warn!(
+                        error = %err,
+                        "could not re-read op heads after publishing; acknowledging the published set"
+                    );
+                    prospective_heads.clone()
+                })
+            }
+        };
 
         let next_metadata = HeadsMetadata {
-            version: metadata.version + 1,
+            version: next_version,
             workspace_heads: next_workspace_heads.clone(),
         };
-        self.write_heads_metadata(&next_metadata)?;
+        if let Err(err) = self.write_heads_metadata(&next_metadata) {
+            // The bucket index carries this version already, and recovery reads
+            // the version from the bucket, so the local file is a cache of it.
+            tracing::error!(
+                version = next_version,
+                error = %err,
+                "could not record the new heads metadata locally; the bucket index still holds it"
+            );
+        }
+
+        // Reconciling divergent heads mints a merge operation the index does
+        // not know about yet. Make it durable, then mirror the settled head set
+        // back. If it cannot be made durable, acknowledge the set the index
+        // already committed rather than a head the bucket has never seen.
+        let acked_heads = if next_heads != prospective_heads {
+            self.publish_derived_heads(
+                next_version,
+                &next_heads,
+                &prospective_heads,
+                &next_workspace_heads,
+            )
+        } else {
+            next_heads
+        };
 
         tracing::debug!(
             previous_version = metadata.version,
             new_version = next_metadata.version,
-            heads = next_heads.len(),
+            heads = acked_heads.len(),
             workspace_heads = next_workspace_heads.len(),
             "updated heads state"
         );
 
-        let heads_bytes: Vec<Vec<u8>> = next_heads
-            .iter()
-            .map(|h| from_hex(h).unwrap_or_default())
-            .collect();
+        let heads_bytes = head_ids_for_wire(&acked_heads);
 
         self.notify_watchers(next_metadata.version, &heads_bytes);
         if self.integration_enabled {
@@ -1774,6 +1953,12 @@ fn updated_workspace_heads(
     next
 }
 
+/// jj's root operation id is all zeros. It names an empty repository rather
+/// than a stored operation, so it never gets a WAL entry.
+fn is_root_operation_hex(op_hex: &str) -> bool {
+    !op_hex.is_empty() && op_hex.bytes().all(|b| b == b'0')
+}
+
 fn write_bytes_if_missing(path: &Path, bytes: &[u8]) -> Result<()> {
     if path.exists() {
         return Ok(());
@@ -1783,4 +1968,26 @@ fn write_bytes_if_missing(path: &Path, bytes: &[u8]) -> Result<()> {
     }
     fs::write(path, bytes)?;
     Ok(())
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A head id that will not parse is dropped, not sent as an empty id.
+    #[test]
+    fn unreadable_head_ids_are_dropped_from_the_wire() {
+        let heads = vec![
+            "00ff".to_string(),
+            "not-hex".to_string(),
+            "abc".to_string(),
+            "1234".to_string(),
+        ];
+        assert_eq!(
+            head_ids_for_wire(&heads),
+            vec![vec![0x00, 0xff], vec![0x12, 0x34]]
+        );
+    }
 }
