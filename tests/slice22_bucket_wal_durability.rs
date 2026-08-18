@@ -15,82 +15,18 @@
 mod common;
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-use std::process::Child;
+use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use tempfile::TempDir;
+use common::bucket_harness::{using_s3, BucketHarness as Harness};
 
 // ─── Harness ──────────────────────────────────────────────────────────────────
-
-struct Harness {
-    _tmp: TempDir,
-    home: PathBuf,
-    repo: PathBuf,
-    bucket_dir: PathBuf,
-    bucket_spec: String,
-    addr: String,
-    server: Option<Child>,
-}
+//
+// The shared parts live in `tests/common/bucket_harness.rs`. What follows is
+// only what this slice needs on top of them.
 
 impl Harness {
-    fn new(name: &str) -> Self {
-        let tmp = tempfile::tempdir().expect("temp dir");
-        let home = common::isolated_home(tmp.path());
-        let repo = tmp.path().join("server-repo");
-        std::fs::create_dir_all(&repo).expect("create server repo dir");
-        let bucket_dir = tmp.path().join("bucket");
-
-        // Tier 2 shares one SeaweedFS bucket across tests, so give each run its
-        // own prefix.
-        let bucket_spec = match std::env::var("TANDEM_TEST_S3_BUCKET") {
-            Ok(base) => s3_spec_with_prefix(&base, name),
-            Err(_) => bucket_dir.to_string_lossy().to_string(),
-        };
-
-        Self {
-            _tmp: tmp,
-            home,
-            repo,
-            bucket_dir,
-            bucket_spec,
-            addr: common::free_addr(),
-            server: None,
-        }
-    }
-
-    fn start_server(&mut self, env: &[(&str, &str)]) {
-        self.start_server_logging(env, None);
-    }
-
-    /// Start a server whose log lands in a file, so a test can count what the
-    /// publish path did rather than only what it left behind.
-    fn start_server_logging(&mut self, env: &[(&str, &str)], log: Option<&Path>) {
-        assert!(self.server.is_none(), "server already running");
-        let mut args: Vec<&str> = vec!["--bucket", &self.bucket_spec];
-        if log.is_some() {
-            args.extend(["--log-level", "debug"]);
-        }
-        let mut child = common::spawn_server_with_args_env_and_log(
-            &self.repo,
-            &self.addr,
-            &args,
-            env,
-            &self.home,
-            log,
-        );
-        common::wait_for_server(&self.addr, &mut child);
-        self.server = Some(child);
-    }
-
-    fn stop_server(&mut self) {
-        if let Some(mut child) = self.server.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-
     /// Wait for a server that is expected to kill itself.
     fn wait_for_server_exit(&mut self) {
         let mut child = self.server.take().expect("server running");
@@ -103,40 +39,6 @@ impl Harness {
         let _ = child.kill();
         let _ = child.wait();
         panic!("server did not exit after the injected crash");
-    }
-
-    fn init_workspace(&self, name: &str) -> PathBuf {
-        let dir = self._tmp.path().join(name);
-        std::fs::create_dir_all(&dir).expect("create workspace dir");
-        let out = common::run_tandem_in(
-            &dir,
-            &["init", "--server", &self.addr, "--workspace", name, "."],
-            &self.home,
-        );
-        common::assert_ok(&out, &format!("init {name}"));
-        dir
-    }
-
-    fn run(&self, dir: &Path, args: &[&str]) -> std::process::Output {
-        common::run_tandem_in(dir, args, &self.home)
-    }
-
-    /// The server's own idea of where it is: `.jj/repo/tandem/heads.json`.
-    fn local_version(&self) -> u64 {
-        let path = self.repo.join(".jj/repo/tandem/heads.json");
-        let bytes = std::fs::read(&path).expect("read local heads metadata");
-        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("parse heads.json");
-        value["version"].as_u64().expect("version field")
-    }
-
-    fn op_head_files(&self) -> Vec<String> {
-        let dir = self.repo.join(".jj/repo/op_heads/heads");
-        let mut heads: Vec<String> = std::fs::read_dir(&dir)
-            .expect("read op heads dir")
-            .map(|entry| entry.expect("op head entry").file_name().to_string_lossy().to_string())
-            .collect();
-        heads.sort();
-        heads
     }
 
     fn operation_is_stored(&self, op_hex: &str) -> bool {
@@ -160,26 +62,6 @@ impl Harness {
                 (name, bytes)
             })
             .collect()
-    }
-}
-
-impl Drop for Harness {
-    fn drop(&mut self) {
-        self.stop_server();
-    }
-}
-
-fn s3_spec_with_prefix(base: &str, name: &str) -> String {
-    let unique = format!(
-        "{name}-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    );
-    match base.split_once('?') {
-        Some((location, query)) => format!("{}/{unique}?{query}", location.trim_end_matches('/')),
-        None => format!("{}/{unique}", base.trim_end_matches('/')),
     }
 }
 
@@ -212,10 +94,6 @@ fn read_fs_index(bucket_dir: &Path) -> Index {
             .map(|(k, v)| (k.clone(), v.as_str().expect("hex").to_string()))
             .collect(),
     }
-}
-
-fn using_s3() -> bool {
-    std::env::var("TANDEM_TEST_S3_BUCKET").is_ok()
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -604,7 +482,7 @@ fn slice22_publishing_after_a_restart_does_not_rewalk_the_history() {
 
     // Restart: whatever this process remembered about the bucket is gone.
     harness.stop_server();
-    let log = harness._tmp.path().join("after-restart.log");
+    let log = harness.tmp.path().join("after-restart.log");
     harness.start_server_logging(&[], Some(&log));
 
     common::assert_ok(
@@ -660,7 +538,7 @@ fn slice22_a_failing_derived_head_write_does_not_fail_a_landed_publish() {
     );
 
     harness.stop_server();
-    let log = harness._tmp.path().join("derived-fault.log");
+    let log = harness.tmp.path().join("derived-fault.log");
     harness.start_server_logging(&[("TANDEM_TEST_FAIL_DERIVED_HEAD_WAL", "1")], Some(&log));
 
     let version_before = harness.local_version();

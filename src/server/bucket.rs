@@ -12,10 +12,12 @@
 //! accessors, and the bucket fields themselves.
 
 use anyhow::{anyhow, bail, Context, Result};
+use jj_lib::backend::{CommitId, TreeId, TreeValue};
 use jj_lib::object_id::ObjectId as _;
-use jj_lib::op_store::OperationId;
-use std::collections::{BTreeMap, HashSet};
+use jj_lib::op_store::{Operation, OperationId};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 
 use super::{
     from_hex, head_ids_for_wire, is_root_operation_hex, to_hex, write_bytes_if_missing,
@@ -23,6 +25,70 @@ use super::{
 };
 use crate::object_store::CasError;
 use crate::wal;
+
+// ─── Boot-time replay ─────────────────────────────────────────────────────────
+
+/// What materializing the repo from the bucket cost at startup.
+///
+/// A server whose disk is a cache boots by reading history it does not have, so
+/// how much of it had to come back is the one number that tells an operator
+/// whether this start was a warm restart or a rebuild from nothing.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct BootReplay {
+    /// Op heads the bucket named that the local repo did not have.
+    pub heads: u64,
+    /// WAL entries fetched and applied, ancestors included.
+    pub entries: u64,
+    /// How long the whole recovery took.
+    pub millis: u64,
+}
+
+/// How much decoded WAL the replay may hold between reading an entry and
+/// applying it. A WAL entry carries content, not just ids, so an unbounded
+/// cache means a cold boot holds the whole repository history in memory.
+const REPLAY_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
+
+/// Entry bodies held between the read that discovers an operation's parents and
+/// the write that applies them.
+///
+/// The replay reads a child to learn its parents and applies it only after
+/// them, so every entry is read some time before it is needed. The deepest
+/// operation is applied first, which makes the most recently read entry the
+/// next one wanted: evicting the oldest costs at most one extra read of an
+/// entry that was not going to be applied for a while.
+#[derive(Default)]
+struct ReplayCache {
+    entries: HashMap<String, wal::WalEntry>,
+    order: VecDeque<String>,
+    bytes: usize,
+}
+
+impl ReplayCache {
+    fn size_of(entry: &wal::WalEntry) -> usize {
+        entry.records.iter().map(|record| record.data.len()).sum()
+    }
+
+    fn insert(&mut self, op_hex: String, entry: wal::WalEntry) {
+        self.bytes += Self::size_of(&entry);
+        self.order.push_back(op_hex.clone());
+        self.entries.insert(op_hex, entry);
+        while self.bytes > REPLAY_CACHE_MAX_BYTES && self.order.len() > 1 {
+            let Some(evicted) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(entry) = self.entries.remove(&evicted) {
+                self.bytes -= Self::size_of(&entry);
+            }
+        }
+    }
+
+    fn take(&mut self, op_hex: &str) -> Option<wal::WalEntry> {
+        let entry = self.entries.remove(op_hex)?;
+        self.bytes -= Self::size_of(&entry);
+        self.order.retain(|hex| hex != op_hex);
+        Some(entry)
+    }
+}
 
 // ─── Staging buffers ──────────────────────────────────────────────────────────
 
@@ -36,7 +102,7 @@ const DURABLE_OPS_CAPACITY: usize = 4096;
 #[derive(Default)]
 pub(super) struct DurableOps {
     seen: HashSet<String>,
-    order: std::collections::VecDeque<String>,
+    order: VecDeque<String>,
 }
 
 impl DurableOps {
@@ -196,15 +262,21 @@ impl Server {
         Ok(true)
     }
 
+    /// An operation out of the local op store, by hex id.
+    fn read_operation_by_hex(&self, op_hex: &str) -> Result<(OperationId, Operation)> {
+        let op_id = OperationId::new(from_hex(op_hex)?);
+        let operation = pollster::block_on(self.repo_loader.op_store().read_operation(&op_id))
+            .map_err(|e| anyhow!("read operation {op_hex}: {e}"))?;
+        Ok((op_id, operation))
+    }
+
     /// The operation and its view, as the tail records of a WAL entry, plus
     /// the operation's parents.
     fn operation_records(&self, op_hex: &str) -> Result<(Vec<wal::WalRecord>, Vec<Vec<u8>>)> {
-        let op_id = OperationId::new(from_hex(op_hex)?);
+        let (op_id, operation) = self.read_operation_by_hex(op_hex)?;
         let op_bytes = self
             .get_operation_sync(op_id.as_bytes())
             .with_context(|| format!("read operation {op_hex} for WAL entry"))?;
-        let operation = pollster::block_on(self.repo_loader.op_store().read_operation(&op_id))
-            .map_err(|e| anyhow!("read operation {op_hex}: {e}"))?;
         let view_bytes = self
             .get_view_sync(operation.view_id.as_bytes())
             .with_context(|| format!("read view for operation {op_hex}"))?;
@@ -391,9 +463,7 @@ impl Server {
 
     /// The parents of an operation, as hex ids.
     fn operation_parent_hexes(&self, op_hex: &str) -> Result<Vec<String>> {
-        let op_id = OperationId::new(from_hex(op_hex)?);
-        let operation = pollster::block_on(self.repo_loader.op_store().read_operation(&op_id))
-            .map_err(|e| anyhow!("read operation {op_hex}: {e}"))?;
+        let (_, operation) = self.read_operation_by_hex(op_hex)?;
         Ok(operation.parents.iter().map(|id| id.hex()).collect())
     }
 
@@ -541,12 +611,17 @@ impl Server {
                 // behind it would let the retry CAS a set that silently drops
                 // the other writer's head — last writer wins, against
                 // invariant 6.
-                let replayed = self
+                let (heads, entries) = self
                     .adopt_index(&index)
                     .context("replay the bucket's op heads after an index CAS conflict")?;
                 version = index.version;
                 workspace_heads = index.workspace_heads.clone();
-                tracing::debug!(replayed, version, "adopted the bucket index after a conflict");
+                tracing::debug!(
+                    heads,
+                    entries,
+                    version,
+                    "adopted the bucket index after a conflict"
+                );
             }
         }
 
@@ -671,47 +746,184 @@ impl Server {
         Ok(())
     }
 
-    /// Apply every op head the index names that the local repo does not have
-    /// yet, from the bucket's WAL entries. Returns how many were replayed.
+    /// Whether the local op store already holds this operation.
+    ///
+    /// This is the replay's stop condition, and it is asked of the disk rather
+    /// than of the head set on purpose: an operation is only ever written after
+    /// its own ancestry, so finding one means the history below it is there
+    /// too. That makes the same walk serve a cold boot and a warm one — on a
+    /// warm boot it stops at the first ancestor and costs nothing.
+    fn operation_is_local(&self, op_hex: &str) -> bool {
+        self.op_store_path.join("operations").join(op_hex).exists()
+    }
+
+    /// Read one operation's WAL entry out of the bucket.
+    fn fetch_wal_entry(&self, op_hex: &str) -> Result<wal::WalEntry> {
+        let key = wal::wal_key(op_hex);
+        let bytes = self
+            .bucket
+            .get(&key)
+            .with_context(|| format!("read WAL entry {key}"))?
+            .ok_or_else(|| {
+                anyhow!(
+                    "WAL entry {key} is missing from the bucket, so the operation history has a \
+                     gap the local repo cannot be rebuilt across"
+                )
+            })?;
+        tracing::debug!(op_id = %op_hex, bytes = bytes.len(), "replaying a WAL entry");
+        wal::WalEntry::decode(&bytes).with_context(|| format!("decode WAL entry {key}"))
+    }
+
+    /// Replay one op head and every ancestor the local repo is missing, parents
+    /// before children. Returns how many WAL entries it applied.
+    ///
+    /// This is the mirror image of `ensure_wal_entry`: that walk makes an
+    /// operation's ancestry durable in the bucket, this one brings it back. The
+    /// ordering is not a nicety. A WAL entry carries only the blobs staged
+    /// since the previous publish, so the objects an operation makes reachable
+    /// are spread across its whole ancestry, and jj-lib walks the operation DAG
+    /// to the root the first time it builds an index over a repo with no index
+    /// segment. Applying a head without its ancestors gives a repo that answers
+    /// `getHeads` and fails everything else.
+    ///
+    /// The head itself is always applied, even when its operation is already on
+    /// disk: that is exactly the crash window recovery exists for — the client
+    /// wrote the operation before asking for the head update, and only the head
+    /// pointer is missing.
+    fn replay_ancestry(&self, head_hex: &str) -> Result<usize> {
+        enum Step {
+            Visit(String),
+            Apply(String),
+        }
+
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut cache = ReplayCache::default();
+        let mut stack = vec![Step::Visit(head_hex.to_string())];
+        let mut applied = 0usize;
+
+        while let Some(step) = stack.pop() {
+            match step {
+                Step::Visit(hex) => {
+                    if is_root_operation_hex(&hex) || !seen.insert(hex.clone()) {
+                        continue;
+                    }
+                    if hex != head_hex && self.operation_is_local(&hex) {
+                        continue;
+                    }
+                    let entry = self
+                        .fetch_wal_entry(&hex)
+                        .with_context(|| format!("replay the ancestry of op head {head_hex}"))?;
+                    let parents: Vec<String> = entry.parents.iter().map(|id| to_hex(id)).collect();
+                    cache.insert(hex.clone(), entry);
+                    stack.push(Step::Apply(hex));
+                    for parent in parents {
+                        stack.push(Step::Visit(parent));
+                    }
+                }
+                Step::Apply(hex) => {
+                    let entry = match cache.take(&hex) {
+                        Some(entry) => entry,
+                        // Evicted while the walk was deeper in the history.
+                        None => self.fetch_wal_entry(&hex)?,
+                    };
+                    self.apply_wal_entry(&entry)
+                        .with_context(|| format!("apply WAL entry {hex}"))?;
+                    applied += 1;
+                }
+            }
+        }
+        Ok(applied)
+    }
+
+    /// Rebuild every op head the index names that the local repo does not have,
+    /// with the ancestry behind it. Returns how many WAL entries were applied.
     ///
     /// Idempotent: everything a WAL entry carries is content-addressed, and
     /// making an operation a head twice is a no-op.
-    fn replay_index_heads(&self, index: &wal::IndexObject) -> Result<usize> {
+    fn replay_index_heads(&self, index: &wal::IndexObject) -> Result<(usize, usize)> {
         let local_heads: HashSet<String> = self.read_jj_op_heads()?.into_iter().collect();
-        let mut replayed = 0usize;
+        let mut heads = 0usize;
+        let mut entries = 0usize;
         for head in &index.op_heads {
             if local_heads.contains(head) || is_root_operation_hex(head) {
                 continue;
             }
-            let key = wal::wal_key(head);
-            let bytes = self.bucket.get(&key)?.ok_or_else(|| {
-                anyhow!("bucket index names op head {head} but WAL entry {key} is missing")
-            })?;
-            let entry =
-                wal::WalEntry::decode(&bytes).with_context(|| format!("decode WAL entry {key}"))?;
-            self.apply_wal_entry(&entry)
-                .with_context(|| format!("replay WAL entry {key}"))?;
-            replayed += 1;
+            entries += self.replay_ancestry(head)?;
+            heads += 1;
         }
-        Ok(replayed)
+        Ok((heads, entries))
     }
 
     /// Take the bucket's index as local state: replay every op head it names,
-    /// then record its version and workspace map. Returns how many heads the
-    /// replay applied.
+    /// then record its version and workspace map. Returns how many heads and
+    /// how many WAL entries the replay applied.
     ///
     /// The order is load-bearing. The heads go in first and the version is only
     /// recorded if they all landed, because every head set this server computes
     /// next comes from the local repo's heads: a version taken without the
     /// heads behind it lets the next write CAS a set that silently drops
     /// another writer's head, against invariant 6.
-    fn adopt_index(&self, index: &wal::IndexObject) -> Result<usize> {
+    fn adopt_index(&self, index: &wal::IndexObject) -> Result<(usize, usize)> {
         let replayed = self.replay_index_heads(index)?;
+        self.retire_bootstrap_heads(index)?;
         self.write_heads_metadata(&HeadsMetadata {
             version: index.version,
             workspace_heads: index.workspace_heads.clone(),
         })?;
         Ok(replayed)
+    }
+
+    /// Drop the operation this boot's own repo init minted.
+    ///
+    /// Materializing on an empty disk starts by creating a colocated repo, and
+    /// creating one mints an "initialize repo" operation whose id is new every
+    /// time — its metadata carries a timestamp. Nothing in the bucket names it.
+    /// Left alone it survives the replay as a second head: a fabricated one,
+    /// against an empty repo, that no client ever published. jj would then
+    /// merge the real history with nothing, two servers materialized from the
+    /// same bucket would disagree about the head set, and the op log — the
+    /// audit trail invariant 7 rests on — would carry an entry that never
+    /// happened.
+    ///
+    /// Only heads this process minted at init are ever retired, and only once
+    /// the bucket's own heads are on disk to take their place. A head that came
+    /// from anywhere else is another writer's, and dropping one of those is
+    /// last-writer-wins, against invariant 6.
+    fn retire_bootstrap_heads(&self, index: &wal::IndexObject) -> Result<()> {
+        if self.bootstrap_op_heads.is_empty() {
+            return Ok(());
+        }
+        let named: HashSet<&str> = index.op_heads.iter().map(String::as_str).collect();
+        let stale: Vec<OperationId> = self
+            .bootstrap_op_heads
+            .iter()
+            .filter(|hex| !named.contains(hex.as_str()))
+            .map(|hex| from_hex(hex).map(OperationId::new))
+            .collect::<Result<Vec<_>>>()?;
+        if stale.is_empty() {
+            return Ok(());
+        }
+
+        // Retiring a head takes a head to retire it in favour of, and it has to
+        // be one the replay actually landed: dropping the init operation before
+        // the bucket's history is on disk would leave the repo with no head at
+        // all.
+        let local: HashSet<String> = self.read_jj_op_heads()?.into_iter().collect();
+        let Some(anchor) = index.op_heads.iter().find(|head| local.contains(*head)) else {
+            tracing::warn!(
+                "no op head from the bucket landed locally; keeping the operation this boot's \
+                 repo init minted so the repo still has a head"
+            );
+            return Ok(());
+        };
+        let anchor_id = OperationId::new(from_hex(anchor)?);
+        pollster::block_on(self.op_heads_store.update_op_heads(&stale, &anchor_id))
+            .map_err(|e| anyhow!("retire the repo-init op heads: {e}"))?;
+        tracing::debug!(
+            retired = stale.len(),
+            "retired the operations this boot's repo init minted"
+        );
+        Ok(())
     }
 
     /// Put the local repo's head set into the index at the version the local
@@ -722,38 +934,53 @@ impl Server {
         self.publish_index(local.version, &heads, &local.workspace_heads)
     }
 
-    /// Bring the local repo back in line with the bucket at startup.
+    /// Materialize the local repo from the bucket at startup.
     ///
-    /// The narrow case this stage owns: the server acknowledged nothing but did
-    /// commit an index write before dying, so the bucket names an op head the
-    /// repo has not applied. Booting from an empty disk is stage 2's job; this
-    /// replays only what the index still points at.
+    /// Two shapes of the same job. On an empty disk the whole history comes
+    /// back: the repo is a cache, and this is what makes it a disposable one.
+    /// On a warm disk only the gap does — the server acknowledged nothing but
+    /// did commit an index write before dying, so the bucket names an op head
+    /// the repo has not applied. Both are the same walk; a warm boot stops at
+    /// the first ancestor it already has.
     pub(super) fn recover_from_bucket(&self) -> Result<()> {
+        let started = Instant::now();
         let local = self.read_heads_metadata()?;
         let index = self.reload_index()?;
 
         let Some(index) = index else {
             // Fresh bucket. Seed it from local state so the first publish has
             // something to compare against.
-            if !self.republish_local_heads(&local)? {
-                tracing::warn!("could not seed the bucket index; another writer got there first");
-                self.reload_index()?;
-            }
+            self.seed_bucket_from_local(&local)?;
+            self.record_boot_replay(BootReplay {
+                millis: started.elapsed().as_millis() as u64,
+                ..BootReplay::default()
+            });
             return Ok(());
         };
 
-        if index.version > local.version {
-            let replayed = self.adopt_index(&index)?;
-            tracing::info!(
-                replayed,
-                from_version = local.version,
-                to_version = index.version,
-                "recovered local repo from the bucket"
-            );
+        let mut replay = BootReplay::default();
+        if index.version > local.version || self.bootstrapped {
+            // A repo that was just created has no history at all, so its
+            // version-0 metadata says nothing about what the bucket holds: the
+            // comparison that guards a warm boot would read an empty disk as
+            // up to date at version 0 and serve an empty repo over a bucket
+            // full of history.
+            let (heads, entries) = self.adopt_index(&index)?;
+            replay.heads = heads as u64;
+            replay.entries = entries as u64;
+            if entries > 0 {
+                tracing::info!(
+                    heads,
+                    entries,
+                    from_version = local.version,
+                    to_version = index.version,
+                    bootstrapped = self.bootstrapped,
+                    "materialized the local repo from the bucket"
+                );
+            }
         } else if index.version < local.version {
-            // The repo is ahead of the bucket — a repo that predates its
-            // bucket, or a crash before the index write landed. Publish what
-            // is here; older operations are stage 2's replay problem.
+            // The repo is ahead of the bucket — a crash before the index write
+            // landed, or a repo that predates its bucket. Publish what is here.
             tracing::info!(
                 index_version = index.version,
                 local_version = local.version,
@@ -764,7 +991,139 @@ impl Server {
             }
         }
 
+        replay.millis = started.elapsed().as_millis() as u64;
+        self.record_boot_replay(replay);
         Ok(())
+    }
+
+    /// Put a brand-new repo's starting state into an empty bucket.
+    ///
+    /// `ensure_wal_entry` carries an operation and its view but no objects: on
+    /// the ordinary path the objects were staged by the client writes that
+    /// preceded the publish. A repo init has no such publish behind it — jj
+    /// creates the working-copy commit and its tree through the backend
+    /// directly — so unless they are staged here, the first entry in the WAL
+    /// names a view whose commit exists on this disk and nowhere else, and a
+    /// repo materialized from that bucket is missing the one object every
+    /// later view still points at.
+    fn seed_bucket_from_local(&self, local: &HeadsMetadata) -> Result<()> {
+        // Only a repo this process just created gets its objects seeded. An
+        // existing repo pointed at an empty bucket is a different job —
+        // backfilling a whole history — and doing it here would read the
+        // repo's entire tip tree into the staging buffer during boot. Seed the
+        // head set and let the next publish carry its own objects.
+        if self.bootstrapped {
+            for head in self.read_jj_op_heads()? {
+                if let Err(err) = self.stage_operation_objects(&head) {
+                    tracing::warn!(
+                        op_id = %head,
+                        error = %err,
+                        "could not stage the objects this repo starts from; a repo materialized \
+                         from this bucket may be missing them"
+                    );
+                }
+                self.write_publish_wal_entry(&head)
+                    .with_context(|| format!("seed the bucket with op head {head}"))?;
+            }
+        }
+
+        if !self.republish_local_heads(local)? {
+            tracing::warn!("could not seed the bucket index; another writer got there first");
+            self.reload_index()?;
+        }
+        Ok(())
+    }
+
+    /// Stage every object an operation's view reaches, so the next WAL entry
+    /// carries them. Used only for state this server created on its own.
+    fn stage_operation_objects(&self, op_hex: &str) -> Result<()> {
+        if is_root_operation_hex(op_hex) {
+            return Ok(());
+        }
+        let (_, operation) = self.read_operation_by_hex(op_hex)?;
+        let view = pollster::block_on(self.repo_loader.op_store().read_view(&operation.view_id))
+            .map_err(|e| anyhow!("read view for operation {op_hex}: {e}"))?;
+
+        let mut commits: Vec<CommitId> = view.wc_commit_ids.values().cloned().collect();
+        for target in view.local_bookmarks.values() {
+            commits.extend(target.added_ids().cloned());
+        }
+        for commit_id in commits {
+            self.stage_commit_objects(&commit_id)?;
+        }
+        Ok(())
+    }
+
+    /// Stage a commit, the trees under it, and their file and symlink content.
+    ///
+    /// Parents are deliberately not followed. This exists for state the server
+    /// minted locally — one empty commit at repo init — and a walk that
+    /// recursed through history would read a whole existing repo into the
+    /// staging buffer on the first boot that names a bucket.
+    fn stage_commit_objects(&self, commit_id: &CommitId) -> Result<()> {
+        let backend = self.store.backend();
+        if commit_id == backend.root_commit_id() {
+            return Ok(());
+        }
+        let commit = pollster::block_on(backend.read_commit(commit_id))
+            .map_err(|e| anyhow!("read commit {}: {e}", commit_id.hex()))?;
+        self.stage_object("commit", commit_id.as_bytes())?;
+
+        let mut seen: HashSet<Vec<u8>> = HashSet::new();
+        let mut trees: Vec<TreeId> = commit.root_tree.iter().cloned().collect();
+        while let Some(tree_id) = trees.pop() {
+            if !seen.insert(tree_id.as_bytes().to_vec()) {
+                continue;
+            }
+            let tree = pollster::block_on(
+                backend.read_tree(jj_lib::repo_path::RepoPath::root(), &tree_id),
+            )
+            .map_err(|e| anyhow!("read tree {}: {e}", tree_id.hex()))?;
+            self.stage_object("tree", tree_id.as_bytes())?;
+            for entry in tree.entries() {
+                match entry.value() {
+                    TreeValue::File { id, .. } => self.stage_object("file", id.as_bytes())?,
+                    TreeValue::Symlink(id) => self.stage_object("symlink", id.as_bytes())?,
+                    TreeValue::Tree(id) => trees.push(id.clone()),
+                    TreeValue::GitSubmodule(_) => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Put one already-stored object into the staging buffer, in the same form
+    /// a client write would have left it in.
+    fn stage_object(&self, kind: &str, id: &[u8]) -> Result<()> {
+        let Some(record_kind) = wal::RecordKind::from_object_kind(kind) else {
+            return Ok(());
+        };
+        let data = self
+            .get_object_sync(kind, id)
+            .with_context(|| format!("read {kind} {} to stage it", to_hex(id)))?;
+        self.pending_blobs
+            .lock()
+            .map_err(|e| anyhow!("pending blobs lock: {e}"))?
+            .stage(wal::WalRecord {
+                kind: record_kind,
+                id: id.to_vec(),
+                data,
+            })
+    }
+
+    fn record_boot_replay(&self, replay: BootReplay) {
+        match self.boot_replay.lock() {
+            Ok(mut slot) => *slot = replay,
+            Err(err) => tracing::warn!(error = %err, "cannot record what boot replay did"),
+        }
+    }
+
+    /// What the boot-time replay did, for the status surface.
+    pub(super) fn boot_replay(&self) -> BootReplay {
+        self.boot_replay
+            .lock()
+            .map(|slot| *slot)
+            .unwrap_or_default()
     }
 }
 
@@ -841,6 +1200,67 @@ mod tests {
             pending.records.len(),
             4,
             "a refused write must not be buffered"
+        );
+    }
+
+    fn entry(tag: u8, len: usize) -> wal::WalEntry {
+        wal::WalEntry {
+            op_id: vec![tag],
+            parents: Vec::new(),
+            records: vec![blob(tag, len)],
+        }
+    }
+
+    /// A cold boot walks the whole history, and a WAL entry carries content.
+    /// The cache has to give way rather than hold the repository in memory —
+    /// and it has to give way at the oldest end, because the walk applies the
+    /// newest entry first.
+    #[test]
+    fn the_replay_cache_evicts_the_entry_it_needs_last() {
+        let mut cache = ReplayCache::default();
+        let chunk = REPLAY_CACHE_MAX_BYTES / 2;
+
+        cache.insert("oldest".to_string(), entry(1, chunk));
+        cache.insert("middle".to_string(), entry(2, chunk));
+        cache.insert("newest".to_string(), entry(3, chunk));
+
+        assert!(
+            cache.take("oldest").is_none(),
+            "the entry applied last is the one to drop"
+        );
+        assert!(
+            cache.take("newest").is_some(),
+            "the entry applied next must survive"
+        );
+        assert!(cache.take("middle").is_some());
+    }
+
+    /// One entry larger than the whole budget must still be kept: dropping it
+    /// as it goes in would make every apply re-read it.
+    #[test]
+    fn the_replay_cache_keeps_an_oversized_entry() {
+        let mut cache = ReplayCache::default();
+        cache.insert("huge".to_string(), entry(1, REPLAY_CACHE_MAX_BYTES * 2));
+        assert!(cache.take("huge").is_some());
+    }
+
+    /// Taking an entry has to give its bytes back, or a long replay slowly
+    /// evicts everything it is still holding.
+    #[test]
+    fn taking_an_entry_frees_its_budget() {
+        let mut cache = ReplayCache::default();
+        let chunk = REPLAY_CACHE_MAX_BYTES / 2;
+
+        cache.insert("first".to_string(), entry(1, chunk));
+        assert!(cache.take("first").is_some());
+        assert_eq!(cache.bytes, 0, "a taken entry must not still be charged");
+        assert!(cache.order.is_empty(), "a taken entry must leave the queue");
+
+        cache.insert("second".to_string(), entry(2, chunk));
+        cache.insert("third".to_string(), entry(3, chunk));
+        assert!(
+            cache.take("second").is_some(),
+            "two half-budget entries must both fit"
         );
     }
 

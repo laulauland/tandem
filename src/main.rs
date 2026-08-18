@@ -657,6 +657,23 @@ fn run_status(json: bool, control_socket: Option<&str>) -> ExitCode {
                 println!("  Repo:     {}", status.repo);
                 println!("  Listen:   {}", status.listen);
                 println!("  Version:  {}", status.version);
+                if let Some(bucket) = status.bucket.as_ref() {
+                    println!("  Bucket:   {} ({})", bucket.location, bucket.backend);
+                    if !bucket.conditional_put {
+                        println!("  Bucket warning: no conditional puts; single writer only");
+                    }
+                    if bucket.materialized || bucket.replayed_entries > 0 {
+                        let verb = if bucket.materialized {
+                            "Materialized"
+                        } else {
+                            "Recovered"
+                        };
+                        println!(
+                            "  {verb} from the bucket: {} op heads, {} WAL entries in {}ms",
+                            bucket.replayed_heads, bucket.replayed_entries, bucket.replay_ms
+                        );
+                    }
+                }
                 println!(
                     "  Integration workspace: {}",
                     if status.integration.enabled {

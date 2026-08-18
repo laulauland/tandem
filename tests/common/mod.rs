@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub mod bucket_harness;
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::thread;

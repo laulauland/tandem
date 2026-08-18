@@ -31,6 +31,25 @@ pub struct IntegrationStatus {
     pub workspace_commit_count: Option<u64>,
 }
 
+/// Where the durable history lives, and what this boot had to fetch from it.
+///
+/// The server's disk is a cache of the bucket, so "which bucket" and "how much
+/// of it came back at boot" are the two facts that say whether a restart was a
+/// warm one or a rebuild from nothing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BucketStatus {
+    pub backend: String,
+    pub location: String,
+    pub conditional_put: bool,
+    /// Whether this process started on an empty directory and materialized the
+    /// repo from the bucket.
+    pub materialized: bool,
+    pub replayed_heads: u64,
+    pub replayed_entries: u64,
+    pub replay_ms: u64,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StatusResponse {
     pub running: bool,
@@ -40,6 +59,9 @@ pub struct StatusResponse {
     pub listen: String,
     pub version: String,
     pub integration: IntegrationStatus,
+    /// Absent from servers older than the durability inversion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bucket: Option<BucketStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +86,7 @@ pub struct ControlState {
     pub log_tx: broadcast::Sender<LogEvent>,
     pub integration_enabled: bool,
     pub integration_metadata_path: String,
+    pub bucket: BucketStatus,
 }
 
 fn level_rank(level: &str) -> u8 {
@@ -205,6 +228,7 @@ async fn handle_control_connection(
                     state.integration_enabled,
                     &state.integration_metadata_path,
                 ),
+                bucket: Some(state.bucket.clone()),
             };
             let json = serde_json::to_string(&resp)?;
             writer.write_all(json.as_bytes()).await?;

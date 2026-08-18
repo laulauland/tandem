@@ -110,6 +110,7 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
                 .integration_metadata_path()
                 .to_string_lossy()
                 .to_string(),
+            bucket: server.bucket_status(),
         });
 
         let sock = sock_path.clone();
@@ -270,6 +271,13 @@ struct Server {
     pending_blobs: Mutex<PendingBlobs>,
     /// Operation ids this process has already written a WAL entry for.
     durable_ops: Mutex<DurableOps>,
+    /// Whether this process created the repo directory it is serving. An empty
+    /// disk has no local state worth comparing against the bucket.
+    bootstrapped: bool,
+    /// Op heads that repo init left behind on an empty disk, before any replay.
+    bootstrap_op_heads: Vec<String>,
+    /// What materializing the repo from the bucket cost at startup.
+    boot_replay: Mutex<bucket::BootReplay>,
     /// Test hook: index writes still to be failed artificially.
     test_index_conflicts: AtomicU64,
     integration_enabled: bool,
@@ -300,7 +308,15 @@ impl Server {
     fn new(repo: PathBuf, integration_enabled: bool, bucket_spec: Option<&str>) -> Result<Self> {
         fs::create_dir_all(&repo)?;
 
-        if !repo.join(".jj").exists() {
+        // An empty directory is not an empty repo: with a bucket behind it, it
+        // is a repo whose whole history is somewhere else. Remember which of
+        // the two this is, because everything about the boot depends on it.
+        let bootstrapped = !repo.join(".jj").exists();
+        if bootstrapped {
+            tracing::info!(
+                repo = %repo.display(),
+                "no repo on disk; creating one to materialize into"
+            );
             Self::init_jj_git_repo(&repo)?;
         }
 
@@ -371,6 +387,9 @@ impl Server {
             index_etag: Mutex::new(None),
             pending_blobs: Mutex::new(PendingBlobs::default()),
             durable_ops: Mutex::new(DurableOps::default()),
+            bootstrapped,
+            bootstrap_op_heads: Vec::new(),
+            boot_replay: Mutex::new(bucket::BootReplay::default()),
             test_index_conflicts: AtomicU64::new(test_env_u64("TANDEM_TEST_INDEX_CAS_CONFLICTS")),
             integration_enabled,
             integration_trigger: Mutex::new(None),
@@ -378,8 +397,27 @@ impl Server {
             watchers: Mutex::new(Vec::new()),
         };
         server.initialize_integration_metadata()?;
+        if bootstrapped {
+            // Read before the replay, so recovery can tell the operation this
+            // init just minted from the ones the bucket is about to hand back.
+            server.bootstrap_op_heads = server.read_jj_op_heads()?;
+        }
         server.recover_from_bucket()?;
         Ok(server)
+    }
+
+    /// Where the durable history lives and what this boot had to fetch from it.
+    fn bucket_status(&self) -> control::BucketStatus {
+        let replay = self.boot_replay();
+        control::BucketStatus {
+            backend: self.bucket.backend_name().to_string(),
+            location: self.bucket.describe(),
+            conditional_put: self.bucket_conditional_put,
+            materialized: self.bootstrapped,
+            replayed_heads: replay.heads,
+            replayed_entries: replay.entries,
+            replay_ms: replay.millis,
+        }
     }
 
     fn user_settings() -> Result<jj_lib::settings::UserSettings> {
