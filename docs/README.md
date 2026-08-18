@@ -4,7 +4,10 @@ Minimal docs structure for the project:
 
 - `../AGENTS.md` — execution/testing/debugging conventions
 - `../ARCHITECTURE.md` — system shape and boundaries
-- `design-docs/` — durable technical decisions
+- `design-docs/` — durable technical decisions; start at
+  `design-docs/target-architecture.md`
+- `benchmarks/` — recorded numbers, and the one command each of them takes
+- `images/` — the sandbox image template: `tandem clone` at image build time
 - `exec-plans/` — active/completed implementation plans
 - `product-specs/` — concise product intent and scope
 

@@ -1,108 +1,186 @@
-# Workflow: Tandem as Server-Client jj
+# Workflow: how work moves through tandem
 
-Tandem applies a server-client model to jj's store layer. The server hosts
-a normal jj+git colocated repo. Agents on remote machines use the `tandem`
-binary (which embeds jj-cli with tandem backend) to read and write objects
-over Cap'n Proto RPC. All jj commands work transparently — the agent never
-knows the store is remote.
+Tandem is jj with the store on the other side of a network. The server holds
+a jj+git colocated repo and a bucket behind it; a client is the same `tandem`
+binary anywhere, running stock jj commands whose store traits speak HTTP. A
+per-workspace daemon watches the files and publishes what changes. Nothing an
+agent does has to know any of that.
+
+This file is the workflow. The shape it rests on is
+[the target architecture](./target-architecture.md), whose invariants are
+binding; this is what those invariants look like from the outside.
 
 ## Roles
 
-**Server (point of origin):**
-- Runs on a VM/VPS as a persistent service
-- Hosts the canonical jj+git repo
-- Runs `tandem serve`
-- Optionally runs with `--enable-integration-workspace` to maintain an always-updated
-  `integration` bookmark across active workspaces
-- Is where git operations happen (`jj git push`, `jj git fetch`, `gh pr create`)
-- Operated by the orchestrator / teamlead / main agent
+**The server** — one per repository, on a VM or a container.
 
-**Agents (remote clients):**
-- Run `jj-tandem` (stock jj + tandem backend)
-- Have local working copies (real files on disk)
-- Read/write objects through RPC — files, trees, commits all stored on server
-- Never touch git directly
+- `tandem up --repo /srv/project --listen 0.0.0.0:13013 --bucket s3://…`
+- Holds the jj+git colocated repo, and treats it as disposable: the durable
+  truth is the bucket's write-ahead log, and the repo is a materialization of
+  it that any `tandem up --bucket <same url>` can rebuild.
+- Orders publishes (op-head compare-and-swap), fans out wake-ups, mints
+  workspace tokens, tracks who holds each workspace's writer role.
+- Is the only place git runs: `jj git push`, `jj git fetch`, `gh pr create`.
 
-## Concrete Workflow
+**An agent** — one workspace each, on whatever machine or container it likes.
 
-### 1. Setup
+- `tandem clone <server> <dir> --workspace <name>` once, then `tandem daemon
+  <dir>` for as long as the agent lives.
+- Runs ordinary jj commands through the same binary: `tandem log`,
+  `tandem diff`, `tandem bookmark create`.
+- Never touches git, and never checkpoints anything.
+
+## 1. Stand the server up
 
 ```bash
-# On the server (typically a VM/VPS)
+# On the server
 mkdir /srv/project && cd /srv/project
-jj git init
+jj git init --colocate
 jj git remote add origin git@github.com:org/project.git
 jj git fetch
-tandem serve --listen 0.0.0.0:13013 --repo /srv/project
-# optional: add --enable-integration-workspace to keep bookmark `integration` updated
+
+tandem up --repo /srv/project --listen 0.0.0.0:13013 \
+  --bucket 's3://tandem-project?region=us-east-1'
 ```
 
-### 2. Agents work
+`--bucket` is what makes the server replaceable. Without it the WAL goes in a
+directory inside the repo, which is fine for a laptop and not fine for
+anything that is supposed to survive the machine.
+
+`tandem up` prints an admin token unless `--admin-token` gave it one. That
+token mints every other token and does not belong on an agent's machine.
+
+## 2. Give an agent a workspace
+
+The admin token mints a short-lived bearer scoped to one workspace:
 
 ```bash
-# Agent A (any machine)
-tandem init --server=server:13013 ~/work/project
-# If --workspace is omitted, tandem auto-generates a unique workspace name.
+curl -s http://server:13013/api/tokens \
+  -H "Authorization: Bearer $TANDEM_ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"workspaceId":"agent-a","ttlSeconds":3600}'
+# → {"token":"…","workspaceId":"agent-a","ttlSeconds":3600}
+```
+
+That token is what the agent gets, and all it can do is add commits, move
+`agent-a`'s own workspace pointer, and move bookmarks under `agent-a/`. The
+server checks it as a diff of the published view, so the limit holds however
+the client was told to behave.
+
+```bash
+# On the agent's machine or in its container
+tandem clone server:13013 ~/work/project --workspace agent-a --token "$TOKEN"
 cd ~/work/project
-ls src/                                 # real files, fetched from server
+tandem daemon . &
+```
+
+`clone` writes the server address, the workspace name and the token next to
+the store, so ordinary commands in that directory need no flags.
+`TANDEM_SERVER`, `TANDEM_WORKSPACE` and `TANDEM_TOKEN` override the files,
+which is how one baked image serves many agents — see
+[baking a sandbox image](../images/README.md).
+
+A workspace name is an identity. Two daemons on one name is not parallelism:
+the second is refused the writer role, says so, and keeps running without
+publishing. Parallel agents get parallel workspaces.
+
+## 3. The agent works
+
+```bash
+cd ~/work/project
+ls src/                                  # real files, on real disk
 echo 'pub fn auth() {}' > src/auth.rs
-tandem new -m "feat: add auth"
-# Objects (file bytes, tree, commit) stored on server via RPC
 ```
 
+That is the whole of it. The daemon sees the write, waits out the debounce
+window, and publishes the burst as one jj operation that the server
+acknowledges only once the WAL entry and the index are durable in the bucket.
+There is no checkpoint command, and no `jj` command has to be run for work to
+be safe. The durability window is the debounce interval and nothing else:
+`--debounce-ms`, or `TANDEM_DEBOUNCE_MS`.
+
+The agent still gets every jj verb when it wants one:
+
 ```bash
-# Agent B (different machine)
-tandem init --server=server:13013 --workspace=agent-b ~/work/project
+tandem log
+tandem describe -m 'feat: add auth'
+tandem bookmark create agent-a/task-42 -r @
+```
+
+Bookmarks are namespaced by workspace, and the token enforces it. `main` is
+not something an agent can move.
+
+## 4. Agents see each other
+
+```bash
+# Agent B, a different machine, a different workspace
+tandem clone server:13013 ~/work/project --workspace agent-b --token "$TOKEN_B"
 cd ~/work/project
-tandem log                              # sees Agent A's commit
-tandem file show -r <commit> src/auth.rs  # Agent A's file, fetched from server
-echo 'pub fn api() {}' > src/api.rs
-tandem new -m "feat: add api"
+tandem log                                 # agent A's commits are there
+tandem file show -r agent-a/task-42 src/auth.rs
 ```
 
-### 3. Orchestrator reviews and ships
+A publish anywhere wakes every subscribed daemon over `GET /api/events`. What
+a woken daemon does is mark its workspace stale — and stop. It does not run
+`jj workspace update-stale` for you, ever: that moves files under whoever is
+editing them, which is a decision and not a reflex. A container that has just
+booted is the one moment nobody is editing, which is why the image entrypoint
+may do it and the daemon may not.
+
+Concurrent publishes do not race to a winner. Op heads are kept and merged;
+a lost compare-and-swap comes back as a 412 and jj's own transaction retry
+converges.
+
+## 5. The integrator ships
 
 ```bash
-# On the server (SSH or local)
+# On the server
 cd /srv/project
-jj log                                  # sees all agents' work
-jj diff -r <commit>                     # reviews actual code changes
-jj diff -r integration                  # optional: inspect server-computed combined state
-jj bookmark create feature -r <tip>
-jj git push --bookmark feature
-gh pr create --base main --head feature
+jj log
+jj diff -r agent-a/task-42
+jj rebase -b agent-a/task-42 -d main       # linear, no merge commit
+jj git push --bookmark agent-a/task-42
+gh pr create --base main --head agent-a/task-42
 ```
 
-### 4. Upstream changes flow back
+Or, when the review happened here and GitHub is only the mirror, move `main`
+itself — which is now a fast-forward, because the rebase made it one:
 
 ```bash
-# On the server, after PR is merged
-jj git fetch
-# Agents automatically see the new commits on next jj command
-# (or immediately via watchHeads notification)
+jj bookmark set main -r agent-a/task-42
+jj git push --bookmark main
 ```
 
-## Git operations: server only
+`main` advances one way: an integrator rebases a ready stack onto it. Agents
+merge in the repo, never on disk.
 
-Git commands run exclusively on the server:
-- `jj git push` — server pushes to GitHub
-- `jj git fetch` — server pulls from GitHub
-- `gh pr create` — server creates PRs
+## 6. Upstream comes back
 
-Agents don't need git access. They work through tandem RPC.
+```bash
+# On the server, after the PR lands
+jj git fetch
+```
 
-This is intentional: the server is the single point of contact with the
-outside world. It's where the orchestrator makes decisions about what
-ships and what doesn't.
+Agents see the new commits on their next command, or as a wake-up if they are
+subscribed. Nothing has to be pulled.
 
-## Tandem as source of truth
+## Where the truth lives
 
-The tandem server is the canonical store. GitHub is a mirror.
+The bucket. Not the server's disk, and not GitHub.
 
-- The server holds the complete history — all agent objects live there
-- `jj git push` mirrors to GitHub for CI, code review, external visibility
-- Other teams interact via GitHub as usual
-- Agents and the orchestrator work entirely through tandem
+- One publish is one immutable WAL entry; the op-heads set is one
+  compare-and-swapped index object. `POST /api/heads` acknowledges only after
+  both are durable.
+- The server's repo is a cache of that log. Lose the machine, run
+  `tandem up --bucket <same url>` on another, and it replays.
+- GitHub is a mirror for CI, review and people outside. It is where work goes
+  to be seen, not where it goes to be safe.
 
-Back up the server repo directory. If it's lost without backups, the data
-is gone (unless you've been pushing to GitHub regularly).
+## What is parked
+
+The always-on integration workspace (`--enable-integration-workspace`) is
+still in the binary and is not part of this workflow. Continuous recompute
+does not survive continuous snapshotting: it would recompute a merge for every
+file save, over states that are mid-edit by construction. The direction when it
+comes back is an on-demand conflict query over ready bookmarks, writable
+nowhere, runnable by anyone.

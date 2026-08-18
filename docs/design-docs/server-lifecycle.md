@@ -174,7 +174,7 @@ Both modes create the control socket. `tandem down`,
 ### tandem serve (existing + new)
 
 ```
---listen <addr>           Cap'n Proto listen address (required)
+--listen <addr>           HTTP listen address (required)
 --repo <path>             Repository path (required)
 --log-level <level>       trace|debug|info|warn|error (default: info)
 --log-file <path>         Log to file instead of stderr
@@ -189,7 +189,7 @@ Both modes create the control socket. `tandem down`,
 ### tandem up
 
 ```
---listen <addr>           Cap'n Proto listen address (optional)
+--listen <addr>           HTTP listen address (optional)
 --repo <path>             Repository path (required)
 --log-level <level>       Daemon log level (default: info)
 --log-file <path>         Daemon log file (default: $XDG_RUNTIME_DIR/tandem/daemon.log)

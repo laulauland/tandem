@@ -5,7 +5,7 @@
 #![allow(dead_code)]
 
 use std::fs;
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::OnceLock;
@@ -16,9 +16,24 @@ use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
 use tempfile::TempDir;
 
+// The readiness handshake is the same question in both suites and encodes the
+// same contract — `GET /api/info`, this caller's bearer, a `200`. It is written
+// once, next to the test suite that explains it, and compiled in here. The two
+// `wait_for_server` wrappers stay apart on purpose: the tests panic, the benches
+// return a `Result`, and they wait for different lengths of time.
+#[path = "../tests/common/readiness.rs"]
+mod readiness;
+
+pub use readiness::server_is_answering;
+
 pub const BENCH_DISABLE_OPTIMISTIC_VERSION_ENV: &str =
     "TANDEM_BENCH_DISABLE_OPTIMISTIC_OP_HEAD_VERSION_CACHE";
 pub const BENCH_DISABLE_RPC_INFLIGHT_ENV: &str = "TANDEM_BENCH_DISABLE_RPC_INFLIGHT";
+/// The stand-in for distance: milliseconds added to every client request.
+///
+/// It is read by the client itself (`http_client::bench_injected_rtt_delay`),
+/// so a bench sets it for the commands it runs. A bench that reads it back is
+/// only asking whether it was on, so that its report can say so.
 pub const BENCH_INJECT_RTT_MS_ENV: &str = "TANDEM_BENCH_INJECT_RTT_MS";
 
 #[derive(Clone, Copy, Debug)]
@@ -178,7 +193,7 @@ impl BenchHarness {
         cmd.stdout(Stdio::null()).stderr(Stdio::null());
         let mut server = cmd.spawn().context("spawn tandem server")?;
 
-        wait_for_server(&server_addr, &mut server)?;
+        wait_for_server(&server_addr, &mut server, None)?;
 
         Ok(Self {
             root,
@@ -535,11 +550,16 @@ pub fn free_addr() -> Result<String> {
     Ok(format!("127.0.0.1:{port}"))
 }
 
-pub fn wait_for_server(addr: &str, child: &mut Child) -> Result<()> {
+pub fn wait_for_server(addr: &str, child: &mut Child, token: Option<&str>) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(15);
     while Instant::now() < deadline {
-        if TcpStream::connect(addr).is_ok() {
+        if server_is_answering(addr, token) {
             return Ok(());
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(anyhow!(
+                "the server at {addr} exited before it answered ({status})"
+            ));
         }
         thread::sleep(Duration::from_millis(50));
     }

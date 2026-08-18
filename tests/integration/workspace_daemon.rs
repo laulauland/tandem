@@ -31,7 +31,11 @@ const LINE_TIMEOUT: Duration = Duration::from_secs(20);
 const DEBOUNCE_MS: &str = "150";
 
 /// A running `tandem daemon`, and the two pipes it talks through.
-struct DaemonProcess {
+///
+/// `pub` for `baked_image.rs`, which starts one the same way a container's
+/// entrypoint does. A second copy of the start-and-wait-for-`watching` dance
+/// would be a second thing to get wrong about the race it exists to close.
+pub struct DaemonProcess {
     child: Child,
     out: Lines,
     err: Lines,
@@ -45,11 +49,11 @@ impl DaemonProcess {
     /// Waiting for that line matters: a write that lands before the watcher is
     /// registered produces no event, and a test that raced it would fail for a
     /// reason that has nothing to do with what it is checking.
-    fn start(root: &Path, home: &Path) -> Self {
+    pub fn start(root: &Path, home: &Path) -> Self {
         Self::start_with_debounce(root, home, DEBOUNCE_MS)
     }
 
-    fn start_with_debounce(root: &Path, home: &Path, debounce_ms: &str) -> Self {
+    pub fn start_with_debounce(root: &Path, home: &Path, debounce_ms: &str) -> Self {
         let mut cmd = Command::new(common::tandem_bin());
         cmd.current_dir(root)
             .args(["daemon", ".", "--debounce-ms", debounce_ms])
@@ -77,7 +81,7 @@ impl DaemonProcess {
     }
 
     /// Wait for the daemon to report a published operation, and answer its id.
-    fn wait_for_publish(&mut self) -> String {
+    pub fn wait_for_publish(&mut self) -> String {
         let line = self
             .out
             .wait_for(LINE_TIMEOUT, |line| line.starts_with("published op="))
@@ -94,12 +98,16 @@ impl DaemonProcess {
     /// The status the daemon keeps on disk, as `tandem daemon --status --json`
     /// reads it.
     fn status(&self) -> serde_json::Value {
-        let out = common::run_tandem_in(&self.root, &["daemon", ".", "--status", "--json"], &self.home);
+        let out = common::run_tandem_in(
+            &self.root,
+            &["daemon", ".", "--status", "--json"],
+            &self.home,
+        );
         common::assert_ok(&out, "read the daemon's status");
         serde_json::from_str(&common::stdout_str(&out)).expect("the status is JSON")
     }
 
-    fn stop(&mut self) {
+    pub fn stop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -168,7 +176,11 @@ fn a_file_change_is_published_without_any_jj_command_being_run() {
     // The whole of the input. No subprocess, no verb, no checkpoint — a
     // program that knows nothing about tandem writing a file.
     std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(root.join("src/main.rs"), b"fn main() { println!(\"hi\"); }\n").unwrap();
+    std::fs::write(
+        root.join("src/main.rs"),
+        b"fn main() { println!(\"hi\"); }\n",
+    )
+    .unwrap();
 
     let op_id = daemon.wait_for_publish();
     assert!(!op_id.is_empty(), "the published line names an operation");
@@ -304,7 +316,11 @@ fn killing_the_client_and_cloning_the_name_elsewhere_reproduces_the_files() {
 
     // Edit. No `jj` command anywhere in this test between here and the kill.
     std::fs::create_dir_all(root.join("deep/nested")).unwrap();
-    std::fs::write(root.join("deep/nested/data.bin"), [0u8, 1, 2, 250, 251, 255]).unwrap();
+    std::fs::write(
+        root.join("deep/nested/data.bin"),
+        [0u8, 1, 2, 250, 251, 255],
+    )
+    .unwrap();
     std::fs::write(root.join("notes.md"), "# notes\n\nsomething\n").unwrap();
     daemon.wait_for_publish();
 

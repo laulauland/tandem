@@ -10,6 +10,8 @@ mod common;
 
 #[path = "integration/auth.rs"]
 mod auth;
+#[path = "integration/baked_image.rs"]
+mod baked_image;
 #[path = "integration/bucket_durability.rs"]
 mod bucket_durability;
 #[path = "integration/bucket_replay.rs"]
@@ -24,6 +26,8 @@ mod contention;
 mod control_socket;
 #[path = "integration/daemon_lifecycle.rs"]
 mod daemon_lifecycle;
+#[path = "integration/fixture_readiness.rs"]
+mod fixture_readiness;
 #[path = "integration/git_round_trip.rs"]
 mod git_round_trip;
 #[path = "integration/handshake.rs"]

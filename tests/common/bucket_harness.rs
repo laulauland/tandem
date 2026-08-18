@@ -75,7 +75,7 @@ impl BucketHarness {
         let mut child = spawn_server_with_args_env_and_log(
             &self.repo, &self.addr, &args, &env, &self.home, log,
         );
-        wait_for_server(&self.addr, &mut child);
+        wait_for_server(&self.addr, &mut child, Some(&self.admin_token));
         self.server = Some(child);
     }
 

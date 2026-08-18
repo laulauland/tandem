@@ -51,7 +51,11 @@ fn up_status_down() {
     );
 
     // Server should be listening
-    common::wait_for_addr(&addr, Duration::from_secs(10));
+    common::wait_for_addr(
+        &addr,
+        Duration::from_secs(10),
+        Some(&common::admin_token_from_up(&up_out)),
+    );
 
     // tandem status should show running
     let status_out = common::run_tandem_in(
@@ -151,7 +155,11 @@ fn up_auto_listen_port() {
     );
 
     let loopback_addr = format!("127.0.0.1:{port}");
-    common::wait_for_addr(&loopback_addr, Duration::from_secs(10));
+    common::wait_for_addr(
+        &loopback_addr,
+        Duration::from_secs(10),
+        Some(&common::admin_token_from_up(&up_out)),
+    );
 
     let down_out =
         common::run_tandem_in(tmp.path(), &["down", "--control-socket", sock_str], &home);

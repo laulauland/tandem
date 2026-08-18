@@ -141,7 +141,7 @@ impl ServerFixture {
             &self.home,
             self.log.as_deref(),
         );
-        wait_for_server(&self.addr, &mut server);
+        wait_for_server(&self.addr, &mut server, Some(&self.admin_token));
         if self.has_socket {
             wait_for_socket(&self.socket, Duration::from_secs(5));
         }
@@ -169,7 +169,7 @@ impl ServerFixture {
             &self.home,
             self.log.as_deref(),
         );
-        wait_for_server(&self.addr, &mut server);
+        wait_for_server(&self.addr, &mut server, Some(&self.admin_token));
         if self.has_socket {
             wait_for_socket(&self.socket, Duration::from_secs(5));
         }
@@ -265,7 +265,7 @@ impl ServerBuilder {
 
         let addr = free_addr();
         let mut server = spawn(&repo, &addr, &args, &env, &home, log.as_deref());
-        wait_for_server(&addr, &mut server);
+        wait_for_server(&addr, &mut server, Some(&admin_token));
         if self.control_socket {
             wait_for_socket(&socket, Duration::from_secs(5));
         }

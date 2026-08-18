@@ -1,0 +1,10 @@
+# The build context for ./Dockerfile is the repository root, and the builder
+# stage wants the sources and nothing else. Without this, `target/` — several
+# gigabytes of build output that the image will rebuild anyway — is uploaded to
+# the daemon before the first instruction runs.
+target
+.jj
+.git
+docs
+qa
+tests

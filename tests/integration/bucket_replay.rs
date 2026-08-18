@@ -376,7 +376,11 @@ fn up_on_an_empty_directory_materializes_and_serves() {
     // ── First life: an empty directory and an empty bucket ────────────
     std::fs::create_dir_all(&repo).expect("create repo dir");
     common::assert_ok(&up(&repo), "tandem up on an empty directory");
-    common::wait_for_addr(&addr, std::time::Duration::from_secs(10));
+    common::wait_for_addr(
+        &addr,
+        std::time::Duration::from_secs(10),
+        Some(&admin_token),
+    );
 
     let first = status();
     assert_eq!(first["bucket"]["location"], bucket_spec);
@@ -414,7 +418,11 @@ fn up_on_an_empty_directory_materializes_and_serves() {
     // ── Second life: the same bucket, no directory at all ─────────────
     std::fs::remove_dir_all(&repo).expect("remove the server repo directory");
     common::assert_ok(&up(&repo), "tandem up on a destroyed directory");
-    common::wait_for_addr(&addr, std::time::Duration::from_secs(10));
+    common::wait_for_addr(
+        &addr,
+        std::time::Duration::from_secs(10),
+        Some(&admin_token),
+    );
 
     let second = status();
     assert_eq!(

@@ -2,10 +2,15 @@
 
 pub mod bucket_harness;
 pub mod lines;
+pub mod readiness;
 pub mod server_fixture;
 pub mod workspace;
 
 pub use server_fixture::ServerFixture;
+
+/// The readiness handshake, shared verbatim with the benches — see
+/// `readiness.rs` for why it is a handshake and not a bare connect.
+pub use readiness::{answers_the_tandem_protocol, server_is_answering};
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
@@ -76,11 +81,17 @@ pub fn isolate_env(cmd: &mut Command, home: &Path) {
     }
 }
 
-pub fn wait_for_server(addr: &str, child: &mut Child) {
+pub fn wait_for_server(addr: &str, child: &mut Child, token: Option<&str>) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        if std::net::TcpStream::connect(addr).is_ok() {
+        if server_is_answering(addr, token) {
             return;
+        }
+        // A server that has already exited is never going to answer, and the
+        // reason it exited is worth more than a timeout ten seconds later.
+        // Losing the race for the port is the likeliest one.
+        if let Ok(Some(status)) = child.try_wait() {
+            panic!("the server for {addr} exited before it answered ({status})");
         }
         if Instant::now() > deadline {
             let _ = child.kill();
@@ -251,11 +262,13 @@ pub fn wait_for_socket(path: &Path, timeout: Duration) {
     }
 }
 
-/// Wait for a TCP address to become connectable (no child process to manage).
-pub fn wait_for_addr(addr: &str, timeout: Duration) {
+/// Wait for a tandem server to answer at an address (no child process to
+/// manage). Readiness is the same handshake `wait_for_server` uses, and for
+/// the same reason — see `answers_the_tandem_protocol`.
+pub fn wait_for_addr(addr: &str, timeout: Duration, token: Option<&str>) {
     let deadline = Instant::now() + timeout;
     loop {
-        if std::net::TcpStream::connect(addr).is_ok() {
+        if server_is_answering(addr, token) {
             return;
         }
         if Instant::now() > deadline {
