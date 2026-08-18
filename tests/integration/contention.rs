@@ -11,7 +11,9 @@
 
 use crate::common;
 use crate::common::lines::start_log_stream;
-use crate::common::workspace::{find_commit_id, run_tandem_resilient, settle_workspace, MAX_RETRIES};
+use crate::common::workspace::{
+    find_commit_id, run_tandem_resilient, settle_workspace, MAX_RETRIES,
+};
 use crate::common::ServerFixture;
 
 use std::path::PathBuf;
@@ -63,10 +65,7 @@ impl TestHarness {
                 server.init_workspace(&name, Some(&name))
             })
             .collect();
-        Self {
-            server,
-            agent_dirs,
-        }
+        Self { server, agent_dirs }
     }
 }
 
@@ -190,7 +189,8 @@ fn run_contention_cycle(harness: &TestHarness, cycle: usize) {
                     );
                     common::assert_ok(&show, &format!("file show {}", filenames[idx]));
                     assert_eq!(
-                        show.stdout, contents[idx],
+                        show.stdout,
+                        contents[idx],
                         "byte mismatch for {} as seen from {}",
                         filenames[idx],
                         agent_dir.display()

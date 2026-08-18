@@ -7,17 +7,22 @@
 //! (CAS version + workspace head attribution).
 //!
 //! This file holds the state, the object and operation stores, and the heads
-//! logic. Three siblings hold the rest: `http` is the API that exposes it,
-//! `bucket` is the durability half — WAL entries, the index object, and the
-//! recovery that replays them — and `integration` is the off-request worker
-//! that keeps the `integration` bookmark up to date.
+//! logic. Siblings hold the rest: `http` is the API that exposes it, `bucket`
+//! is the durability half — WAL entries, the index object, and the recovery
+//! that replays them — `integration` is the off-request worker that keeps the
+//! `integration` bookmark up to date, and `authority` decides who is asking and
+//! whether they may, over the rules `scope` states.
 
+mod authority;
 mod bucket;
 mod faults;
 pub mod http;
 mod integration;
+mod scope;
+pub mod writer;
 
 pub use faults::{CrashWindow, FaultPoints};
+pub use scope::ScopeDenied;
 
 use anyhow::{anyhow, bail, Context, Result};
 // blake2 is available if needed for raw hashing, but we use jj_lib::content_hash
@@ -60,6 +65,10 @@ pub struct ServeOptions {
     /// the server keeps its bucket inside the repo, which is enough for dev
     /// and tests but gives up the durability inversion.
     pub bucket: Option<String>,
+    /// The token that mints every other token. Absent means the server makes
+    /// one up and logs it, because there is no such thing as a server that
+    /// answers an unauthenticated request.
+    pub admin_token: Option<String>,
 }
 
 pub async fn run_serve(opts: ServeOptions) -> Result<()> {
@@ -80,11 +89,28 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
         tracing::debug!(log_file = %path, "serve log file argument");
     }
 
+    // A server without a token would answer anybody, so one is always in
+    // force. When the operator did not name one, the server says what it
+    // generated — that line is how `tandem init` is given something to use.
+    let admin_token = match opts.admin_token.clone() {
+        Some(token) if !token.trim().is_empty() => token,
+        _ => {
+            let generated = crate::auth::generate_admin_token();
+            tracing::warn!(
+                admin_token = %generated,
+                "no admin token configured; generated one for this run — pass it to \
+                 `tandem init --token` or set TANDEM_ADMIN_TOKEN to keep it across restarts"
+            );
+            generated
+        }
+    };
+
     let repo = PathBuf::from(&opts.repo_path);
     let server = Arc::new(Server::new(
         repo,
         opts.enable_integration_workspace,
         opts.bucket.as_deref(),
+        &admin_token,
     )?);
     server.start_integration_worker();
     let listener = tokio::net::TcpListener::bind(&opts.listen_addr)
@@ -230,6 +256,10 @@ pub struct Server {
     boot_replay: Mutex<bucket::BootReplay>,
     /// The faults this server is under. Inert unless a test says otherwise.
     faults: Arc<FaultPoints>,
+    /// The admin token, and every workspace token minted from it.
+    tokens: crate::auth::TokenStore,
+    /// Which client is currently the writer for each workspace.
+    writer_roles: writer::WriterRoles,
     integration_enabled: bool,
     integration_trigger: Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>,
     lock: Mutex<()>,
@@ -322,11 +352,17 @@ fn head_ids_for_wire(heads: &[String]) -> Vec<Vec<u8>> {
 
 impl Server {
     /// A server over `repo`, with no faults injected.
-    pub fn new(repo: PathBuf, integration_enabled: bool, bucket_spec: Option<&str>) -> Result<Self> {
+    pub fn new(
+        repo: PathBuf,
+        integration_enabled: bool,
+        bucket_spec: Option<&str>,
+        admin_token: &str,
+    ) -> Result<Self> {
         Self::new_with_faults(
             repo,
             integration_enabled,
             bucket_spec,
+            admin_token,
             FaultPoints::inert(),
         )
     }
@@ -336,6 +372,7 @@ impl Server {
         repo: PathBuf,
         integration_enabled: bool,
         bucket_spec: Option<&str>,
+        admin_token: &str,
         faults: Arc<FaultPoints>,
     ) -> Result<Self> {
         fs::create_dir_all(&repo)?;
@@ -424,6 +461,8 @@ impl Server {
             bootstrap_op_heads: Vec::new(),
             boot_replay: Mutex::new(bucket::BootReplay::default()),
             faults,
+            tokens: crate::auth::TokenStore::new(admin_token),
+            writer_roles: writer::WriterRoles::new(),
             integration_enabled,
             integration_trigger: Mutex::new(None),
             lock: Mutex::new(()),
@@ -950,6 +989,7 @@ impl Server {
         new_id: Vec<u8>,
         expected_version: u64,
         workspace_id: Option<String>,
+        authority: &crate::auth::Authority,
     ) -> Result<UpdateResult> {
         self.faults.refuse_if_halted()?;
         let _guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
@@ -998,6 +1038,16 @@ impl Server {
         }
 
         old_op_ids.retain(|id| id != &new_op_id);
+
+        // ── The scope check ──
+        //
+        // Before anything durable happens, and after the CAS version check, so
+        // that a client that simply lost the race still gets told it lost the
+        // race. A workspace token is checked against what its operation does to
+        // the view; the admin token is the integrator and is not.
+        if let Some(scoped_workspace) = authority.workspace() {
+            self.check_publish_scope(scoped_workspace, &new_op_id)?;
+        }
 
         let new_hex = to_hex(&new_id);
         let next_workspace_heads =

@@ -77,8 +77,79 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/views/{id}", get(get_view))
         .route("/api/heads", get(get_heads).post(update_heads))
         .route("/api/events", get(events))
+        .route("/api/tokens", post(mint_token))
+        .route("/api/workspaces/{id}/writer", post(claim_writer_role))
+        // Every route above, the handshake included. A server that answered
+        // one question to an unauthenticated caller would be telling a
+        // stranger which repo it is holding.
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&server),
+            require_bearer,
+        ))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .with_state(server)
+}
+
+// ─── Authentication ───────────────────────────────────────────────────────────
+
+/// Resolve the bearer once, and hand what it authorizes to the handler.
+///
+/// The handler gets an `Authority`, not a token: nothing downstream of here
+/// has to know what a token looks like, and nothing downstream can forget to
+/// check one.
+async fn require_bearer(
+    State(server): State<Arc<Server>>,
+    mut request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> ApiResult<Response> {
+    let presented = bearer_from_headers(request.headers())?.to_string();
+    let Some(authority) = server.authority_for(&presented) else {
+        tracing::debug!(path = %request.uri().path(), "refused an unauthenticated request");
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "the bearer token is unknown or has expired",
+        ));
+    };
+    request.extensions_mut().insert(authority);
+    Ok(next.run(request).await)
+}
+
+/// The token out of `Authorization: Bearer …`, or the 401 that refuses it.
+fn bearer_from_headers(headers: &HeaderMap) -> ApiResult<&str> {
+    let raw = headers
+        .get(header::AUTHORIZATION)
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "this endpoint needs an Authorization: Bearer token",
+            )
+        })?
+        .to_str()
+        .map_err(|_| ApiError::bad_request("Authorization is not text"))?;
+
+    raw.strip_prefix("Bearer ")
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "Authorization must be a Bearer token",
+            )
+        })
+}
+
+/// The authority the middleware resolved for this request.
+///
+/// It put one there for every route on this router, so a missing extension is
+/// a wiring mistake rather than an unauthenticated caller, and it is answered
+/// 401 rather than trusted.
+fn authority_of(extensions: &axum::http::Extensions) -> ApiResult<&crate::auth::Authority> {
+    extensions.get::<crate::auth::Authority>().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "this request carries no resolved authority",
+        )
+    })
 }
 
 // ─── Error shape ──────────────────────────────────────────────────────────────
@@ -117,6 +188,17 @@ impl ApiError {
             Self::new(StatusCode::BAD_REQUEST, format!("{error:#}"))
         } else {
             Self::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{error:#}"))
+        }
+    }
+
+    /// A publish that the token was not allowed to make is the client's
+    /// answer to keep, not a fault to retry: 403, with the reason the scope
+    /// check gave. Everything else on that path is still a 500.
+    fn from_publish(error: anyhow::Error) -> Self {
+        if error.downcast_ref::<super::ScopeDenied>().is_some() {
+            Self::new(StatusCode::FORBIDDEN, format!("{error:#}"))
+        } else {
+            Self::internal(error)
         }
     }
 
@@ -402,9 +484,25 @@ async fn get_heads(State(server): State<Arc<Server>>) -> ApiResult<Response> {
 async fn update_heads(
     State(server): State<Arc<Server>>,
     headers: HeaderMap,
+    extensions: axum::http::Extensions,
     Json(request): Json<wire::UpdateHeadsBody>,
 ) -> ApiResult<Response> {
     let expected_version = expected_version_from_if_match(&headers)?;
+    let authority = authority_of(&extensions)?.clone();
+
+    // The workspace a publish attributes itself to has to be the one the token
+    // speaks for. A publish that names no workspace attributes nothing, which
+    // any token may do — the view-diff check below is what actually decides
+    // what it is allowed to change.
+    if !request.workspace_id.is_empty() && !authority.may_act_for(&request.workspace_id) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            format!(
+                "this token does not speak for workspace {}",
+                request.workspace_id
+            ),
+        ));
+    }
 
     let mut old_ids = Vec::with_capacity(request.old_ids.len());
     for hex in &request.old_ids {
@@ -433,10 +531,16 @@ async fn update_heads(
     let workspace_for_call = workspace_id.clone();
     let new_for_call = new_id.clone();
     let result = blocking(&server, move |server| {
-        server.update_op_heads_sync(old_ids, new_for_call, expected_version, workspace_for_call)
+        server.update_op_heads_sync(
+            old_ids,
+            new_for_call,
+            expected_version,
+            workspace_for_call,
+            &authority,
+        )
     })
     .await
-    .map_err(ApiError::internal)?;
+    .map_err(ApiError::from_publish)?;
 
     let status = if result.ok {
         StatusCode::OK
@@ -485,6 +589,91 @@ fn expected_version_from_if_match(headers: &HeaderMap) -> ApiResult<u64> {
 
     crate::http_client::version_from_etag(raw)
         .ok_or_else(|| ApiError::bad_request(format!("If-Match {raw:?} is not a head version")))
+}
+
+// ─── Handlers: tokens and the writer role ─────────────────────────────────────
+
+/// `POST /api/tokens` — the admin token asking for a workspace-scoped one.
+async fn mint_token(
+    State(server): State<Arc<Server>>,
+    extensions: axum::http::Extensions,
+    Json(request): Json<wire::MintTokenBody>,
+) -> ApiResult<Json<wire::TokenBody>> {
+    if !authority_of(&extensions)?.is_admin() {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "only the admin token may mint tokens",
+        ));
+    }
+    let workspace_id = request.workspace_id.trim().to_string();
+    if workspace_id.is_empty() {
+        return Err(ApiError::bad_request(
+            "POST /api/tokens needs the workspaceId the token is for",
+        ));
+    }
+    let ttl = request
+        .ttl_seconds
+        .map(std::time::Duration::from_secs)
+        .unwrap_or(crate::auth::DEFAULT_TOKEN_TTL);
+
+    tracing::info!(rpc_method = "mintToken", workspace_id = %workspace_id, "rpc request");
+    let body = blocking(&server, move |server| {
+        Ok(server.mint_token_sync(&workspace_id, ttl))
+    })
+    .await
+    .map_err(ApiError::internal)?;
+    Ok(Json(body))
+}
+
+/// `POST /api/workspaces/{id}/writer` — claiming or renewing the writer role.
+///
+/// A claim by the holder that already has it is a renewal and always answers
+/// 200. A claim by anybody else while the current one still stands is a 409,
+/// carrying who holds it and for how much longer.
+async fn claim_writer_role(
+    State(server): State<Arc<Server>>,
+    extensions: axum::http::Extensions,
+    Path(workspace_id): Path<String>,
+    Json(request): Json<wire::ClaimWriterBody>,
+) -> ApiResult<Json<wire::WriterRoleBody>> {
+    if !authority_of(&extensions)?.may_act_for(&workspace_id) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            format!("this token does not speak for workspace {workspace_id}"),
+        ));
+    }
+    let holder = request.holder.trim().to_string();
+    if holder.is_empty() {
+        return Err(ApiError::bad_request(
+            "a writer-role claim needs a holder to name who is asking",
+        ));
+    }
+    let ttl = request
+        .ttl_seconds
+        .map(std::time::Duration::from_secs)
+        .unwrap_or(super::writer::DEFAULT_WRITER_TTL);
+
+    tracing::info!(
+        rpc_method = "claimWriterRole",
+        workspace_id = %workspace_id,
+        holder = %holder,
+        "rpc request"
+    );
+
+    let claimed = blocking(&server, move |server| {
+        Ok(server.claim_writer_role_sync(&workspace_id, &holder, ttl))
+    })
+    .await
+    .map_err(ApiError::internal)?;
+
+    match claimed {
+        Ok(role) => Ok(Json(wire::WriterRoleBody {
+            workspace_id: role.workspace_id,
+            holder: role.holder,
+            expires_in_seconds: role.expires_in.as_secs(),
+        })),
+        Err(conflict) => Err(ApiError::new(StatusCode::CONFLICT, conflict.to_string())),
+    }
 }
 
 // ─── Handlers: events ─────────────────────────────────────────────────────────

@@ -5,7 +5,10 @@ fn assert_init_fails_with_env(env: &[(&str, &str)], expected_field: &str) {
     let fx = ServerFixture::builder().envs(env).start();
     let workspace = fx.dir("workspace");
 
-    let init = fx.run(&workspace, &["init", "--server", &fx.addr, "."]);
+    let init = fx.run(
+        &workspace,
+        &["init", "--server", &fx.addr, "--token", fx.token(), "."],
+    );
     assert!(
         !init.status.success(),
         "init unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
@@ -46,7 +49,10 @@ fn missing_watch_capability_is_gated() {
         .envs(&[("TANDEM_TEST_REPO_INFO_CAPABILITIES", "")])
         .start();
 
-    let watch = fx.run(fx.path(), &["watch", "--server", &fx.addr]);
+    let watch = fx.run(
+        fx.path(),
+        &["watch", "--server", &fx.addr, "--token", fx.token()],
+    );
     assert!(
         !watch.status.success(),
         "watch unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",

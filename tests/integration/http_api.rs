@@ -99,8 +99,8 @@ fn hex_of(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn json_at(addr: &str, path: &str) -> serde_json::Value {
-    common::api_get(addr, path)
+fn json_at(addr: &str, token: &str, path: &str) -> serde_json::Value {
+    common::api_get(addr, token, path)
         .json()
         .expect("decode JSON body")
 }
@@ -108,7 +108,7 @@ fn json_at(addr: &str, path: &str) -> serde_json::Value {
 #[test]
 fn info_endpoint_carries_the_compatibility_handshake() {
     let fx = fixture();
-    let info = json_at(&fx.addr, "/api/info");
+    let info = json_at(&fx.addr, fx.token(), "/api/info");
 
     assert_eq!(info["protocolMajor"], 0);
     assert_eq!(info["protocolMinor"], 1);
@@ -142,6 +142,7 @@ fn object_reads_are_immutable_and_writes_answer_with_the_id() {
     let data = b"a blob written straight over http\n".to_vec();
     let written = common::http_client()
         .post(common::api_url(&fx.addr, "/api/objects/file"))
+        .bearer_auth(fx.token())
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .body(data.clone())
         .send()
@@ -161,7 +162,7 @@ fn object_reads_are_immutable_and_writes_answer_with_the_id() {
         "a file write answers with its normalized bytes"
     );
 
-    let read = common::api_get(&fx.addr, &format!("/api/objects/file/{id}"));
+    let read = common::api_get(&fx.addr, fx.token(), &format!("/api/objects/file/{id}"));
     let cache_control = read
         .headers()
         .get(reqwest::header::CACHE_CONTROL)
@@ -183,6 +184,7 @@ fn an_unknown_object_kind_is_a_bad_request_and_a_missing_id_is_a_not_found() {
 
     let bad_kind = client
         .get(common::api_url(&fx.addr, "/api/objects/banana/00"))
+        .bearer_auth(fx.token())
         .send()
         .unwrap();
     assert_eq!(bad_kind.status().as_u16(), 400);
@@ -197,6 +199,7 @@ fn an_unknown_object_kind_is_a_bad_request_and_a_missing_id_is_a_not_found() {
             &fx.addr,
             &format!("/api/objects/file/{}", "ab".repeat(20)),
         ))
+        .bearer_auth(fx.token())
         .send()
         .unwrap();
     assert_eq!(missing.status().as_u16(), 404);
@@ -217,6 +220,7 @@ fn the_batch_endpoint_writes_every_item_and_reports_each_one() {
 
     let response = common::http_client()
         .post(common::api_url(&fx.addr, "/api/objects:batch"))
+        .bearer_auth(fx.token())
         .header(
             reqwest::header::CONTENT_TYPE,
             "application/vnd.tandem.batch",
@@ -240,7 +244,7 @@ fn the_batch_endpoint_writes_every_item_and_reports_each_one() {
 
     // The two blobs are now readable at their ids.
     let hex = hex_of(&records[0].1);
-    let read = common::api_get(&fx.addr, &format!("/api/objects/file/{hex}"));
+    let read = common::api_get(&fx.addr, fx.token(), &format!("/api/objects/file/{hex}"));
     assert_eq!(read.bytes().unwrap().to_vec(), good_a);
 }
 
@@ -268,6 +272,7 @@ fn a_malformed_batch_frame_is_refused_without_a_crash() {
     ] {
         let response = client
             .post(common::api_url(&fx.addr, "/api/objects:batch"))
+            .bearer_auth(fx.token())
             .body(body)
             .send()
             .expect("POST a bad batch frame");
@@ -279,7 +284,7 @@ fn a_malformed_batch_frame_is_refused_without_a_crash() {
     }
 
     // The server is still alive and answering.
-    let _ = json_at(&fx.addr, "/api/heads");
+    let _ = json_at(&fx.addr, fx.token(), "/api/heads");
 }
 
 #[test]
@@ -289,6 +294,7 @@ fn heads_carry_an_etag_and_a_stale_if_match_is_a_conflict() {
 
     let response = client
         .get(common::api_url(&fx.addr, "/api/heads"))
+        .bearer_auth(fx.token())
         .send()
         .unwrap();
     assert!(response.status().is_success());
@@ -310,6 +316,7 @@ fn heads_carry_an_etag_and_a_stale_if_match_is_a_conflict() {
     // state the caller lost the race to.
     let stale = client
         .post(common::api_url(&fx.addr, "/api/heads"))
+        .bearer_auth(fx.token())
         .header(reqwest::header::IF_MATCH, "\"0\"")
         .json(&serde_json::json!({
             "oldIds": [head_id],
@@ -329,6 +336,7 @@ fn heads_carry_an_etag_and_a_stale_if_match_is_a_conflict() {
     // A publish with no If-Match at all is refused outright.
     let unconditional = client
         .post(common::api_url(&fx.addr, "/api/heads"))
+        .bearer_auth(fx.token())
         .json(&serde_json::json!({ "newId": head_id }))
         .send()
         .unwrap();
@@ -339,10 +347,10 @@ fn heads_carry_an_etag_and_a_stale_if_match_is_a_conflict() {
 fn operations_and_views_are_readable_and_prefixes_resolve() {
     let fx = fixture();
 
-    let heads = json_at(&fx.addr, "/api/heads");
+    let heads = json_at(&fx.addr, fx.token(), "/api/heads");
     let head_id = heads["heads"][0].as_str().expect("a head").to_string();
 
-    let operation = common::api_get(&fx.addr, &format!("/api/ops/{head_id}"));
+    let operation = common::api_get(&fx.addr, fx.token(), &format!("/api/ops/{head_id}"));
     assert!(
         operation
             .headers()
@@ -355,15 +363,19 @@ fn operations_and_views_are_readable_and_prefixes_resolve() {
     );
     assert!(!operation.bytes().unwrap().is_empty());
 
-    let single = json_at(&fx.addr, &format!("/api/ops?prefix={}", &head_id[..8]));
+    let single = json_at(
+        &fx.addr,
+        fx.token(),
+        &format!("/api/ops?prefix={}", &head_id[..8]),
+    );
     assert_eq!(single["resolution"], "singleMatch");
     assert_eq!(single["id"].as_str().unwrap(), head_id);
 
-    let none = json_at(&fx.addr, "/api/ops?prefix=ffffffffffffffff");
+    let none = json_at(&fx.addr, fx.token(), "/api/ops?prefix=ffffffffffffffff");
     assert_eq!(none["resolution"], "noMatch");
 
     // Every operation in the store shares the empty prefix.
-    let ambiguous = json_at(&fx.addr, "/api/ops?prefix=");
+    let ambiguous = json_at(&fx.addr, fx.token(), "/api/ops?prefix=");
     assert_eq!(ambiguous["resolution"], "ambiguous");
 }
 
@@ -373,6 +385,7 @@ fn the_event_stream_wakes_a_reader_when_the_heads_move() {
 
     let response = common::http_client()
         .get(common::api_url(&fx.addr, "/api/events"))
+        .bearer_auth(fx.token())
         .header(reqwest::header::ACCEPT, "text/event-stream")
         .timeout(Duration::from_secs(20))
         .send()
@@ -446,6 +459,7 @@ fn an_object_past_the_default_body_limit_is_written_and_read_back_whole() {
 
     let written = common::http_client()
         .post(common::api_url(&fx.addr, "/api/objects/file"))
+        .bearer_auth(fx.token())
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .body(data.clone())
         .send()
@@ -463,7 +477,7 @@ fn an_object_past_the_default_body_limit_is_written_and_read_back_whole() {
         .unwrap()
         .to_string();
 
-    let read = common::api_get(&fx.addr, &format!("/api/objects/file/{id}"));
+    let read = common::api_get(&fx.addr, fx.token(), &format!("/api/objects/file/{id}"));
     assert_eq!(
         read.bytes().unwrap().to_vec(),
         data,
@@ -481,6 +495,7 @@ fn a_batch_past_the_default_body_limit_writes_every_item() {
 
     let response = common::http_client()
         .post(common::api_url(&fx.addr, "/api/objects:batch"))
+        .bearer_auth(fx.token())
         .header(
             reqwest::header::CONTENT_TYPE,
             "application/vnd.tandem.batch",
@@ -502,7 +517,7 @@ fn a_batch_past_the_default_body_limit_writes_every_item() {
     }
 
     let hex = hex_of(&records[0].1);
-    let read = common::api_get(&fx.addr, &format!("/api/objects/file/{hex}"));
+    let read = common::api_get(&fx.addr, fx.token(), &format!("/api/objects/file/{hex}"));
     assert_eq!(read.bytes().unwrap().to_vec(), big);
 }
 

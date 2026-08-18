@@ -13,8 +13,8 @@ use anyhow::{anyhow, Context, Result};
 use jj_lib::backend::{CommitId, CopyId, FileId, TreeValue};
 use jj_lib::commit::Commit;
 use jj_lib::merge::Merge;
-use jj_lib::object_id::ObjectId as _;
 use jj_lib::merged_tree_builder::MergedTreeBuilder;
+use jj_lib::object_id::ObjectId as _;
 use jj_lib::ref_name::WorkspaceNameBuf;
 use jj_lib::repo::{ReadonlyRepo, Repo as _, RepoLoader};
 use jj_lib::repo_path::RepoPathBuf;
@@ -47,8 +47,9 @@ impl Agent {
     pub fn join(cluster: &Cluster, name: &str) -> Result<Self> {
         let settings = super::test_settings()?;
         let path = cluster.workspace_root().join(name);
-        let path = init_tandem_workspace(&settings, &cluster.addr, name, &path)
-            .with_context(|| format!("initialize workspace {name}"))?;
+        let path =
+            init_tandem_workspace(&settings, &cluster.addr, &cluster.admin_token, name, &path)
+                .with_context(|| format!("initialize workspace {name}"))?;
         let repo_dir = dunce::canonicalize(path.join(".jj/repo"))?;
         Ok(Self {
             name: name.to_string(),
@@ -67,8 +68,12 @@ impl Agent {
     /// memory. A fresh loader means a fresh cache, and a read that really goes
     /// to the server.
     fn loader(&self) -> Result<RepoLoader> {
-        RepoLoader::init_from_file_system(&self.settings, &self.repo_dir, &tandem_factories_with_defaults())
-            .with_context(|| format!("{}: load the repo", self.name))
+        RepoLoader::init_from_file_system(
+            &self.settings,
+            &self.repo_dir,
+            &tandem_factories_with_defaults(),
+        )
+        .with_context(|| format!("{}: load the repo", self.name))
     }
 
     /// The repo as it is right now, which means as the server says it is.

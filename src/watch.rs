@@ -17,10 +17,10 @@ use crate::hex::to_hex;
 use crate::http_client::{build_http_client, ConnectorTarget, RepoCapability, TandemClient};
 use crate::wire;
 
-pub fn run_watch(server_addr: &str) -> Result<()> {
+pub fn run_watch(server_addr: &str, token: &str) -> Result<()> {
     // Refuse a server that cannot do this before opening a long-lived stream.
     let client =
-        TandemClient::connect_with_requirements(server_addr, &[RepoCapability::WatchHeads])
+        TandemClient::connect_with_requirements(server_addr, token, &[RepoCapability::WatchHeads])
             .with_context(|| format!("watch preflight failed for {server_addr}"))?;
 
     let target = ConnectorTarget::parse(server_addr)?;
@@ -29,6 +29,7 @@ pub fn run_watch(server_addr: &str) -> Result<()> {
     let events = http
         .get(format!("{}/api/events", target.base_url()))
         .header(reqwest::header::ACCEPT, "text/event-stream")
+        .bearer_auth(token)
         .send()
         .with_context(|| format!("watch connection failed for {server_addr}"))?;
 

@@ -44,7 +44,8 @@ fn two_agents_files_bookmarks_and_a_git_clone() {
     // that only handles nested paths passes without this.
     std::fs::write(agent_a_dir.join("README.md"), readme_content).unwrap();
 
-    let (describe_a, _) = run_tandem_resilient(&agent_a_dir, &["describe", "-m", "add auth module"], &home);
+    let (describe_a, _) =
+        run_tandem_resilient(&agent_a_dir, &["describe", "-m", "add auth module"], &home);
     common::assert_ok(&describe_a, "agent-a describe");
 
     let (new_a, _) = run_tandem_resilient(&agent_a_dir, &["new"], &home);
@@ -55,7 +56,8 @@ fn two_agents_files_bookmarks_and_a_git_clone() {
     std::fs::create_dir_all(&src_b).unwrap();
     std::fs::write(src_b.join("api.rs"), api_content).unwrap();
 
-    let (describe_b, _) = run_tandem_resilient(&agent_b_dir, &["describe", "-m", "add api module"], &home);
+    let (describe_b, _) =
+        run_tandem_resilient(&agent_b_dir, &["describe", "-m", "add api module"], &home);
     common::assert_ok(&describe_b, "agent-b describe");
 
     let (new_b, _) = run_tandem_resilient(&agent_b_dir, &["new"], &home);
@@ -121,9 +123,19 @@ fn two_agents_files_bookmarks_and_a_git_clone() {
     // ── Agent A creates a bookmark ────────────────────────────────────
     let (bookmark_create, _) = run_tandem_resilient(
         &agent_a_dir,
-        &["bookmark", "create", "feature-x", "-r", &commit_auth],
-        &home);
-    common::assert_ok(&bookmark_create, "agent-a bookmark create feature-x");
+        &[
+            "bookmark",
+            "create",
+            "agent-a/feature-x",
+            "-r",
+            &commit_auth,
+        ],
+        &home,
+    );
+    common::assert_ok(
+        &bookmark_create,
+        "agent-a bookmark create agent-a/feature-x",
+    );
 
     // ── Agent B sees the bookmark ─────────────────────────────────────
     settle_workspace(&agent_b_dir, &home);
@@ -131,8 +143,8 @@ fn two_agents_files_bookmarks_and_a_git_clone() {
     common::assert_ok(&bookmark_list, "agent-b bookmark list");
     let bookmark_text = common::stdout_str(&bookmark_list);
     assert!(
-        bookmark_text.contains("feature-x"),
-        "agent-b should see 'feature-x' bookmark\nbookmark list:\n{bookmark_text}"
+        bookmark_text.contains("agent-a/feature-x"),
+        "agent-b should see the 'agent-a/feature-x' bookmark\nbookmark list:\n{bookmark_text}"
     );
 
     // ── Server-side verification: both files exist ────────────────────

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use jj_lib::backend::CommitId;
 use jj_lib::ref_name::{WorkspaceName, WorkspaceNameBuf};
-use jj_lib::repo::{Repo as _, ReadonlyRepo, StoreFactories};
+use jj_lib::repo::{ReadonlyRepo, Repo as _, StoreFactories};
 use jj_lib::settings::UserSettings;
 use jj_lib::signing::Signer;
 use jj_lib::workspace::{default_working_copy_factory, Workspace};
@@ -20,21 +20,27 @@ use crate::{backend, op_heads_store, op_store};
 /// What `Workspace::init_with_factories` wants for each store it creates: a
 /// closure from settings and a store path to a boxed implementation. Naming the
 /// three shapes keeps the call site readable.
-type BackendInit<'a> = &'a dyn Fn(
-    &UserSettings,
-    &Path,
-) -> Result<Box<dyn jj_lib::backend::Backend>, jj_lib::backend::BackendInitError>;
+type BackendInit<'a> =
+    &'a dyn Fn(
+        &UserSettings,
+        &Path,
+    ) -> Result<Box<dyn jj_lib::backend::Backend>, jj_lib::backend::BackendInitError>;
 
-type OpStoreInit<'a> = &'a dyn Fn(
-    &UserSettings,
-    &Path,
-    jj_lib::op_store::RootOperationData,
-) -> Result<Box<dyn jj_lib::op_store::OpStore>, jj_lib::backend::BackendInitError>;
+type OpStoreInit<'a> =
+    &'a dyn Fn(
+        &UserSettings,
+        &Path,
+        jj_lib::op_store::RootOperationData,
+    )
+        -> Result<Box<dyn jj_lib::op_store::OpStore>, jj_lib::backend::BackendInitError>;
 
 type OpHeadsInit<'a> = &'a dyn Fn(
     &UserSettings,
     &Path,
-) -> Result<Box<dyn jj_lib::op_heads_store::OpHeadsStore>, jj_lib::backend::BackendInitError>;
+) -> Result<
+    Box<dyn jj_lib::op_heads_store::OpHeadsStore>,
+    jj_lib::backend::BackendInitError,
+>;
 
 /// Register the tandem backend, op store and op-heads store so that jj can
 /// load a repo whose store type is `tandem`.
@@ -71,13 +77,40 @@ pub fn tandem_factories() -> StoreFactories {
     factories
 }
 
+/// Turn whatever token the caller was given into the one this workspace keeps.
+///
+/// A person setting up a workspace has the admin token — that is the one the
+/// server printed when it started — so the first thing init does is trade it
+/// for a token scoped to this workspace, and that scoped one is what gets
+/// written to disk. Handing an admin token to a store trait would give every
+/// later `jj` command in the workspace the authority to move `main`.
+///
+/// A caller who already holds a workspace token is refused the trade, and
+/// keeps what it has: that is how a workspace is set up somewhere the admin
+/// token is deliberately not present.
+pub fn workspace_token(server_addr: &str, token: &str, workspace_name: &str) -> Result<String> {
+    let client = crate::http_client::TandemClient::connect(server_addr, token)
+        .with_context(|| format!("cannot reach the tandem server at {server_addr}"))?;
+    match client
+        .mint_workspace_token(workspace_name, None)
+        .context("cannot mint a workspace token")?
+    {
+        Some(minted) => Ok(minted.token),
+        None => Ok(token.to_string()),
+    }
+}
+
 /// Create a tandem workspace at `workspace_path` and give it a working-copy
 /// commit in the same context as the server's default workspace.
+///
+/// `token` is either the server's admin token or a token already scoped to
+/// this workspace; see [`workspace_token`].
 ///
 /// Returns the canonical path of the new workspace.
 pub fn init_tandem_workspace(
     settings: &UserSettings,
     server_addr: &str,
+    token: &str,
     workspace_name: &str,
     workspace_path: &Path,
 ) -> Result<PathBuf> {
@@ -88,15 +121,21 @@ pub fn init_tandem_workspace(
 
     let signer = Signer::from_settings(settings).context("cannot create signer")?;
 
+    let scoped_token = workspace_token(server_addr, token, workspace_name)?;
+
     let backend_addr = server_addr.to_string();
     let op_store_addr = server_addr.to_string();
     let op_heads_addr = server_addr.to_string();
     let op_heads_name = workspace_name.to_string();
+    let backend_token = scoped_token.clone();
+    let op_store_token = scoped_token.clone();
+    let op_heads_token = scoped_token.clone();
 
     let backend_init: BackendInit = &|_settings, store_path| {
         Ok(Box::new(backend::TandemBackend::init(
             store_path,
             &backend_addr,
+            &backend_token,
         )?))
     };
 
@@ -104,6 +143,7 @@ pub fn init_tandem_workspace(
         Ok(Box::new(op_store::TandemOpStore::init(
             store_path,
             &op_store_addr,
+            &op_store_token,
             root_data,
         )?))
     };
@@ -112,6 +152,7 @@ pub fn init_tandem_workspace(
         Ok(Box::new(op_heads_store::TandemOpHeadsStore::init(
             store_path,
             &op_heads_addr,
+            &op_heads_token,
             &op_heads_name,
         )?))
     };
@@ -138,28 +179,29 @@ pub fn init_tandem_workspace(
     // A new workspace starts where the server's default workspace already is,
     // not at the root commit — otherwise every agent would begin on its own
     // island and the first publish would look like a fork.
-    let source_parent_commits =
-        match head_repo.view().get_wc_commit_id(WorkspaceName::DEFAULT) {
-            Some(source_wc_commit_id) => {
-                let source_wc_commit = head_repo
-                    .store()
-                    .get_commit(source_wc_commit_id)
-                    .context("workspace init failed: cannot load source workspace commit")?;
-                let mut parents = Vec::new();
-                for parent_id in source_wc_commit.parent_ids() {
-                    let parent = head_repo.store().get_commit(parent_id).with_context(|| {
-                        format!("workspace init failed: cannot load source workspace parent {parent_id}")
-                    })?;
-                    parents.push(parent);
-                }
-                if parents.is_empty() {
-                    vec![head_repo.store().root_commit()]
-                } else {
-                    parents
-                }
+    let source_parent_commits = match head_repo.view().get_wc_commit_id(WorkspaceName::DEFAULT) {
+        Some(source_wc_commit_id) => {
+            let source_wc_commit = head_repo
+                .store()
+                .get_commit(source_wc_commit_id)
+                .context("workspace init failed: cannot load source workspace commit")?;
+            let mut parents = Vec::new();
+            for parent_id in source_wc_commit.parent_ids() {
+                let parent = head_repo.store().get_commit(parent_id).with_context(|| {
+                    format!(
+                        "workspace init failed: cannot load source workspace parent {parent_id}"
+                    )
+                })?;
+                parents.push(parent);
             }
-            None => vec![head_repo.store().root_commit()],
-        };
+            if parents.is_empty() {
+                vec![head_repo.store().root_commit()]
+            } else {
+                parents
+            }
+        }
+        None => vec![head_repo.store().root_commit()],
+    };
 
     let merged_tree = pollster::block_on(jj_lib::rewrite::merge_commit_trees(
         head_repo.as_ref(),

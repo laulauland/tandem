@@ -146,7 +146,10 @@ fn an_unclean_death_loses_nothing_that_was_acknowledged() {
     );
     let acked_version = harness.local_version();
     let acked_heads = harness.op_head_files();
-    assert!(!acked_heads.is_empty(), "the publish should have left heads");
+    assert!(
+        !acked_heads.is_empty(),
+        "the publish should have left heads"
+    );
 
     // SIGKILL: no shutdown hook, no flush, nothing written on the way out.
     harness.stop_server();
@@ -318,7 +321,10 @@ fn publishing_after_a_restart_does_not_rewalk_the_history() {
     harness.start_server_logging(Some(&log));
 
     common::assert_ok(
-        &harness.run(&ws, &["describe", "-m", "the first publish after a restart"]),
+        &harness.run(
+            &ws,
+            &["describe", "-m", "the first publish after a restart"],
+        ),
         "publish after restart",
     );
 

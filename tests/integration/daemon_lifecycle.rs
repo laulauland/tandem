@@ -93,10 +93,21 @@ fn a_signal_does_not_undo_the_work_before_it() {
     std::fs::create_dir_all(&workspace_dir).unwrap();
 
     let addr = common::free_addr();
-    let mut server = common::spawn_server_with_args(&server_repo, &addr, &[], &home);
+    let token = jj_tandem::auth::generate_admin_token();
+    let mut server = common::spawn_server_with_args_and_env(
+        &server_repo,
+        &addr,
+        &[],
+        &[("TANDEM_ADMIN_TOKEN", &token)],
+        &home,
+    );
     common::wait_for_server(&addr, &mut server);
 
-    let init = common::run_tandem_in(&workspace_dir, &["init", "--server", &addr, "."], &home);
+    let init = common::run_tandem_in(
+        &workspace_dir,
+        &["init", "--server", &addr, "--token", &token, "."],
+        &home,
+    );
     common::assert_ok(&init, "tandem init");
 
     std::fs::write(workspace_dir.join("test.txt"), b"shutdown test\n").unwrap();
@@ -112,15 +123,26 @@ fn a_signal_does_not_undo_the_work_before_it() {
     assert_eq!(cat.stdout, b"shutdown test\n");
 
     signal(&server, libc::SIGTERM);
-    let status = wait_for_exit(&mut server, Duration::from_secs(10), "SIGTERM after a round trip");
+    let status = wait_for_exit(
+        &mut server,
+        Duration::from_secs(10),
+        "SIGTERM after a round trip",
+    );
     assert!(
         status.success(),
         "the server should exit 0 after SIGTERM, got {:?}",
         status.code()
     );
 
-    // Restart and ask again: what was acknowledged is still there.
-    let mut server = common::spawn_server_with_args(&server_repo, &addr, &[], &home);
+    // Restart and ask again: what was acknowledged is still there, and so is
+    // the workspace's token — the same admin token still vouches for it.
+    let mut server = common::spawn_server_with_args_and_env(
+        &server_repo,
+        &addr,
+        &[],
+        &[("TANDEM_ADMIN_TOKEN", &token)],
+        &home,
+    );
     common::wait_for_server(&addr, &mut server);
     let _ = common::run_tandem_in(&workspace_dir, &["workspace", "update-stale"], &home);
     let cat = common::run_tandem_in(

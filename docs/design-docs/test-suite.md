@@ -79,6 +79,24 @@ the harness then restarts it over the same repo and bucket. From a client's
 point of view and from the invariants' point of view that is the same event as
 `process::exit(99)`, and unlike a real exit it can be driven from a test.
 
+## Authority
+
+Who may publish what is checked in three places, and the split follows the
+rules of thumb above:
+
+- `src/auth.rs` unit tests: a token is minted, read back, and refused once it
+  has expired or once a byte of it is changed. Pure, so it lives with the code.
+- `src/server/scope.rs` unit tests: the view-diff rules themselves, as views in
+  and a verdict out. No repo, no server, no HTTP.
+- `tests/integration/auth.rs`: the same rules as a person meets them — real
+  HTTP for the 401/403/409 answers, and real `tandem bookmark create` through a
+  real workspace for the "own namespace yes, `main` no" matrix, which is the
+  part only a subprocess can give.
+
+The DST covers the other half: every generated publish goes through the same
+scope check as a real one, so a rule that refuses honest work fails a seed
+rather than a hand-written case.
+
 ## Migration table
 
 Where each pre-restructure test went. Nothing in the left column is unpinned:

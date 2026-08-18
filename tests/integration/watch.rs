@@ -44,7 +44,7 @@ fn watch_registers_catches_up_and_then_notifies() {
     let mut watch_cmd = Command::new(common::tandem_bin());
     watch_cmd
         .current_dir(fx.path())
-        .args(["watch", "--server", &addr])
+        .args(["watch", "--server", &addr, "--token", fx.token()])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     common::isolate_env(&mut watch_cmd, &home);

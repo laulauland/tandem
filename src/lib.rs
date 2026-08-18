@@ -6,6 +6,7 @@
 //! subprocess in between, which is what makes a generated schedule replayable
 //! from its seed.
 
+pub mod auth;
 pub mod backend;
 pub mod cache;
 pub mod control;
@@ -17,6 +18,7 @@ pub mod object_store;
 pub mod op_heads_store;
 pub mod op_store;
 pub mod proto_convert;
+pub mod repo_link;
 pub mod server;
 pub mod wal;
 pub mod watch;

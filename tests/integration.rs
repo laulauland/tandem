@@ -8,6 +8,8 @@
 
 mod common;
 
+#[path = "integration/auth.rs"]
+mod auth;
 #[path = "integration/bucket_durability.rs"]
 mod bucket_durability;
 #[path = "integration/bucket_replay.rs"]

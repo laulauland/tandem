@@ -30,6 +30,9 @@ pub struct ServerFixture {
     /// fixture was built with `control_socket()`.
     pub socket: PathBuf,
     pub server: Child,
+    /// The token this server was started with. Every request in the suite
+    /// carries it, and `init_workspace` trades it for a scoped one.
+    pub admin_token: String,
     args: Vec<String>,
     env: Vec<(String, String)>,
     has_socket: bool,
@@ -56,6 +59,11 @@ impl ServerFixture {
         let dir = self.tmp.path().join(name);
         std::fs::create_dir_all(&dir).expect("create a directory under the fixture");
         dir
+    }
+
+    /// The admin token, for a test that talks to the API by hand.
+    pub fn token(&self) -> &str {
+        &self.admin_token
     }
 
     /// The control socket path as the CLI wants it.
@@ -85,7 +93,7 @@ impl ServerFixture {
         env: &[(&str, &str)],
     ) -> PathBuf {
         let dir = self.dir(dir_name);
-        let mut args = vec!["init", "--server", &self.addr];
+        let mut args = vec!["init", "--server", &self.addr, "--token", &self.admin_token];
         if let Some(name) = workspace {
             args.extend(["--workspace", name]);
         }
@@ -221,8 +229,14 @@ impl ServerBuilder {
             tmp.path().join("server.log")
         });
 
+        // Each fixture gets its own admin token, through the environment,
+        // which is where `tandem up` puts it too.
+        let admin_token = jj_tandem::auth::generate_admin_token();
+        let mut env = self.env;
+        env.push(("TANDEM_ADMIN_TOKEN".to_string(), admin_token.clone()));
+
         let addr = free_addr();
-        let mut server = spawn(&repo, &addr, &args, &self.env, &home, log.as_deref());
+        let mut server = spawn(&repo, &addr, &args, &env, &home, log.as_deref());
         wait_for_server(&addr, &mut server);
         if self.control_socket {
             wait_for_socket(&socket, Duration::from_secs(5));
@@ -235,8 +249,9 @@ impl ServerBuilder {
             addr,
             socket,
             server,
+            admin_token,
             args,
-            env: self.env,
+            env,
             has_socket: self.control_socket,
             log,
         }

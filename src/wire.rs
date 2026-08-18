@@ -177,6 +177,53 @@ pub struct ErrorBody {
     pub error: String,
 }
 
+// ─── Tokens and the writer role ───────────────────────────────────────────────
+
+/// `POST /api/tokens` — the admin token asking for a workspace-scoped one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MintTokenBody {
+    /// The workspace the new token speaks for.
+    pub workspace_id: String,
+    /// How long it should live. The server clamps it and answers with what it
+    /// actually granted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>,
+}
+
+/// What a mint answers with. The bearer appears here and nowhere else — the
+/// server writes it down nowhere, so this response is the only copy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenBody {
+    pub token: String,
+    pub workspace_id: String,
+    /// Seconds from the moment the server answered.
+    pub ttl_seconds: u64,
+}
+
+/// `POST /api/workspaces/{id}/writer` — claiming or renewing the writer role.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimWriterBody {
+    /// Who is asking. The same holder asking again is renewing; anybody else
+    /// is taking over, which only an expired claim allows.
+    pub holder: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>,
+}
+
+/// Who holds the writer role for a workspace, and for how much longer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterRoleBody {
+    pub workspace_id: String,
+    pub holder: String,
+    /// Seconds from the moment the server answered. A holder that wants to
+    /// keep the role asks again before this runs out.
+    pub expires_in_seconds: u64,
+}
+
 /// One wake-up on `/api/events`.
 ///
 /// The version is a hint about how far the server has moved, not the head

@@ -29,6 +29,9 @@ pub struct Cluster {
     pub addr: String,
     /// The faults this server is under. Shared with every restart of it.
     pub faults: Arc<FaultPoints>,
+    /// The token that mints workspace tokens. Fixed for the life of the
+    /// cluster, so that a restart keeps accepting what the agents hold.
+    pub admin_token: String,
     runtime: Runtime,
     running: Option<Running>,
 }
@@ -60,6 +63,7 @@ impl Cluster {
             bucket,
             addr: "127.0.0.1:0".to_string(),
             faults: FaultPoints::inert(),
+            admin_token: jj_tandem::auth::generate_admin_token(),
             runtime,
             running: None,
         };
@@ -77,6 +81,7 @@ impl Cluster {
             self.repo.clone(),
             false,
             Some(&self.bucket.to_string_lossy()),
+            &self.admin_token,
             Arc::clone(&self.faults),
         )
         .context("start the in-process server")?;

@@ -51,7 +51,8 @@ pub fn is_retriable_workspace_state(stderr: &str) -> bool {
     stderr.contains("working copy is stale")
         || stderr.contains("update-stale")
         || stderr.contains("seems to be a sibling of the working copy's operation")
-        || (stderr.contains("reconcile divergent operation heads") && stderr.contains("already exists"))
+        || (stderr.contains("reconcile divergent operation heads")
+            && stderr.contains("already exists"))
 }
 
 /// jj sometimes names the operation to integrate in its error. Take it.
@@ -92,7 +93,10 @@ pub fn first_commit_id(output: &Output, what: &str) -> String {
         .find(|line| !line.is_empty())
         .unwrap_or_default()
         .to_string();
-    assert!(!commit_id.is_empty(), "{what}: no commit id came back:\n{text}");
+    assert!(
+        !commit_id.is_empty(),
+        "{what}: no commit id came back:\n{text}"
+    );
     commit_id
 }
 
@@ -138,7 +142,12 @@ fn find_commit_id_maybe_ignoring_working_copy(
 /// change, and a fixed delay between the change and noticing it. The server
 /// already says when its heads move. Subscribing costs one connection, wakes
 /// on the event, and spawns a process only when there is a reason to.
-pub fn wait_for<T>(addr: &str, timeout: Duration, mut probe: impl FnMut() -> Option<T>) -> Option<T> {
+pub fn wait_for<T>(
+    addr: &str,
+    token: &str,
+    timeout: Duration,
+    mut probe: impl FnMut() -> Option<T>,
+) -> Option<T> {
     let deadline = Instant::now() + timeout;
 
     // Probe once: the thing may already have happened, and an event that has
@@ -150,6 +159,7 @@ pub fn wait_for<T>(addr: &str, timeout: Duration, mut probe: impl FnMut() -> Opt
     let stream = super::http_client()
         .get(format!("http://{addr}/api/events"))
         .header(reqwest::header::ACCEPT, "text/event-stream")
+        .bearer_auth(token)
         .timeout(timeout)
         .send();
 

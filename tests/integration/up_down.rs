@@ -252,9 +252,14 @@ fn up_roundtrip_down() {
         &home,
     );
     common::assert_ok(&up_out, "tandem up");
+    let token = common::admin_token_from_up(&up_out);
 
     // Init workspace
-    let init = common::run_tandem_in(&workspace_dir, &["init", "--server", &addr, "."], &home);
+    let init = common::run_tandem_in(
+        &workspace_dir,
+        &["init", "--server", &addr, "--token", &token, "."],
+        &home,
+    );
     common::assert_ok(&init, "tandem init");
 
     // Write a file

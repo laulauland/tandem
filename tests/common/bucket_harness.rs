@@ -27,6 +27,9 @@ pub struct BucketHarness {
     pub bucket_spec: String,
     pub addr: String,
     pub server: Option<Child>,
+    /// The token this harness's server accepts. Fixed for the harness, so a
+    /// restart keeps accepting the workspace tokens already on disk.
+    pub admin_token: String,
 }
 
 impl BucketHarness {
@@ -52,6 +55,7 @@ impl BucketHarness {
             bucket_spec,
             addr: free_addr(),
             server: None,
+            admin_token: jj_tandem::auth::generate_admin_token(),
         }
     }
 
@@ -67,8 +71,10 @@ impl BucketHarness {
         if log.is_some() {
             args.extend(["--log-level", "debug"]);
         }
-        let mut child =
-            spawn_server_with_args_env_and_log(&self.repo, &self.addr, &args, &[], &self.home, log);
+        let env = [("TANDEM_ADMIN_TOKEN", self.admin_token.as_str())];
+        let mut child = spawn_server_with_args_env_and_log(
+            &self.repo, &self.addr, &args, &env, &self.home, log,
+        );
         wait_for_server(&self.addr, &mut child);
         self.server = Some(child);
     }
@@ -85,7 +91,16 @@ impl BucketHarness {
         std::fs::create_dir_all(&dir).expect("create workspace dir");
         let out = run_tandem_in(
             &dir,
-            &["init", "--server", &self.addr, "--workspace", name, "."],
+            &[
+                "init",
+                "--server",
+                &self.addr,
+                "--token",
+                &self.admin_token,
+                "--workspace",
+                name,
+                ".",
+            ],
             &self.home,
         );
         assert_ok(&out, &format!("init {name}"));

@@ -242,7 +242,11 @@ pub fn run(schedule: &Schedule) -> Result<()> {
             owed_bytes.clear();
         }
 
-        oracle::check(&cluster, &agents, &format!("step {number} ({})", step.label()))?;
+        oracle::check(
+            &cluster,
+            &agents,
+            &format!("step {number} ({})", step.label()),
+        )?;
     }
 
     close(&mut cluster, &mut agents, &owed_bytes)

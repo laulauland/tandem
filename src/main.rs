@@ -33,6 +33,13 @@ ENVIRONMENT:
                             backend when connecting to a remote store
     TANDEM_WORKSPACE        Workspace name for `tandem init` when --workspace
                             is not provided
+    TANDEM_ADMIN_TOKEN      The token `tandem serve` and `tandem up` accept as
+                            the administrator's. It is what mints workspace
+                            tokens. Generated if unset — `tandem up` prints it,
+                            `tandem serve` logs it
+    TANDEM_TOKEN            The token `tandem init` and `tandem watch` present.
+                            Either the admin token or one already scoped to the
+                            workspace
     TANDEM_ENABLE_INTEGRATION_WORKSPACE
                             Set to 1/true to enable server-side integration
                             workspace recompute mode
@@ -52,7 +59,7 @@ SETUP:
     tandem serve --listen 0.0.0.0:13013 --repo /path/to/repo
 
     # Initialize a workspace backed by the server
-    tandem init --server server:13013 my-workspace
+    tandem init --server server:13013 --token <admin token> my-workspace
 
     # Use jj normally
     cd my-workspace
@@ -67,9 +74,9 @@ EXAMPLES:
 
 const INIT_AFTER_HELP: &str = "\
 EXAMPLES:
-    tandem init --server server:13013 my-workspace
-    tandem init --server server:13013 --workspace agent-a .
-    TANDEM_SERVER=server:13013 tandem init .";
+    tandem init --server server:13013 --token tdma_… my-workspace
+    tandem init --server server:13013 --token tdma_… --workspace agent-a .
+    TANDEM_SERVER=server:13013 TANDEM_TOKEN=tdma_… tandem init .";
 
 const SERVER_AFTER_HELP: &str = "\
 EXAMPLES:
@@ -125,6 +132,10 @@ enum Commands {
         /// Defaults to a directory inside the repo.
         #[arg(long, env = "TANDEM_BUCKET")]
         bucket: Option<String>,
+        /// The token that mints workspace tokens. Generated and logged if
+        /// omitted.
+        #[arg(long, env = "TANDEM_ADMIN_TOKEN")]
+        admin_token: Option<String>,
     },
 
     /// Initialize a tandem-backed workspace
@@ -136,6 +147,10 @@ enum Commands {
         /// Workspace name (auto-generated if omitted)
         #[arg(long, env = "TANDEM_WORKSPACE")]
         workspace: Option<String>,
+        /// The server's admin token, or a token already scoped to this
+        /// workspace
+        #[arg(long, env = "TANDEM_TOKEN")]
+        token: String,
         /// Workspace directory
         #[arg(default_value = ".")]
         path: String,
@@ -146,6 +161,9 @@ enum Commands {
         /// Server address (host:port)
         #[arg(long, env = "TANDEM_SERVER")]
         server: String,
+        /// A token the server accepts
+        #[arg(long, env = "TANDEM_TOKEN")]
+        token: String,
     },
 
     /// Start tandem server as a background daemon
@@ -171,6 +189,10 @@ enum Commands {
         /// Bucket holding the write-ahead log (see `tandem serve --bucket`)
         #[arg(long, env = "TANDEM_BUCKET")]
         bucket: Option<String>,
+        /// The token that mints workspace tokens. Generated and printed if
+        /// omitted.
+        #[arg(long, env = "TANDEM_ADMIN_TOKEN")]
+        admin_token: Option<String>,
     },
 
     /// Stop the tandem daemon
@@ -245,6 +267,7 @@ fn main() -> ExitCode {
             log_file,
             enable_integration_workspace,
             bucket,
+            admin_token,
         }) => run_serve(
             &listen,
             &repo,
@@ -255,16 +278,18 @@ fn main() -> ExitCode {
             log_file.as_deref(),
             enable_integration_workspace,
             bucket.as_deref(),
+            admin_token.as_deref(),
         ),
         Some(Commands::Init {
             server,
             workspace,
+            token,
             path,
         }) => {
             let workspace_name = resolve_init_workspace_name(workspace.as_deref());
-            run_tandem_init(&server, &workspace_name, &path)
+            run_tandem_init(&server, &token, &workspace_name, &path)
         }
-        Some(Commands::Watch { server }) => run_watch(&server),
+        Some(Commands::Watch { server, token }) => run_watch(&server, &token),
         Some(Commands::Up {
             repo,
             listen,
@@ -273,6 +298,7 @@ fn main() -> ExitCode {
             control_socket,
             enable_integration_workspace,
             bucket,
+            admin_token,
         }) => run_up(
             &repo,
             listen.as_deref(),
@@ -281,6 +307,7 @@ fn main() -> ExitCode {
             control_socket.as_deref(),
             enable_integration_workspace,
             bucket.as_deref(),
+            admin_token.as_deref(),
         ),
         Some(Commands::Down { control_socket }) => run_down(control_socket.as_deref()),
         Some(Commands::Server { command }) => match command {
@@ -299,8 +326,8 @@ fn main() -> ExitCode {
 
 // ─── Watch mode ───────────────────────────────────────────────────────────────
 
-fn run_watch(server_addr: &str) -> ExitCode {
-    if let Err(err) = watch::run_watch(server_addr) {
+fn run_watch(server_addr: &str, token: &str) -> ExitCode {
+    if let Err(err) = watch::run_watch(server_addr, token) {
         eprintln!("error: {err:#}");
         return ExitCode::FAILURE;
     }
@@ -319,6 +346,7 @@ fn run_serve(
     log_file: Option<&str>,
     enable_integration_workspace_flag: bool,
     bucket: Option<&str>,
+    admin_token: Option<&str>,
 ) -> ExitCode {
     // In daemon mode, stdout/stderr are already redirected to the log file
     // by `run_up` before spawning this process. Nothing extra needed here.
@@ -343,6 +371,7 @@ fn run_serve(
             enable_integration_workspace_flag,
         ),
         bucket: bucket.map(|s| s.to_string()),
+        admin_token: admin_token.map(|s| s.to_string()),
     };
 
     if let Err(err) = rt.block_on(server::run_serve(opts)) {
@@ -452,6 +481,7 @@ fn run_up(
     control_socket: Option<&str>,
     enable_integration_workspace_flag: bool,
     bucket: Option<&str>,
+    admin_token: Option<&str>,
 ) -> ExitCode {
     let sock_path = resolve_control_socket(control_socket);
     let enable_integration_workspace =
@@ -491,6 +521,14 @@ fn run_up(
             return ExitCode::FAILURE;
         }
     };
+    // The daemon needs an admin token, and whoever ran `tandem up` needs to
+    // know it — the log the daemon writes is not where a person looks. So the
+    // token is decided here, handed to the daemon, and printed below.
+    let admin_token = match admin_token {
+        Some(given) => given.to_string(),
+        None => jj_tandem::auth::generate_admin_token(),
+    };
+
     let mut cmd = std::process::Command::new(exe);
     cmd.args([
         "serve",
@@ -512,6 +550,9 @@ fn run_up(
     if let Some(bucket) = bucket {
         cmd.args(["--bucket", bucket]);
     }
+    // Through the environment, not the argument list: a command line is
+    // readable by every process on the machine, and this is a secret.
+    cmd.env("TANDEM_ADMIN_TOKEN", &admin_token);
 
     // Redirect stdout/stderr to log file for daemon
     let log_file_handle = match std::fs::File::create(&log_file_path) {
@@ -555,6 +596,7 @@ fn run_up(
                     if status.running {
                         write_last_listen(repo, &listen_addr);
                         println!("tandem running on {listen_addr}, PID {pid}");
+                        println!("admin token: {admin_token}");
                         return ExitCode::SUCCESS;
                     }
                 }
@@ -746,7 +788,12 @@ fn load_user_settings_from_environment() -> Result<jj_lib::settings::UserSetting
         .map_err(|e| format!("cannot create settings: {e}"))
 }
 
-fn run_tandem_init(server_addr: &str, workspace_name: &str, workspace_path_str: &str) -> ExitCode {
+fn run_tandem_init(
+    server_addr: &str,
+    token: &str,
+    workspace_name: &str,
+    workspace_path_str: &str,
+) -> ExitCode {
     let settings = match load_user_settings_from_environment() {
         Ok(s) => s,
         Err(e) => {
@@ -758,6 +805,7 @@ fn run_tandem_init(server_addr: &str, workspace_name: &str, workspace_path_str: 
     match workspace_init::init_tandem_workspace(
         &settings,
         server_addr,
+        token,
         workspace_name,
         Path::new(workspace_path_str),
     ) {
@@ -795,4 +843,3 @@ fn run_jj() -> ExitCode {
         .run()
         .into()
 }
-

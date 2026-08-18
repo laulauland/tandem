@@ -34,10 +34,11 @@ cargo build --release
 ```bash
 # On your server (VPS, or localhost for testing)
 tandem up --repo ~/project --listen 0.0.0.0:13013
+# up prints the admin token it generated; pass --admin-token to choose one
 tandem server status
 
 # On each agent's machine
-tandem init --server=your-server:13013 ~/work
+tandem init --server=your-server:13013 --token=<admin token> ~/work
 cd ~/work
 echo 'pub fn auth() {}' > auth.rs
 tandem new -m "feat: add auth"
@@ -60,24 +61,28 @@ The default setup. Server on a VPS, agents connect from their machines.
 # SSH to your VPS, install tandem
 cargo install jj-tandem
 
-# Start the server
+# Start the server. It prints an admin token — keep it, because every request
+# to the server carries a token and this is the one that mints the others.
 tandem up --repo /srv/project --listen 0.0.0.0:13013
+
+# Or choose the token yourself, so it survives a restart unchanged:
+tandem up --repo /srv/project --listen 0.0.0.0:13013 --admin-token "$TANDEM_ADMIN_TOKEN"
 
 # Verify
 tandem server status
 ```
 
-On agent machines:
+On agent machines (`<admin token>` is the one the server printed):
 
 ```bash
 # Agent A
-tandem init --server=your-vps:13013 ~/work
+tandem init --server=your-vps:13013 --token=<admin token> ~/work
 cd ~/work
 echo 'pub fn auth(token: &str) -> bool { !token.is_empty() }' > auth.rs
 tandem new -m "feat: add auth module"
 
 # Agent B (different machine)
-tandem init --server=your-vps:13013 --workspace=agent-b ~/work
+tandem init --server=your-vps:13013 --token=<admin token> --workspace=agent-b ~/work
 cd ~/work
 tandem log                                     # sees Agent A's commit
 tandem file show -r <change-id> auth.rs        # reads Agent A's file
@@ -105,11 +110,11 @@ Server and agents on the same machine, different directories.
 tandem up --repo /tmp/project --listen 127.0.0.1:13013
 
 # Agent A
-tandem init --server=127.0.0.1:13013 /tmp/agent-a
+tandem init --server=127.0.0.1:13013 --token=<admin token> /tmp/agent-a
 cd /tmp/agent-a && echo 'hello' > file.txt && tandem new -m "agent A"
 
 # Agent B
-tandem init --server=127.0.0.1:13013 --workspace=agent-b /tmp/agent-b
+tandem init --server=127.0.0.1:13013 --token=<admin token> --workspace=agent-b /tmp/agent-b
 cd /tmp/agent-b && tandem log   # sees agent A's commit
 
 # Done
@@ -127,12 +132,14 @@ docker network create tandem-net
 # Server container
 docker run -d --name tandem-server --network tandem-net \
   -v $(pwd)/target/release/tandem:/usr/local/bin/tandem \
+  -e TANDEM_ADMIN_TOKEN=dev-admin-token \
   debian:trixie-slim \
   tandem serve --listen 0.0.0.0:13013 --repo /srv/project
 
 # Agent container
 docker run --rm --network tandem-net \
   -v $(pwd)/target/release/tandem:/usr/local/bin/tandem \
+  -e TANDEM_TOKEN=dev-admin-token \
   debian:trixie-slim bash -c '
     tandem init --server=tandem-server:13013 /work
     cd /work
@@ -155,12 +162,12 @@ time via the shared store.
 tandem up --repo /srv/project --listen 0.0.0.0:13013
 
 # Agent 1
-tandem init --server=your-vps:13013 --workspace=backend ~/work-backend
+tandem init --server=your-vps:13013 --token=<admin token> --workspace=backend ~/work-backend
 cd ~/work-backend
 claude --prompt "Implement auth module in src/auth.rs. Use tandem for version control."
 
 # Agent 2
-tandem init --server=your-vps:13013 --workspace=frontend ~/work-frontend
+tandem init --server=your-vps:13013 --token=<admin token> --workspace=frontend ~/work-frontend
 cd ~/work-frontend
 claude --prompt "Implement UI. Run tandem log to see other agents' work."
 ```
@@ -180,6 +187,50 @@ Use tandem instead of git for all version control:
 Before starting work, run tandem log to see what others have done.
 Do NOT use git commands — this repo uses tandem.
 ```
+
+---
+
+## Tokens and the writer role
+
+Every request to the server carries a bearer token. There are two kinds.
+
+**The admin token** speaks for the whole repo. `tandem up` generates one and
+prints it, or you give it one with `--admin-token` / `TANDEM_ADMIN_TOKEN`. It
+is the only token that mints others:
+
+```bash
+curl -s http://your-vps:13013/api/tokens \
+  -H "Authorization: Bearer $TANDEM_ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"workspaceId":"agent-a","ttlSeconds":86400}'
+# => {"token":"tdmw_…","workspaceId":"agent-a","ttlSeconds":86400}
+```
+
+**A workspace token** speaks for one workspace, and expires. It may read
+everything, add commits, move its own workspace pointer, and move bookmarks
+under its own `agent-a/` prefix. Moving `main`, or another workspace's pointer,
+or a bookmark in another workspace's namespace, is refused with a 403 that
+names what it refused. The check is made on what a publish changes in the view,
+so no operation is half-applied: the whole publish is taken or none of it is.
+
+Tokens are not written down on the server. They are signed by the admin token,
+so a restart with the same admin token keeps accepting them — and rotating the
+admin token invalidates every workspace token at once. That is the only way to
+revoke one before it expires, so keep the lifetimes short.
+
+**The writer role** is how several processes for one workspace agree on which
+of them writes. A client claims it, and keeps it by asking again:
+
+```bash
+curl -s http://your-vps:13013/api/workspaces/agent-a/writer \
+  -H "Authorization: Bearer $TANDEM_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"holder":"daemon-1","ttlSeconds":30}'
+```
+
+While it is held, a claim by anybody else answers 409 and names the holder.
+Left unrenewed, the claim runs out and the next client gets it. The role is an
+agreement between well-behaved clients, not a lock: it does not gate publishes.
 
 ---
 
@@ -279,18 +330,19 @@ tandem serve --listen <addr> --repo <path> [--log-level <level>] [--log-format <
 ### Workspace setup
 
 ```
-tandem init --server <addr> [--workspace <name>] [path]
+tandem init --server <addr> --token <token> [--workspace <name>] [path]
 ```
 
 Initializes a tandem-backed workspace. Creates the directory, registers the
 tandem backend, and connects to the server. `--workspace` names the workspace.
 If omitted, tandem auto-generates a unique workspace name to avoid cross-device
-workspace collisions by default.
+workspace collisions by default. `--token` is the bearer the workspace presents
+on every request; it can come from `TANDEM_TOKEN` instead.
 
 ### Watch
 
 ```
-tandem watch --server <addr>
+tandem watch --server <addr> --token <token>
 ```
 
 Streams head change notifications from the server. Useful for triggering
@@ -320,6 +372,8 @@ the remote store.
 | Variable | Purpose |
 |----------|---------|
 | `TANDEM_SERVER` | Server address — fallback for `--server` |
+| `TANDEM_ADMIN_TOKEN` | The token `tandem serve` and `tandem up` accept as the admin. If unset, `tandem up` generates one and prints it. |
+| `TANDEM_TOKEN` | The token `tandem init` and `tandem watch` present — fallback for `--token`. |
 | `TANDEM_WORKSPACE` | Workspace name fallback for `tandem init` when `--workspace` is not provided. |
 | `TANDEM_LISTEN` | Listen address fallback for `tandem up --listen`. |
 | `TANDEM_ENABLE_INTEGRATION_WORKSPACE` | Set to `1`/`true` to enable integration workspace mode when `--enable-integration-workspace` is not passed. |
@@ -462,7 +516,8 @@ Cross-machine tested with Docker containers — see `qa/v1/cross-machine-report.
 ## Known limitations
 
 - **No TLS** — connections are plaintext. Use SSH tunnels or a VPN for untrusted networks.
-- **No auth** — anyone who can reach the port can read/write the repo. Firewall the port and use SSH tunnels for access.
+- **Tokens travel in the clear** — every request is authenticated, but without TLS a bearer is readable by anything on the path. Tunnel or terminate TLS in front on untrusted networks.
+- **No revocation** — a workspace token stands until it expires. Rotating the admin token is what cancels the outstanding ones, and it cancels all of them.
 - **Plain HTTP only (today)** — store calls run over HTTP, so a sandbox that allows outbound HTTP can reach a server directly. TLS termination is not built in yet; put a reverse proxy in front, or tunnel, when the path is untrusted.
 - **Unix only for daemon management** — `tandem up`, `tandem down`, `tandem server status`, and `tandem server logs` use Unix domain sockets. macOS and Linux only, not Windows. (`tandem serve` works everywhere.)
 - **No static binary yet** — requires glibc 2.39+. Use matching distro or build locally.
@@ -474,7 +529,8 @@ Cross-machine tested with Docker containers — see `qa/v1/cross-machine-report.
 - **Back up the server repo directory** — it's the source of truth.
 - **Git credentials on the server** — the server needs SSH keys or tokens for `jj git push` / `jj git fetch`.
 - **Monitor disk space** — all agent objects land on the server.
-- **Firewall the port** — no auth means network-level access control is your only defense.
+- **Keep the admin token off the command line** — a command line is readable by every process on the machine. Pass it in `TANDEM_ADMIN_TOKEN`.
+- **Firewall the port** — the tokens are plaintext on the wire, so network-level access control is still worth having.
 
 ## Project structure
 

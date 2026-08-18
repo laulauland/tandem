@@ -103,10 +103,8 @@ impl FaultPoints {
     /// attempts of a retried publish — the window in which a drained staging
     /// buffer can lose objects.
     pub fn stage_object_on_index_conflict(&self, content: Option<Vec<u8>>) {
-        *self
-            .object_on_index_conflict
-            .lock()
-            .expect("fault lock") = content.filter(|bytes| !bytes.is_empty());
+        *self.object_on_index_conflict.lock().expect("fault lock") =
+            content.filter(|bytes| !bytes.is_empty());
     }
 
     pub(super) fn object_for_index_conflict(&self) -> Option<Vec<u8>> {

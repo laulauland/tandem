@@ -20,6 +20,7 @@ use tokio::io::AsyncRead;
 
 use crate::http_client::TandemClient;
 use crate::proto_convert;
+use crate::repo_link;
 // Object kind discriminants. `wire` owns them because they also name the
 // `/api/objects/{kind}` path segments and the batch-frame records.
 use crate::wire::{KIND_COMMIT, KIND_FILE, KIND_SYMLINK, KIND_TREE};
@@ -42,35 +43,18 @@ impl fmt::Debug for TandemBackend {
     }
 }
 
-/// Read server address from env var or file.
-fn read_server_address(store_path: &Path) -> Result<String, BackendLoadError> {
-    // Try TANDEM_SERVER env var first
-    if let Ok(addr) = std::env::var("TANDEM_SERVER") {
-        if !addr.is_empty() {
-            return Ok(addr);
-        }
-    }
-    // Fall back to file
-    let addr_path = store_path.join("server_address");
-    std::fs::read_to_string(&addr_path).map_err(|e| {
-        BackendLoadError(
-            anyhow::anyhow!(
-                "cannot read tandem server address from {} or TANDEM_SERVER env: {e}",
-                addr_path.display()
-            )
-            .into(),
-        )
-    })
-}
-
 impl TandemBackend {
     /// Initialize a new tandem backend (called during workspace init).
-    pub fn init(store_path: &Path, server_addr: &str) -> Result<Self, BackendInitError> {
-        // Write server address for future loads
-        std::fs::write(store_path.join("server_address"), server_addr)
-            .map_err(|e| BackendInitError(e.into()))?;
+    pub fn init(
+        store_path: &Path,
+        server_addr: &str,
+        token: &str,
+    ) -> Result<Self, BackendInitError> {
+        // Write the link for future loads.
+        repo_link::write_link(store_path, server_addr, token)?;
 
-        let client = TandemClient::connect(server_addr).map_err(|e| BackendInitError(e.into()))?;
+        let client =
+            TandemClient::connect(server_addr, token).map_err(|e| BackendInitError(e.into()))?;
         let info = client.repo_info().clone();
 
         Ok(Self {
@@ -85,8 +69,10 @@ impl TandemBackend {
 
     /// Load an existing tandem backend from `store_path`.
     pub fn load(_settings: &UserSettings, store_path: &Path) -> Result<Self, BackendLoadError> {
-        let server_addr = read_server_address(store_path)?;
-        let client = TandemClient::connect(&server_addr).map_err(|e| BackendLoadError(e.into()))?;
+        let server_addr = repo_link::read_server_address(store_path)?;
+        let token = repo_link::read_token(store_path)?;
+        let client =
+            TandemClient::connect(&server_addr, &token).map_err(|e| BackendLoadError(e.into()))?;
         let info = client.repo_info().clone();
 
         Ok(Self {

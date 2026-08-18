@@ -140,6 +140,10 @@ pub enum PrefixResult {
 pub struct TandemClient {
     http: reqwest::blocking::Client,
     target: ConnectorTarget,
+    /// The bearer every request carries. A server refuses a request without
+    /// one, the handshake included, so this is set before the first byte
+    /// leaves rather than being attached by whoever remembers to.
+    token: String,
     repo_info: RepoInfoResponse,
     injected_rtt: Duration,
     /// Where an id that has already been fetched on this machine comes from
@@ -199,15 +203,21 @@ pub fn bench_injected_rtt_delay() -> Duration {
 }
 
 impl TandemClient {
-    pub fn connect(addr: &str) -> Result<Arc<Self>> {
-        Self::connect_with_requirements(addr, &[])
+    pub fn connect(addr: &str, token: &str) -> Result<Arc<Self>> {
+        Self::connect_with_requirements(addr, token, &[])
     }
 
     pub fn connect_with_requirements(
         addr: &str,
+        token: &str,
         required_capabilities: &[RepoCapability],
     ) -> Result<Arc<Self>> {
-        Self::connect_with_cache(addr, required_capabilities, DiskCache::from_environment())
+        Self::connect_with_cache(
+            addr,
+            token,
+            required_capabilities,
+            DiskCache::from_environment(),
+        )
     }
 
     /// The same connection with a cache the caller chose, rather than the one
@@ -215,6 +225,7 @@ impl TandemClient {
     /// without writing to a process-wide environment.
     pub fn connect_with_cache(
         addr: &str,
+        token: &str,
         required_capabilities: &[RepoCapability],
         cache: Option<Arc<DiskCache>>,
     ) -> Result<Arc<Self>> {
@@ -224,6 +235,7 @@ impl TandemClient {
         let client = TandemClient {
             http,
             target,
+            token: token.to_string(),
             // Filled in by the handshake immediately below.
             repo_info: RepoInfoResponse::default(),
             injected_rtt: bench_injected_rtt_delay(),
@@ -279,6 +291,7 @@ impl TandemClient {
             std::thread::sleep(self.injected_rtt);
         }
         let response = request
+            .bearer_auth(&self.token)
             .send()
             .with_context(|| format!("request to tandem server {} failed", self.server_addr()))?;
         Ok(response)
@@ -393,6 +406,36 @@ impl TandemClient {
     #[allow(dead_code)]
     pub fn get_repo_info(&self) -> Result<RepoInfoResponse> {
         Ok(self.repo_info.clone())
+    }
+
+    /// The bearer this client presents, so that a caller holding one client
+    /// can hand the same credential to the next one it builds.
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
+    /// Ask for a workspace-scoped bearer.
+    ///
+    /// `Ok(None)` means the server refused this client's own token for the
+    /// job, which is what a workspace token gets: only the admin token mints.
+    /// The caller reads that as "what I am holding is already the workspace
+    /// token", which is what makes `tandem init --token` take either one.
+    pub fn mint_workspace_token(
+        &self,
+        workspace_id: &str,
+        ttl_seconds: Option<u64>,
+    ) -> Result<Option<wire::TokenBody>> {
+        let request = wire::MintTokenBody {
+            workspace_id: workspace_id.to_string(),
+            ttl_seconds,
+        };
+        let response = self.send(self.http.post(self.url("/api/tokens")).json(&request))?;
+        if response.status() == reqwest::StatusCode::FORBIDDEN {
+            return Ok(None);
+        }
+        let response = Self::check(response, "mint token")?;
+        let body: wire::TokenBody = response.json().context("decode minted token")?;
+        Ok(Some(body))
     }
 
     pub fn get_object(&self, kind: u16, id: &[u8]) -> Result<Vec<u8>> {
@@ -722,6 +765,7 @@ mod tests {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
     use std::sync::atomic::AtomicBool;
+    use std::sync::Mutex;
 
     use crate::wire::KIND_FILE;
 
@@ -733,9 +777,16 @@ mod tests {
     // client's own bookkeeping. Fifty lines of HTTP/1.1 is cheaper than a
     // mocking crate, and the tree has no mocking crate for a reason.
 
+    /// What every request in these tests presents. The counting server does
+    /// not check it — the server's own tests do that — but it records it, so
+    /// that "the client sends the token it was given" is a fact a test can
+    /// state at the far end of a socket.
+    const TEST_TOKEN: &str = "tdmw_testtoken";
+
     struct CountingServer {
         addr: String,
         requests: Arc<AtomicU64>,
+        authorizations: Arc<Mutex<Vec<String>>>,
         stop: Arc<AtomicBool>,
         acceptor: Option<std::thread::JoinHandle<()>>,
     }
@@ -749,19 +800,24 @@ mod tests {
                 .expect("nonblocking listener");
 
             let requests = Arc::new(AtomicU64::new(0));
+            let authorizations = Arc::new(Mutex::new(Vec::new()));
             let stop = Arc::new(AtomicBool::new(false));
             let objects = Arc::new(objects);
 
             let acceptor = {
                 let requests = Arc::clone(&requests);
+                let authorizations = Arc::clone(&authorizations);
                 let stop = Arc::clone(&stop);
                 std::thread::spawn(move || {
                     while !stop.load(Ordering::Relaxed) {
                         match listener.accept() {
                             Ok((stream, _)) => {
                                 let requests = Arc::clone(&requests);
+                                let authorizations = Arc::clone(&authorizations);
                                 let objects = Arc::clone(&objects);
-                                std::thread::spawn(move || serve(stream, requests, objects));
+                                std::thread::spawn(move || {
+                                    serve(stream, requests, authorizations, objects)
+                                });
                             }
                             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                                 std::thread::sleep(Duration::from_millis(2));
@@ -775,6 +831,7 @@ mod tests {
             Self {
                 addr,
                 requests,
+                authorizations,
                 stop,
                 acceptor: Some(acceptor),
             }
@@ -782,6 +839,10 @@ mod tests {
 
         fn requests(&self) -> u64 {
             self.requests.load(Ordering::Relaxed)
+        }
+
+        fn authorizations(&self) -> Vec<String> {
+            self.authorizations.lock().expect("authorizations").clone()
         }
     }
 
@@ -797,6 +858,7 @@ mod tests {
     fn serve(
         stream: std::net::TcpStream,
         requests: Arc<AtomicU64>,
+        authorizations: Arc<Mutex<Vec<String>>>,
         objects: Arc<HashMap<String, Vec<u8>>>,
     ) {
         stream
@@ -829,6 +891,16 @@ mod tests {
                 let header = header.trim_end();
                 if header.is_empty() {
                     break;
+                }
+                if let Some(value) = header
+                    .split_once(':')
+                    .filter(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+                    .map(|(_, value)| value.trim())
+                {
+                    authorizations
+                        .lock()
+                        .expect("authorizations")
+                        .push(value.to_string());
                 }
                 if let Some(value) = header
                     .split_once(':')
@@ -924,8 +996,9 @@ mod tests {
         )]));
         let tmp = tempfile::tempdir().expect("temp dir");
 
-        let client = TandemClient::connect_with_cache(&server.addr, &[], cache_at(tmp.path()))
-            .expect("connect");
+        let client =
+            TandemClient::connect_with_cache(&server.addr, TEST_TOKEN, &[], cache_at(tmp.path()))
+                .expect("connect");
         assert_eq!(client.requests_sent(), 1, "the handshake, and nothing else");
 
         let cold = client.get_object(KIND_FILE, &id).expect("cold read");
@@ -955,16 +1028,18 @@ mod tests {
         )]));
         let tmp = tempfile::tempdir().expect("temp dir");
 
-        let first = TandemClient::connect_with_cache(&server.addr, &[], cache_at(tmp.path()))
-            .expect("connect the first client");
+        let first =
+            TandemClient::connect_with_cache(&server.addr, TEST_TOKEN, &[], cache_at(tmp.path()))
+                .expect("connect the first client");
         assert_eq!(
             first.get_object(KIND_FILE, &id).expect("cold read"),
             payload
         );
         let after_warming = server.requests();
 
-        let second = TandemClient::connect_with_cache(&server.addr, &[], cache_at(tmp.path()))
-            .expect("connect the second client");
+        let second =
+            TandemClient::connect_with_cache(&server.addr, TEST_TOKEN, &[], cache_at(tmp.path()))
+                .expect("connect the second client");
         assert_eq!(
             second.get_object(KIND_FILE, &id).expect("warm read"),
             payload
@@ -991,8 +1066,9 @@ mod tests {
         )]));
         let tmp = tempfile::tempdir().expect("temp dir");
 
-        let client = TandemClient::connect_with_cache(&server.addr, &[], cache_at(tmp.path()))
-            .expect("connect");
+        let client =
+            TandemClient::connect_with_cache(&server.addr, TEST_TOKEN, &[], cache_at(tmp.path()))
+                .expect("connect");
         assert_eq!(
             client.get_object(KIND_FILE, &id).expect("cold read"),
             payload
@@ -1037,8 +1113,9 @@ mod tests {
         let server = CountingServer::start(HashMap::new());
         let tmp = tempfile::tempdir().expect("temp dir");
 
-        let client = TandemClient::connect_with_cache(&server.addr, &[], cache_at(tmp.path()))
-            .expect("connect");
+        let client =
+            TandemClient::connect_with_cache(&server.addr, TEST_TOKEN, &[], cache_at(tmp.path()))
+                .expect("connect");
         assert!(client.get_object(KIND_FILE, &id).is_err());
         assert!(
             files_under(tmp.path()).is_empty(),
@@ -1063,7 +1140,8 @@ mod tests {
             payload.clone(),
         )]));
 
-        let client = TandemClient::connect_with_cache(&server.addr, &[], None).expect("connect");
+        let client =
+            TandemClient::connect_with_cache(&server.addr, TEST_TOKEN, &[], None).expect("connect");
         assert_eq!(
             client.get_object(KIND_FILE, &id).expect("first read"),
             payload
@@ -1101,6 +1179,29 @@ mod tests {
                 .contains("unsupported tandem transport scheme"),
             "unexpected error: {err:#}"
         );
+    }
+
+    #[test]
+    fn every_request_carries_the_token_the_client_was_given() {
+        let id = vec![0x01, 0x02];
+        let server = CountingServer::start(HashMap::from([(
+            format!("/api/objects/file/{}", to_hex(&id)),
+            b"payload".to_vec(),
+        )]));
+
+        let client =
+            TandemClient::connect_with_cache(&server.addr, TEST_TOKEN, &[], None).expect("connect");
+        client.get_object(KIND_FILE, &id).expect("read");
+
+        let seen = server.authorizations();
+        assert_eq!(
+            seen.len(),
+            2,
+            "the handshake and the read, both authorized: {seen:?}"
+        );
+        for header in seen {
+            assert_eq!(header, format!("Bearer {TEST_TOKEN}"));
+        }
     }
 
     #[test]

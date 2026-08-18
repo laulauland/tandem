@@ -65,7 +65,11 @@ impl Lines {
     ///
     /// Lines that do not match are kept, so a test can assert on everything it
     /// saw when something goes wrong.
-    pub fn wait_for(&mut self, timeout: Duration, matches: impl Fn(&str) -> bool) -> Option<String> {
+    pub fn wait_for(
+        &mut self,
+        timeout: Duration,
+        matches: impl Fn(&str) -> bool,
+    ) -> Option<String> {
         let deadline = Instant::now() + timeout;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());

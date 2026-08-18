@@ -29,6 +29,7 @@ pub struct ApiHeads {
 pub fn api_heads(cluster: &Cluster) -> Result<ApiHeads> {
     let body: jj_tandem::wire::HeadsBody = http_client()?
         .get(format!("{}/api/heads", cluster.base_url()))
+        .bearer_auth(&cluster.admin_token)
         .send()
         .context("GET /api/heads")?
         .error_for_status()
@@ -49,6 +50,7 @@ pub fn api_object(cluster: &Cluster, kind: &str, id_hex: &str) -> Result<Vec<u8>
             "{}/api/objects/{kind}/{id_hex}",
             cluster.base_url()
         ))
+        .bearer_auth(&cluster.admin_token)
         .send()
         .context("GET /api/objects")?
         .error_for_status()
@@ -132,7 +134,9 @@ pub fn assert_bytes_in_some_wal_entry(cluster: &Cluster, bytes: &[u8], what: &st
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     !needle.is_empty()
         && needle.len() <= haystack.len()
-        && haystack.windows(needle.len()).any(|window| window == needle)
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
 }
 
 /// Assert every invariant. `context` names the step that led here, so a
@@ -205,8 +209,9 @@ fn check_inner(cluster: &Cluster, agents: &[Agent]) -> Result<()> {
     let settings = super::test_settings()?;
     let repo_dir = dunce::canonicalize(cluster.repo.join(".jj/repo"))
         .context("canonicalize the server's .jj/repo")?;
-    let loader = RepoLoader::init_from_file_system(&settings, &repo_dir, &StoreFactories::default())
-        .context("load the server's repo")?;
+    let loader =
+        RepoLoader::init_from_file_system(&settings, &repo_dir, &StoreFactories::default())
+            .context("load the server's repo")?;
     let jj_heads: BTreeSet<String> = loader
         .op_heads_store()
         .get_op_heads()

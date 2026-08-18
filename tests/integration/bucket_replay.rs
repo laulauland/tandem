@@ -215,8 +215,11 @@ fn destroying_the_server_repo_and_reupping_replays_the_history() {
 
     // And the server still serves: a client publishes onto the replayed state.
     let _ = harness.run(&published.a, &["workspace", "update-stale"]);
-    std::fs::write(published.a.join("after-replay.txt"), "written after replay\n")
-        .expect("write file");
+    std::fs::write(
+        published.a.join("after-replay.txt"),
+        "written after replay\n",
+    )
+    .expect("write file");
     common::assert_ok(
         &harness.run(&published.a, &["describe", "-m", "after the replay"]),
         "publish onto the materialized repo",
@@ -326,6 +329,9 @@ fn up_on_an_empty_directory_materializes_and_serves() {
     let sock = common::control_socket_path(tmp.path());
     let sock_str = sock.to_str().unwrap();
     let addr = common::free_addr();
+    // Fixed across both lives of the daemon: the workspace keeps the token it
+    // was given, and a restart has to keep accepting it.
+    let admin_token = jj_tandem::auth::generate_admin_token();
 
     let up = |repo: &Path| {
         common::run_tandem_in(
@@ -342,6 +348,8 @@ fn up_on_an_empty_directory_materializes_and_serves() {
                 tmp.path().join("daemon.log").to_str().unwrap(),
                 "--bucket",
                 &bucket_spec,
+                "--admin-token",
+                &admin_token,
             ],
             &home,
         )
@@ -382,7 +390,16 @@ fn up_on_an_empty_directory_materializes_and_serves() {
     common::assert_ok(
         &common::run_tandem_in(
             &ws,
-            &["init", "--server", &addr, "--workspace", "agent-a", "."],
+            &[
+                "init",
+                "--server",
+                &addr,
+                "--token",
+                &admin_token,
+                "--workspace",
+                "agent-a",
+                ".",
+            ],
             &home,
         ),
         "tandem init",

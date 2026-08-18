@@ -22,10 +22,11 @@ use tempfile::TempDir;
 /// and asks only when there is a reason to.
 fn wait_for_integration_commit(
     addr: &str,
+    token: &str,
     workspace_dir: &std::path::Path,
     home: &std::path::Path,
 ) -> String {
-    let found = common::workspace::wait_for(addr, Duration::from_secs(15), || {
+    let found = common::workspace::wait_for(addr, token, Duration::from_secs(15), || {
         let out = common::run_tandem_in(
             workspace_dir,
             &[
@@ -141,11 +142,7 @@ fn flag_off_no_integration_bookmark() {
 fn flag_on_creates_integration_bookmark_and_status() {
     let mut fx = ServerFixture::builder()
         .control_socket()
-        .args(&[
-            "--enable-integration-workspace",
-            "--log-level",
-            "error",
-        ])
+        .args(&["--enable-integration-workspace", "--log-level", "error"])
         .start();
     let home = fx.home.clone();
 
@@ -157,7 +154,7 @@ fn flag_on_creates_integration_bookmark_and_status() {
     );
 
     write_single_commit(&ws, &home);
-    let integration_commit = wait_for_integration_commit(&fx.addr, &ws, &home);
+    let integration_commit = wait_for_integration_commit(&fx.addr, fx.token(), &ws, &home);
     assert!(!integration_commit.is_empty());
     let integration_author_email = commit_author_email(&ws, &integration_commit, &home);
     assert_eq!(

@@ -218,7 +218,9 @@ impl Server {
         }
         match self.pending_blobs.lock() {
             Ok(mut pending) => pending.restage(blobs),
-            Err(err) => tracing::error!(error = %err, "cannot restage objects after a failed WAL write"),
+            Err(err) => {
+                tracing::error!(error = %err, "cannot restage objects after a failed WAL write")
+            }
         }
     }
 
@@ -567,7 +569,10 @@ impl Server {
         match self.publish_index(version, op_heads, workspace_heads) {
             Ok(true) => {}
             Ok(false) => {
-                tracing::warn!(version, "index CAS conflict while mirroring reconciled heads");
+                tracing::warn!(
+                    version,
+                    "index CAS conflict while mirroring reconciled heads"
+                );
                 if let Err(err) = self.reload_index() {
                     tracing::warn!(error = %err, "could not reload the index object");
                 }

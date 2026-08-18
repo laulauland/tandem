@@ -62,6 +62,11 @@ smallvec = "1"
 blake2 = "0.10"
 digest = "0.10"
 
+# Randomness — bearer tokens have to be unguessable, which a hash of a counter
+# and a clock is not. The major is the one jj-lib itself resolves, so the tree
+# keeps a single `rand`.
+rand = "0.9"
+
 # Sync bridge for async backend methods
 pollster = "0.4"
 

@@ -13,7 +13,6 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::Output;
 
-
 #[test]
 fn single_agent_file_round_trip() {
     let mut fx = ServerFixture::start();
@@ -96,7 +95,6 @@ fn single_agent_file_round_trip() {
     );
 }
 
-
 fn parse_workspace_name_from_init(output: &Output) -> String {
     let stderr = common::stderr_str(output);
     let prefix = "Initialized tandem workspace '";
@@ -141,7 +139,11 @@ fn implicit_workspace_names_are_unique_and_tracked() {
     let ws_b_dir = fx.dir("agent-b");
 
     // Init A without --workspace -> should auto-generate non-default name.
-    let init_a = common::run_tandem_in(&ws_a_dir, &["init", "--server", &fx.addr, "."], &home);
+    let init_a = common::run_tandem_in(
+        &ws_a_dir,
+        &["init", "--server", &fx.addr, "--token", fx.token(), "."],
+        &home,
+    );
     common::assert_ok(&init_a, "workspace A init (implicit workspace)");
     let ws_a_name = parse_workspace_name_from_init(&init_a);
     assert_ne!(
@@ -172,7 +174,11 @@ fn implicit_workspace_names_are_unique_and_tracked() {
     );
 
     // Init B without --workspace after A has committed.
-    let init_b = common::run_tandem_in(&ws_b_dir, &["init", "--server", &fx.addr, "."], &home);
+    let init_b = common::run_tandem_in(
+        &ws_b_dir,
+        &["init", "--server", &fx.addr, "--token", fx.token(), "."],
+        &home,
+    );
     common::assert_ok(&init_b, "workspace B init (implicit workspace)");
     let ws_b_name = parse_workspace_name_from_init(&init_b);
     assert_ne!(
@@ -251,9 +257,6 @@ fn implicit_workspace_names_are_unique_and_tracked() {
         "workspace_heads should include workspace B name '{ws_b_name}', keys={workspace_heads:?}"
     );
 }
-
-
-
 
 #[test]
 fn init_uses_server_workspace_parent_context_by_default() {

@@ -115,6 +115,18 @@ pub fn run_tandem_in_with_env(
     cmd.output().expect("run tandem")
 }
 
+/// The admin token `tandem up` printed.
+///
+/// The daemon generates one when the operator names none, and prints it —
+/// which is the only way a test (or a person) can then run `tandem init`.
+pub fn admin_token_from_up(output: &Output) -> String {
+    let text = stdout_str(output);
+    text.lines()
+        .find_map(|line| line.strip_prefix("admin token: "))
+        .map(|token| token.trim().to_string())
+        .unwrap_or_else(|| panic!("`tandem up` printed no admin token\noutput:\n{text}"))
+}
+
 pub fn assert_ok(output: &Output, context: &str) {
     assert!(
         output.status.success(),
@@ -289,9 +301,13 @@ pub fn api_url(addr: &str, path: &str) -> String {
 }
 
 /// `GET` one of the server's endpoints and insist it answered.
-pub fn api_get(addr: &str, path: &str) -> reqwest::blocking::Response {
+///
+/// Every endpoint wants a bearer, so the token is an argument rather than
+/// something a caller can forget.
+pub fn api_get(addr: &str, token: &str, path: &str) -> reqwest::blocking::Response {
     let response = http_client()
         .get(api_url(addr, path))
+        .bearer_auth(token)
         .send()
         .unwrap_or_else(|err| panic!("GET {path} on {addr}: {err}"));
     assert!(

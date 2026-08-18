@@ -15,6 +15,7 @@ use prost::Message as _;
 
 use crate::http_client::{PrefixResult, TandemClient};
 use crate::proto_convert;
+use crate::repo_link;
 
 const OPERATION_ID_LENGTH: usize = 64;
 const VIEW_ID_LENGTH: usize = 64;
@@ -33,36 +34,17 @@ impl fmt::Debug for TandemOpStore {
     }
 }
 
-/// Read server address from env var or file.
-fn read_server_address(store_path: &Path) -> Result<String, BackendLoadError> {
-    if let Ok(addr) = std::env::var("TANDEM_SERVER") {
-        if !addr.is_empty() {
-            return Ok(addr);
-        }
-    }
-    let addr_path = store_path.join("server_address");
-    std::fs::read_to_string(&addr_path).map_err(|e| {
-        BackendLoadError(
-            anyhow::anyhow!(
-                "cannot read tandem server address from {} or TANDEM_SERVER env: {e}",
-                addr_path.display()
-            )
-            .into(),
-        )
-    })
-}
-
 impl TandemOpStore {
     /// Initialize a new tandem op store (called during workspace init).
     pub fn init(
         store_path: &Path,
         server_addr: &str,
+        token: &str,
         root_data: RootOperationData,
     ) -> Result<Self, jj_lib::backend::BackendInitError> {
-        std::fs::write(store_path.join("server_address"), server_addr)
-            .map_err(|e| jj_lib::backend::BackendInitError(e.into()))?;
+        repo_link::write_link(store_path, server_addr, token)?;
 
-        let client = TandemClient::connect(server_addr)
+        let client = TandemClient::connect(server_addr, token)
             .map_err(|e| jj_lib::backend::BackendInitError(e.into()))?;
         let info = client.repo_info().clone();
 
@@ -80,8 +62,10 @@ impl TandemOpStore {
         store_path: &Path,
         root_data: RootOperationData,
     ) -> Result<Self, BackendLoadError> {
-        let server_addr = read_server_address(store_path)?;
-        let client = TandemClient::connect(&server_addr).map_err(|e| BackendLoadError(e.into()))?;
+        let server_addr = repo_link::read_server_address(store_path)?;
+        let token = repo_link::read_token(store_path)?;
+        let client =
+            TandemClient::connect(&server_addr, &token).map_err(|e| BackendLoadError(e.into()))?;
         let info = client.repo_info().clone();
 
         Ok(Self {

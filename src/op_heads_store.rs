@@ -17,8 +17,8 @@ use prost::Message as _;
 
 use crate::env::env_flag_enabled;
 use crate::http_client::TandemClient;
+use crate::repo_link;
 
-const WORKSPACE_ID_FILE: &str = "workspace_id";
 const CAS_MAX_ATTEMPTS: usize = 80;
 const CAS_BACKOFF_BASE_MS: u64 = 2;
 const CAS_BACKOFF_MAX_MS: u64 = 256;
@@ -42,54 +42,6 @@ impl fmt::Debug for TandemOpHeadsStore {
         f.debug_struct("TandemOpHeadsStore")
             .field("workspace_id", &self.workspace_id)
             .finish()
-    }
-}
-
-/// Read server address from env var or file.
-fn read_server_address(store_path: &Path) -> Result<String, BackendLoadError> {
-    if let Ok(addr) = std::env::var("TANDEM_SERVER") {
-        if !addr.is_empty() {
-            return Ok(addr);
-        }
-    }
-    let addr_path = store_path.join("server_address");
-    std::fs::read_to_string(&addr_path).map_err(|e| {
-        BackendLoadError(
-            anyhow::anyhow!(
-                "cannot read tandem server address from {} or TANDEM_SERVER env: {e}",
-                addr_path.display()
-            )
-            .into(),
-        )
-    })
-}
-
-fn read_workspace_id(store_path: &Path) -> Result<String, BackendLoadError> {
-    if let Ok(workspace_id) = std::env::var("TANDEM_WORKSPACE") {
-        let trimmed = workspace_id.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_string());
-        }
-    }
-
-    let workspace_path = store_path.join(WORKSPACE_ID_FILE);
-    match std::fs::read_to_string(&workspace_path) {
-        Ok(id) => {
-            let trimmed = id.trim();
-            if trimmed.is_empty() {
-                Ok("default".to_string())
-            } else {
-                Ok(trimmed.to_string())
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("default".to_string()),
-        Err(e) => Err(BackendLoadError(
-            anyhow::anyhow!(
-                "cannot read tandem workspace identity from {}: {e}",
-                workspace_path.display()
-            )
-            .into(),
-        )),
     }
 }
 
@@ -135,14 +87,14 @@ impl TandemOpHeadsStore {
     pub fn init(
         store_path: &Path,
         server_addr: &str,
+        token: &str,
         workspace_id: &str,
     ) -> Result<Self, jj_lib::backend::BackendInitError> {
-        std::fs::write(store_path.join("server_address"), server_addr)
-            .map_err(|e| jj_lib::backend::BackendInitError(e.into()))?;
-        std::fs::write(store_path.join(WORKSPACE_ID_FILE), workspace_id)
+        repo_link::write_link(store_path, server_addr, token)?;
+        std::fs::write(store_path.join(repo_link::WORKSPACE_ID_FILE), workspace_id)
             .map_err(|e| jj_lib::backend::BackendInitError(e.into()))?;
 
-        let client = TandemClient::connect(server_addr)
+        let client = TandemClient::connect(server_addr, token)
             .map_err(|e| jj_lib::backend::BackendInitError(e.into()))?;
         let version_cache_path = store_path.join(VERSION_CACHE_FILE);
         let optimistic_version_cache = optimistic_version_cache_enabled();
@@ -165,9 +117,11 @@ impl TandemOpHeadsStore {
 
     /// Load an existing tandem op heads store from `store_path`.
     pub fn load(_settings: &UserSettings, store_path: &Path) -> Result<Self, BackendLoadError> {
-        let server_addr = read_server_address(store_path)?;
-        let workspace_id = read_workspace_id(store_path)?;
-        let client = TandemClient::connect(&server_addr).map_err(|e| BackendLoadError(e.into()))?;
+        let server_addr = repo_link::read_server_address(store_path)?;
+        let token = repo_link::read_token(store_path)?;
+        let workspace_id = repo_link::read_workspace_id(store_path)?;
+        let client =
+            TandemClient::connect(&server_addr, &token).map_err(|e| BackendLoadError(e.into()))?;
         let version_cache_path = store_path.join(VERSION_CACHE_FILE);
         let optimistic_version_cache = optimistic_version_cache_enabled();
         let cached_version = if optimistic_version_cache {
