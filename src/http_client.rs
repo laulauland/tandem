@@ -128,6 +128,17 @@ pub struct HeadsSnapshot {
     pub version: u64,
 }
 
+/// What the server answered a writer-role claim with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriterClaim {
+    /// The role is this holder's for `expires_in`, after which somebody else
+    /// may take it. A holder that means to keep it asks again before then.
+    Held { holder: String, expires_in: Duration },
+    /// Somebody else holds it. `detail` is the server's sentence about who,
+    /// and for how much longer.
+    Refused { detail: String },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum PrefixResult {
     NoMatch,
@@ -436,6 +447,44 @@ impl TandemClient {
         let response = Self::check(response, "mint token")?;
         let body: wire::TokenBody = response.json().context("decode minted token")?;
         Ok(Some(body))
+    }
+
+    /// Take the writer role for a workspace, or keep it.
+    ///
+    /// The same holder asking again renews; anybody else asking while the
+    /// current claim stands is refused, and the refusal says who holds it.
+    /// A refusal is an answer rather than an error: a daemon that lost the
+    /// race has to keep running and keep asking, not fall over.
+    pub fn claim_writer_role(
+        &self,
+        workspace_id: &str,
+        holder: &str,
+        ttl: Option<Duration>,
+    ) -> Result<WriterClaim> {
+        let request = wire::ClaimWriterBody {
+            holder: holder.to_string(),
+            ttl_seconds: ttl.map(|ttl| ttl.as_secs()),
+        };
+        let response = self.send(
+            self.http
+                .post(self.url(&format!("/api/workspaces/{workspace_id}/writer")))
+                .json(&request),
+        )?;
+
+        if response.status() == reqwest::StatusCode::CONFLICT {
+            let body = response.text().unwrap_or_default();
+            let detail = serde_json::from_str::<wire::ErrorBody>(&body)
+                .map(|parsed| parsed.error)
+                .unwrap_or(body);
+            return Ok(WriterClaim::Refused { detail });
+        }
+
+        let response = Self::check(response, "claim writer role")?;
+        let body: wire::WriterRoleBody = response.json().context("decode writer role")?;
+        Ok(WriterClaim::Held {
+            holder: body.holder,
+            expires_in: Duration::from_secs(body.expires_in_seconds),
+        })
     }
 
     pub fn get_object(&self, kind: u16, id: &[u8]) -> Result<Vec<u8>> {

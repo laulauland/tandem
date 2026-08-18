@@ -13,6 +13,14 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+/// How many head reconciles a spawned server should degrade. See
+/// [`FaultPoints::fail_reconciles`].
+const FAIL_RECONCILES_ENV: &str = "TANDEM_TEST_FAIL_RECONCILES";
+
+fn env_count(name: &str) -> Option<u64> {
+    std::env::var(name).ok()?.trim().parse().ok()
+}
+
 /// A point in the publish path where a test may cut the server off.
 ///
 /// The list is the whole path, not a sample of it: a publish writes the WAL
@@ -69,6 +77,8 @@ pub struct FaultPoints {
     fail_derived_head_wal: AtomicBool,
     /// WAL entry writes still to be answered with a synthetic bucket failure.
     wal_write_failures: AtomicU64,
+    /// Head reconciles still to be answered by leaving the heads unmerged.
+    reconcile_failures: AtomicU64,
     /// Content for the object a second client "writes" during a retried publish.
     object_on_index_conflict: Mutex<Option<Vec<u8>>>,
 }
@@ -77,6 +87,22 @@ impl FaultPoints {
     /// A fault set that does nothing — what the binary always runs with.
     pub fn inert() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+
+    /// A fault set seeded from the environment.
+    ///
+    /// The seam stays a value: this reads the environment once, when a server
+    /// process starts, and no call site ever reads it again. What it buys is
+    /// the one case a value cannot reach — a `tandem serve` that a test
+    /// spawned, where nothing in the test's address space holds a handle to
+    /// arm. A test that runs the server in-process arms the value directly and
+    /// never sets these.
+    pub fn from_environment() -> Arc<Self> {
+        let faults = Self::default();
+        if let Some(count) = env_count(FAIL_RECONCILES_ENV) {
+            faults.fail_reconciles(count);
+        }
+        Arc::new(faults)
     }
 
     // ── Index CAS conflicts ──
@@ -131,6 +157,33 @@ impl FaultPoints {
         }
         self.wal_write_failures.fetch_sub(1, Ordering::Relaxed);
         tracing::warn!(remaining, "injecting a WAL write failure");
+        true
+    }
+
+    // ── A reconcile that leaves the heads unmerged ──
+
+    /// Make the next `count` head reconciles degrade the way the code already
+    /// documents they may: the heads that were about to be merged are handed
+    /// back as they are.
+    ///
+    /// This is not a hypothetical path. `reconcile_jj_op_heads` returns the
+    /// unmerged set whenever it cannot read an operation, cannot walk the
+    /// operation parents, or cannot write the merge — and it must, because it
+    /// runs after the publish is already durable and already acknowledged.
+    /// What the fault buys is the state that leaves behind: two sibling heads
+    /// that outlive the publish that made them, and the next merge of them,
+    /// wherever it happens, deciding a workspace's fate.
+    pub fn fail_reconciles(&self, count: u64) {
+        self.reconcile_failures.store(count, Ordering::Relaxed);
+    }
+
+    pub(super) fn take_reconcile_failure(&self) -> bool {
+        let remaining = self.reconcile_failures.load(Ordering::Relaxed);
+        if remaining == 0 {
+            return false;
+        }
+        self.reconcile_failures.fetch_sub(1, Ordering::Relaxed);
+        tracing::warn!(remaining, "injecting a reconcile failure");
         true
     }
 

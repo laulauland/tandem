@@ -148,6 +148,34 @@ impl ServerFixture {
         self.server = server;
     }
 
+    /// Stop this server and start another over the same repo, at the same
+    /// address, with `env` added to what it was started with.
+    ///
+    /// The address stays because the clients already on disk wrote it into
+    /// their store configuration and cannot be told a new one. What this is
+    /// for is arming a fault on a server a test spawned: the fault set is a
+    /// value the server process holds, and a process reads its environment
+    /// once, so the only moment to arm one is a start.
+    pub fn restart_with_env(&mut self, env: &[(&str, &str)]) {
+        self.stop();
+        for (key, value) in env {
+            self.env.push((key.to_string(), value.to_string()));
+        }
+        let mut server = spawn(
+            &self.repo,
+            &self.addr,
+            &self.args,
+            &self.env,
+            &self.home,
+            self.log.as_deref(),
+        );
+        wait_for_server(&self.addr, &mut server);
+        if self.has_socket {
+            wait_for_socket(&self.socket, Duration::from_secs(5));
+        }
+        self.server = server;
+    }
+
     /// Kill the server and reap it. Harmless if it has already exited — which
     /// it has, for the tests that shut it down with a signal to watch it clean
     /// up after itself.

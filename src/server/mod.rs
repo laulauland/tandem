@@ -10,14 +10,16 @@
 //! logic. Siblings hold the rest: `http` is the API that exposes it, `bucket`
 //! is the durability half — WAL entries, the index object, and the recovery
 //! that replays them — `integration` is the off-request worker that keeps the
-//! `integration` bookmark up to date, and `authority` decides who is asking and
-//! whether they may, over the rules `scope` states.
+//! `integration` bookmark up to date, `repair` puts back a workspace a merge
+//! settled on an interrupted clone's placeholder, and `authority` decides who
+//! is asking and whether they may, over the rules `scope` states.
 
 mod authority;
 mod bucket;
 mod faults;
 pub mod http;
 mod integration;
+mod repair;
 mod scope;
 pub mod writer;
 
@@ -351,7 +353,8 @@ fn head_ids_for_wire(heads: &[String]) -> Vec<Vec<u8>> {
 }
 
 impl Server {
-    /// A server over `repo`, with no faults injected.
+    /// A server over `repo`, under whatever faults the environment names —
+    /// which, outside a test, is none.
     pub fn new(
         repo: PathBuf,
         integration_enabled: bool,
@@ -363,7 +366,7 @@ impl Server {
             integration_enabled,
             bucket_spec,
             admin_token,
-            FaultPoints::inert(),
+            FaultPoints::from_environment(),
         )
     }
 
@@ -528,9 +531,13 @@ impl Server {
     /// head the store has lost — a crash between two writes, a client that
     /// published and never came back — is otherwise unreachable, and the
     /// workspace record is the only place it is still named.
+    ///
+    /// `arriving` is the operation the publish in progress is adding, when
+    /// there is one. It is never made the merge base — see `order_op_heads`.
     fn reconcile_jj_op_heads(
         &self,
         workspace_heads: &BTreeMap<String, String>,
+        arriving: Option<&OperationId>,
     ) -> Result<Vec<String>> {
         let before = self.read_jj_op_heads()?;
 
@@ -568,6 +575,17 @@ impl Server {
             return Ok(before);
         }
 
+        // The degrade below, on demand. Armed only by a test, and armed here
+        // rather than at one of the three real causes because what is under
+        // test is the state it leaves, not which of them produced it.
+        if self.faults.take_reconcile_failure() {
+            tracing::warn!(
+                candidates = candidate_hex.len(),
+                "injected reconcile failure; leaving the heads unmerged"
+            );
+            return Ok(before);
+        }
+
         // ── Ancestors first, then the merge ──
         //
         // A candidate that another candidate already descends from is not a
@@ -589,7 +607,7 @@ impl Server {
         // op-heads store is taken out of it. Filtering the merge without
         // filtering the removal is what leaves stale heads in the store, and
         // that is what makes clients see a divergent operation history.
-        let ordered = match order_op_heads(operations) {
+        let ordered = match order_op_heads(operations, arriving) {
             Ok(ordered) => ordered,
             Err(err) => {
                 tracing::warn!(
@@ -635,6 +653,22 @@ impl Server {
                     );
                     return Ok(before);
                 }
+            }
+        };
+
+        // The merge just made is checked here, where its parents are the heads
+        // it merged, rather than only at the end of the publish: the operation
+        // `record_merged_parents` wraps it in carries the same view but a
+        // different parent set. See `repair_merged_workspace_pointers`.
+        let settled_op = match self.repair_merged_workspace_pointers(&settled_op) {
+            Ok(Some(repaired)) => repaired,
+            Ok(None) => settled_op,
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "could not check the merge for a workspace it lost; serving it as it is"
+                );
+                settled_op
             }
         };
 
@@ -1101,7 +1135,7 @@ impl Server {
         // already landed, retry its transaction, and rewrite the same change —
         // which is how a change id goes divergent. Each step degrades to the
         // last state known to be both durable and correct, and says so.
-        let next_heads = match self.reconcile_jj_op_heads(&next_workspace_heads) {
+        let reconciled = match self.reconcile_jj_op_heads(&next_workspace_heads, Some(&new_op_id)) {
             Ok(heads) => heads,
             Err(err) => {
                 tracing::warn!(
@@ -1117,6 +1151,12 @@ impl Server {
                 })
             }
         };
+
+        // Whoever made the merge — this server just now, this server on an
+        // earlier publish, or the client that published `new_op_id` — a head
+        // that settled a workspace on an interrupted clone's empty commit is
+        // repaired before it is served. See `repair_merged_workspace_pointers`.
+        let next_heads = self.repair_placeholder_merges(&reconciled);
 
         let next_metadata = HeadsMetadata {
             version: next_version,
@@ -1315,16 +1355,36 @@ fn test_repo_info_capabilities() -> Vec<String> {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Keep the operations nothing else in the set descends from, oldest first.
+/// Keep the operations nothing else in the set descends from, oldest first,
+/// and never let the operation that just arrived be the oldest.
 ///
-/// Both halves come from `jj_lib::op_heads_store::resolve_op_heads`, which is
-/// the reference implementation for this: ancestors are dropped so that no
-/// operation is ever merged with its own descendant, and what is left is
-/// ordered by end time so the merge starts from the oldest state and applies
-/// the later ones onto it. `merge_operations` takes the first entry as the
-/// base, so the order is not cosmetic.
+/// Both halves of the first part come from `jj_lib::op_heads_store::
+/// resolve_op_heads`, which is the reference implementation for this:
+/// ancestors are dropped so that no operation is ever merged with its own
+/// descendant, and what is left is ordered by end time so the merge starts
+/// from the oldest state and applies the later ones onto it.
+/// `merge_operations` takes the first entry as the base, so the order is not
+/// cosmetic.
+///
+/// The base is not merely a starting point. When both sides move the same
+/// workspace's working-copy pointer and their common ancestor knows nothing
+/// about that workspace, jj has no ancestry argument to settle it with and
+/// keeps the base side's answer (`MutableRepo::merge_wc_commit`). So whoever
+/// is the base decides who a workspace belongs to — and the end time deciding
+/// that is a *client's* clock. A machine whose clock is behind could publish
+/// an operation that becomes the base of every merge and hand every contested
+/// workspace to itself; the case that matters is a clone that died between the
+/// two operations it publishes, whose leftover points the name at an empty
+/// commit. Winning that merge would replace a workspace's last published
+/// snapshot with an empty tree.
+///
+/// `arriving` is the operation this publish is adding, and it is pinned last:
+/// what was already settled stays settled, and a head that has only just
+/// turned up merges onto it rather than under it. See
+/// `tests/integration/clone.rs::a_clone_killed_between_its_two_operations_does_not_cost_the_next_one_its_files`.
 fn order_op_heads(
     operations: Vec<jj_lib::operation::Operation>,
+    arriving: Option<&OperationId>,
 ) -> Result<Vec<jj_lib::operation::Operation>> {
     let heads = jj_lib::dag_walk::heads_ok(
         operations.into_iter().map(Ok),
@@ -1334,7 +1394,12 @@ fn order_op_heads(
     .map_err(|e: jj_lib::op_store::OpStoreError| anyhow!("walk operation parents: {e}"))?;
 
     let mut heads: Vec<_> = heads.into_iter().collect();
-    heads.sort_by_key(|op| op.metadata().time.end.timestamp);
+    heads.sort_by_key(|op| {
+        (
+            arriving.is_some_and(|id| op.id() == id),
+            op.metadata().time.end.timestamp,
+        )
+    });
     Ok(heads)
 }
 

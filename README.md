@@ -330,14 +330,67 @@ tandem serve --listen <addr> --repo <path> [--log-level <level>] [--log-format <
 ### Workspace setup
 
 ```
+tandem clone <addr> [dir] --workspace <name> --token <token>
+```
+
+Puts a tandem-backed workspace on disk and materializes its files. A name the
+server has never seen is created, in the same context as the server's default
+workspace. A name it already has is **attached** to: what comes back is the
+last snapshot that name published, byte for byte, wherever the machine that
+published it has gone. That is what lets a workspace outlive its machine.
+
+A clone also fills the client cache (`TANDEM_CACHE_DIR`) with everything it
+fetched, which is what makes it the thing to run when baking an image.
+
+```
 tandem init --server <addr> --token <token> [--workspace <name>] [path]
 ```
 
-Initializes a tandem-backed workspace. Creates the directory, registers the
-tandem backend, and connects to the server. `--workspace` names the workspace.
-If omitted, tandem auto-generates a unique workspace name to avoid cross-device
-workspace collisions by default. `--token` is the bearer the workspace presents
-on every request; it can come from `TANDEM_TOKEN` instead.
+The older spelling of the same thing, kept working because scripts say it. It
+runs the same code and attaches on the same terms; it only spells the server
+and the directory differently, and does not print which of the two it did.
+
+`--workspace` names the workspace; if omitted, tandem auto-generates a unique
+name to avoid cross-device workspace collisions. `--token` is the bearer the
+workspace presents on every request; it can come from `TANDEM_TOKEN` instead.
+
+### Workspace daemon
+
+```
+tandem daemon [path] [--debounce-ms <ms>] [--writer-ttl-seconds <n>]
+tandem daemon [path] --status [--json]
+```
+
+Watches the workspace directory and publishes each burst of file changes as one
+jj operation. Nothing has to ask it to: there is no checkpoint command, and no
+`jj` command has to be run for work to become durable. What edits the directory
+— an agent, a compiler, a person — never learns that tandem exists.
+
+- **`--debounce-ms`** (default 1000, or `TANDEM_DEBOUNCE_MS`) is how long a
+  burst of changes is collected before it is snapshotted. It is a durability
+  window and not a comfort setting: work done inside one window is work that a
+  dying machine takes with it.
+- An idle workspace publishes nothing. No file change means no snapshot, no
+  operation, and no request.
+- One workspace has one writer. The daemon claims the writer role and renews it
+  well inside its TTL; a second daemon on the same workspace is refused, says
+  so, and keeps running without publishing until the role falls free.
+- A head published anywhere else marks this workspace **stale** and stops
+  there. `tandem workspace update-stale` is never run for you — it moves files
+  under whoever is editing them, and that is a decision, not a reflex.
+- Operation descriptions are uniform (`tandem daemon: snapshot working copy`).
+  What a change is *about* belongs in the change description, which is
+  `tandem describe`'s job.
+- Files the workspace's own root `.gitignore` disowns do not open a debounce
+  window — a build writing into `target/` would otherwise cost a full
+  working-copy scan per burst for as long as it runs. They are not forgotten:
+  the next writer-role renewal snapshots, so a file that is both tracked and
+  gitignored is published late rather than never.
+- **`--status`** answers from the file the daemon keeps at
+  `.jj/tandem-daemon.json`, and checks whether the process that wrote it is
+  still there. A daemon that was killed leaves its last status behind; the
+  status reports it as `running: false` and exits non-zero rather than
+  repeating a dead daemon's claims as current.
 
 ### Watch
 
@@ -373,8 +426,9 @@ the remote store.
 |----------|---------|
 | `TANDEM_SERVER` | Server address — fallback for `--server` |
 | `TANDEM_ADMIN_TOKEN` | The token `tandem serve` and `tandem up` accept as the admin. If unset, `tandem up` generates one and prints it. |
-| `TANDEM_TOKEN` | The token `tandem init` and `tandem watch` present — fallback for `--token`. |
-| `TANDEM_WORKSPACE` | Workspace name fallback for `tandem init` when `--workspace` is not provided. |
+| `TANDEM_TOKEN` | The token `tandem clone`, `tandem init` and `tandem watch` present — fallback for `--token`. |
+| `TANDEM_WORKSPACE` | Workspace name fallback for `tandem clone` and `tandem init` when `--workspace` is not provided. |
+| `TANDEM_DEBOUNCE_MS` | How long `tandem daemon` collects file changes before it snapshots. It is a durability window: work done inside one is work a dying machine takes with it. Defaults to 1000. |
 | `TANDEM_LISTEN` | Listen address fallback for `tandem up --listen`. |
 | `TANDEM_ENABLE_INTEGRATION_WORKSPACE` | Set to `1`/`true` to enable integration workspace mode when `--enable-integration-workspace` is not passed. |
 | `TANDEM_CACHE_DIR` | Where the client caches objects, operations and views. Everything in it is named by a hash of its own contents, so one directory can be shared by every workspace on a machine — or baked into an image. Defaults to `$XDG_CACHE_HOME/tandem`, else `$HOME/.cache/tandem`. |

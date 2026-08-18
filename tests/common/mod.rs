@@ -145,6 +145,22 @@ pub fn stderr_str(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).to_string()
 }
 
+/// One `key=value` field out of a line of tool output, when the line has it.
+///
+/// The commands under test report themselves in whitespace-separated
+/// `key=value` fields — `published op=…`, `clone … origin=…` — so this is the
+/// one parser for all of them.
+pub fn field_in(line: &str, key: &str) -> Option<String> {
+    line.split_whitespace()
+        .find_map(|field| field.strip_prefix(key))
+        .map(str::to_string)
+}
+
+/// The same, on a line that is required to carry the field.
+pub fn field(line: &str, key: &str) -> String {
+    field_in(line, key).unwrap_or_else(|| panic!("no {key} in: {line}"))
+}
+
 /// Run a jj command in a given repo directory. Returns stdout on success.
 pub fn run_jj_in(repo: &Path, args: &[&str]) -> Output {
     let mut cmd = Command::new("jj");

@@ -1,13 +1,17 @@
-//! tandem watch — stream head-change notifications from a tandem server.
+//! Subscribing to `GET /api/events`, and the one command that only does that.
 //!
-//! Subscribes to `GET /api/events` and prints each change as:
-//! `version=<N> heads=<hex1>,<hex2>,...`
+//! `tandem watch` prints each change as `version=<N> heads=<hex1>,<hex2>,...`.
 //!
 //! The events themselves carry no head data — they are wake-ups. On each one
 //! the watcher reads `/api/heads` and prints what it finds, which is why two
 //! publishes in quick succession may print as one line: a wake-up that
 //! coalesces with the one behind it loses nothing, because the read that
 //! answers it sees the later state anyway.
+//!
+//! [`subscribe`] and [`EventStream`] are the reusable half. The workspace
+//! daemon subscribes to the same stream for the same reason and reads it the
+//! same way; a second copy of an SSE line parser is a second place for a
+//! keep-alive comment to be mistaken for an event.
 
 use std::io::{BufRead, BufReader};
 
@@ -17,28 +21,38 @@ use crate::hex::to_hex;
 use crate::http_client::{build_http_client, ConnectorTarget, RepoCapability, TandemClient};
 use crate::wire;
 
-pub fn run_watch(server_addr: &str, token: &str) -> Result<()> {
-    // Refuse a server that cannot do this before opening a long-lived stream.
-    let client =
-        TandemClient::connect_with_requirements(server_addr, token, &[RepoCapability::WatchHeads])
-            .with_context(|| format!("watch preflight failed for {server_addr}"))?;
-
+/// Open the head-change stream, or say why the server would not.
+///
+/// The stream has no request timeout: it is meant to stay open, and a
+/// keep-alive comment rather than a reconnect is what says the server is
+/// still there.
+pub fn subscribe(server_addr: &str, token: &str) -> Result<EventStream<ResponseLines>> {
     let target = ConnectorTarget::parse(server_addr)?;
-    // No request timeout: the event stream is meant to stay open.
     let http = build_http_client(None)?;
     let events = http
         .get(format!("{}/api/events", target.base_url()))
         .header(reqwest::header::ACCEPT, "text/event-stream")
         .bearer_auth(token)
         .send()
-        .with_context(|| format!("watch connection failed for {server_addr}"))?;
+        .with_context(|| format!("event subscription failed for {server_addr}"))?;
 
     if !events.status().is_success() {
         return Err(anyhow!(
-            "watch stream refused by {server_addr}: HTTP {}",
+            "event stream refused by {server_addr}: HTTP {}",
             events.status().as_u16()
         ));
     }
+
+    Ok(EventStream::new(events))
+}
+
+pub fn run_watch(server_addr: &str, token: &str) -> Result<()> {
+    // Refuse a server that cannot do this before opening a long-lived stream.
+    let client =
+        TandemClient::connect_with_requirements(server_addr, token, &[RepoCapability::WatchHeads])
+            .with_context(|| format!("watch preflight failed for {server_addr}"))?;
+
+    let events = subscribe(server_addr, token)?;
 
     eprintln!("watching heads on {server_addr}...");
 
@@ -47,7 +61,7 @@ pub fn run_watch(server_addr: &str, token: &str) -> Result<()> {
     let mut last_printed: Option<u64> = None;
     print_heads(&client, &mut last_printed)?;
 
-    for event in EventStream::new(events) {
+    for event in events {
         let event = event?;
         // The version in the event is a hint. The read below is the truth,
         // and it is what decides whether there is anything to print.
@@ -77,12 +91,15 @@ fn print_heads(client: &TandemClient, last_printed: &mut Option<u64>) -> Result<
 /// Events are blank-line-separated blocks of `field: value` lines. Only the
 /// `data:` lines matter here; comment lines (`:`), which are what a keep-alive
 /// looks like, and every other field are skipped.
-struct EventStream<R: BufRead> {
+pub struct EventStream<R: BufRead> {
     reader: R,
 }
 
-impl EventStream<BufReader<reqwest::blocking::Response>> {
-    fn new(response: reqwest::blocking::Response) -> Self {
+/// What a subscription reads: the response body, buffered a line at a time.
+pub type ResponseLines = BufReader<reqwest::blocking::Response>;
+
+impl EventStream<ResponseLines> {
+    pub fn new(response: reqwest::blocking::Response) -> Self {
         Self {
             reader: BufReader::new(response),
         }

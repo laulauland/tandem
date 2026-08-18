@@ -71,8 +71,21 @@ enumerable rather than hand-picked:
 
 `BeforeWalWrite`, `AfterWalWrite`, `AfterIndexWrite`, `AfterLocalApply`,
 `AfterMetadataWrite` — plus index-CAS conflicts, an object staged between two
-attempts of a retried publish, a bucket that refuses the next WAL entries, and
-a failing derived-head WAL write.
+attempts of a retried publish, a bucket that refuses the next WAL entries, a
+failing derived-head WAL write, and a head reconcile that degrades to leaving
+the heads unmerged.
+
+One of those is also reachable from the environment, and the exception is worth
+stating because the rule above is otherwise absolute.
+`FaultPoints::from_environment` reads `TANDEM_TEST_FAIL_RECONCILES` once, when
+a server process starts, and
+nothing reads it again. It exists for the one thing a value cannot reach: a
+`tandem serve` that a *subprocess* test spawned, where the test holds no handle
+in the server's address space to arm. `tests/integration/clone.rs` needs it,
+because what it is testing — a workspace pointer decided by a merge of heads
+that outlived the publish that made them — has to be driven through the real
+binary, the real clone, and a real interruption. An in-process test arms the
+value directly and sets nothing.
 
 A crash makes the in-process server return an error and set a `halted` flag;
 the harness then restarts it over the same repo and bucket. From a client's

@@ -111,8 +111,35 @@ pub fn now_epoch_secs() -> u64 {
         .as_secs()
 }
 
+/// Set to record a bench's number into the committed artifact rather than
+/// under `target/`. See [`write_json_artifact`].
+pub const BENCH_RECORD_ENV: &str = "TANDEM_BENCH_RECORD";
+
+/// Write a bench report, by default where a working copy does not notice.
+///
+/// `relative_path` names the committed artifact — `docs/benchmarks/…` — and
+/// that is where the report goes when [`BENCH_RECORD_ENV`] is set. Every other
+/// run puts the same file under `target/benchmarks/` instead.
+///
+/// The default is the way round it is because of what a bench is for. A person
+/// runs one to see whether a change they are making is slower, and runs it
+/// repeatedly while making it. Under jj there is no staging area: a modified
+/// file is already part of the revision, so a bench that rewrote a committed
+/// artifact would put a number nobody looked at into the change under review,
+/// every time, and `jj diff` would carry it. Recording a number is a separate,
+/// deliberate act, and it should read as one.
 pub fn write_json_artifact<T: Serialize>(relative_path: &str, value: &T) -> Result<PathBuf> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_path);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let recording = std::env::var(BENCH_RECORD_ENV)
+        .is_ok_and(|value| !matches!(value.trim(), "" | "0" | "false"));
+    let path = if recording {
+        root.join(relative_path)
+    } else {
+        let name = Path::new(relative_path)
+            .file_name()
+            .ok_or_else(|| anyhow!("the artifact path {relative_path} names no file"))?;
+        root.join("target").join("benchmarks").join(name)
+    };
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("create artifact dir {}", parent.display()))?;
@@ -466,7 +493,7 @@ fn hinted_op_integrate_id(stderr: &str) -> Option<String> {
     }
 }
 
-fn ensure_ok(output: &Output, context: &str) -> Result<()> {
+pub fn ensure_ok(output: &Output, context: &str) -> Result<()> {
     if output.status.success() {
         return Ok(());
     }
@@ -479,7 +506,7 @@ fn ensure_ok(output: &Output, context: &str) -> Result<()> {
     ))
 }
 
-fn isolated_home(root: &Path) -> Result<PathBuf> {
+pub fn isolated_home(root: &Path) -> Result<PathBuf> {
     let home = root.join("fake-home");
     fs::create_dir_all(&home).context("create fake home")?;
 
@@ -493,7 +520,7 @@ fn isolated_home(root: &Path) -> Result<PathBuf> {
     Ok(home)
 }
 
-fn isolate_env(cmd: &mut Command, home: &Path) {
+pub fn isolate_env(cmd: &mut Command, home: &Path) {
     cmd.env("HOME", home);
     cmd.env("XDG_CONFIG_HOME", home.join(".config"));
     // Inside the run's own home, so one bench run never reads what an earlier
@@ -502,13 +529,13 @@ fn isolate_env(cmd: &mut Command, home: &Path) {
     cmd.env("TANDEM_CACHE_DIR", home.join(".cache").join("tandem"));
 }
 
-fn free_addr() -> Result<String> {
+pub fn free_addr() -> Result<String> {
     let listener = TcpListener::bind("127.0.0.1:0").context("bind free addr")?;
     let port = listener.local_addr().context("read local addr")?.port();
     Ok(format!("127.0.0.1:{port}"))
 }
 
-fn wait_for_server(addr: &str, child: &mut Child) -> Result<()> {
+pub fn wait_for_server(addr: &str, child: &mut Child) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(15);
     while Instant::now() < deadline {
         if TcpStream::connect(addr).is_ok() {
@@ -522,7 +549,7 @@ fn wait_for_server(addr: &str, child: &mut Child) -> Result<()> {
     Err(anyhow!("server {addr} failed to start before deadline"))
 }
 
-fn tandem_bin_path() -> &'static PathBuf {
+pub fn tandem_bin_path() -> &'static PathBuf {
     static TANDEM_BIN: OnceLock<PathBuf> = OnceLock::new();
     TANDEM_BIN.get_or_init(resolve_tandem_bin_path)
 }

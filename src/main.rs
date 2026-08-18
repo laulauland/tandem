@@ -2,11 +2,12 @@
 //!
 //! Single binary:
 //!   tandem serve --listen <addr> --repo <path>   → server mode
-//!   tandem init --server <addr> [path]           → initialize tandem workspace
+//!   tandem clone <addr> <dir> --workspace <name> → create or attach a workspace
+//!   tandem daemon [dir]                          → watch, snapshot, publish
 //!   tandem <jj args>                             → stock jj via CliRunner
 
 use jj_tandem::env::env_flag_enabled;
-use jj_tandem::{control, server, watch, workspace_init};
+use jj_tandem::{control, daemon, server, watch, workspace_init};
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -46,6 +47,10 @@ ENVIRONMENT:
     TANDEM_LISTEN           Listen address for `tandem up` (host:port).
                             If unset, tandem auto-selects a free port
                             in 0.0.0.0:13013-13063
+    TANDEM_DEBOUNCE_MS      How long `tandem daemon` collects file changes
+                            before it snapshots. It is a durability window:
+                            work done inside one is work a dying machine takes
+                            with it. Defaults to 1000
     TANDEM_CACHE_DIR        Where the client keeps its cache of objects,
                             operations and views. Everything in it is named by
                             a hash of its contents, so the directory can be
@@ -58,13 +63,16 @@ SETUP:
     # Start a server
     tandem serve --listen 0.0.0.0:13013 --repo /path/to/repo
 
-    # Initialize a workspace backed by the server
-    tandem init --server server:13013 --token <admin token> my-workspace
+    # Create (or re-attach) a workspace backed by the server
+    tandem clone server:13013 my-workspace --workspace agent-a --token <admin token>
+
+    # Let file changes publish themselves
+    cd my-workspace
+    tandem daemon &
+    echo 'hello' > hello.txt
 
     # Use jj normally
-    cd my-workspace
-    echo 'hello' > hello.txt
-    tandem new -m 'add hello'
+    tandem describe -m 'add hello'
     tandem log";
 
 const SERVE_AFTER_HELP: &str = "\
@@ -77,6 +85,30 @@ EXAMPLES:
     tandem init --server server:13013 --token tdma_… my-workspace
     tandem init --server server:13013 --token tdma_… --workspace agent-a .
     TANDEM_SERVER=server:13013 TANDEM_TOKEN=tdma_… tandem init .";
+
+const CLONE_AFTER_HELP: &str = "\
+EXAMPLES:
+    tandem clone server:13013 ./work --workspace agent-a --token tdma_…
+    TANDEM_TOKEN=tdma_… tandem clone server:13013 ./work --workspace agent-a
+
+A clone of a workspace name the server already knows attaches to it: the files
+that come back are the last snapshot that name published, wherever the machine
+that published them has gone. It also fills the local cache, which is what
+makes it the thing to run when baking an image.";
+
+const DAEMON_AFTER_HELP: &str = "\
+EXAMPLES:
+    tandem daemon
+    tandem daemon /path/to/workspace --debounce-ms 300
+    tandem daemon --status
+
+The daemon watches the workspace for file changes and publishes each burst of
+them as one jj operation. Nothing has to ask it to: there is no checkpoint
+command, and no `jj` command has to be run for work to be durable.
+
+A head change published anywhere else marks this workspace stale and stops
+there. `tandem workspace update-stale` is never run for you — it moves files
+under whoever is editing them, and that is a decision, not a reflex.";
 
 const SERVER_AFTER_HELP: &str = "\
 EXAMPLES:
@@ -154,6 +186,45 @@ enum Commands {
         /// Workspace directory
         #[arg(default_value = ".")]
         path: String,
+    },
+
+    /// Create a tandem workspace, or attach to one the server already has
+    #[command(after_help = CLONE_AFTER_HELP)]
+    Clone {
+        /// Server address (host:port)
+        #[arg(env = "TANDEM_SERVER")]
+        server: String,
+        /// Workspace directory
+        #[arg(default_value = ".")]
+        dir: String,
+        /// Workspace name (auto-generated if omitted)
+        #[arg(long, env = "TANDEM_WORKSPACE")]
+        workspace: Option<String>,
+        /// The server's admin token, or a token already scoped to this
+        /// workspace
+        #[arg(long, env = "TANDEM_TOKEN")]
+        token: String,
+    },
+
+    /// Watch a workspace and publish its file changes as operations
+    #[command(after_help = DAEMON_AFTER_HELP)]
+    Daemon {
+        /// Workspace directory
+        #[arg(default_value = ".")]
+        path: String,
+        /// How long a burst of file changes is collected before it is
+        /// snapshotted. This is the durability window
+        #[arg(long)]
+        debounce_ms: Option<u64>,
+        /// How long each writer-role claim lasts
+        #[arg(long, default_value_t = 30)]
+        writer_ttl_seconds: u64,
+        /// Print what this workspace's daemon is doing, and exit
+        #[arg(long)]
+        status: bool,
+        /// Output the status as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Stream head change notifications (requires server)
@@ -246,7 +317,11 @@ fn main() -> ExitCode {
     // argument parsing — this avoids conflicts with jj global flags like
     // --no-pager, --color, -R that appear before the subcommand.
     match args.get(1).map(|s| s.as_str()) {
-        None | Some("serve" | "init" | "watch" | "up" | "down" | "server" | "--help" | "-h") => {}
+        None
+        | Some(
+            "serve" | "init" | "clone" | "daemon" | "watch" | "up" | "down" | "server" | "--help"
+            | "-h",
+        ) => {}
         _ => return run_jj(),
     }
 
@@ -288,6 +363,28 @@ fn main() -> ExitCode {
         }) => {
             let workspace_name = resolve_init_workspace_name(workspace.as_deref());
             run_tandem_init(&server, &token, &workspace_name, &path)
+        }
+        Some(Commands::Clone {
+            server,
+            dir,
+            workspace,
+            token,
+        }) => {
+            let workspace_name = resolve_init_workspace_name(workspace.as_deref());
+            run_clone(&server, &token, &workspace_name, &dir)
+        }
+        Some(Commands::Daemon {
+            path,
+            debounce_ms,
+            writer_ttl_seconds,
+            status,
+            json,
+        }) => {
+            if status {
+                run_daemon_status(&path, json)
+            } else {
+                run_workspace_daemon(&path, debounce_ms, writer_ttl_seconds)
+            }
         }
         Some(Commands::Watch { server, token }) => run_watch(&server, &token),
         Some(Commands::Up {
@@ -775,17 +872,7 @@ fn generate_workspace_name() -> String {
 }
 
 fn load_user_settings_from_environment() -> Result<jj_lib::settings::UserSettings, String> {
-    let config_env = jj_cli::config::ConfigEnv::from_environment();
-    let mut raw_config =
-        jj_cli::config::config_from_environment(jj_cli::config::default_config_layers());
-    config_env
-        .reload_user_config(&mut raw_config)
-        .map_err(|e| format!("cannot load jj user config: {e}"))?;
-    let resolved = config_env
-        .resolve_config(&raw_config)
-        .map_err(|e| format!("cannot resolve jj config: {e}"))?;
-    jj_lib::settings::UserSettings::from_config(resolved)
-        .map_err(|e| format!("cannot create settings: {e}"))
+    workspace_init::user_settings_from_environment().map_err(|e| format!("{e:#}"))
 }
 
 fn run_tandem_init(
@@ -827,6 +914,180 @@ fn run_tandem_init(
             // text: where a cause has causes of its own, this prints those too,
             // and the old code stopped at the first.
             eprintln!("error: {e:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+// ─── Clone ────────────────────────────────────────────────────────────────────
+
+fn run_clone(
+    server_addr: &str,
+    token: &str,
+    workspace_name: &str,
+    workspace_path_str: &str,
+) -> ExitCode {
+    let settings = match load_user_settings_from_environment() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    match workspace_init::clone_tandem_workspace(
+        &settings,
+        server_addr,
+        token,
+        workspace_name,
+        Path::new(workspace_path_str),
+    ) {
+        Ok((workspace_path, origin)) => {
+            eprintln!(
+                "{} tandem workspace '{}' at {} (server: {})",
+                match origin {
+                    workspace_init::WorkspaceOrigin::Created => "Created",
+                    workspace_init::WorkspaceOrigin::Attached => "Attached to",
+                },
+                workspace_name,
+                workspace_path.display(),
+                server_addr
+            );
+            println!("workspace={workspace_name} origin={}", origin.as_str());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+// ─── The workspace daemon ─────────────────────────────────────────────────────
+
+fn run_workspace_daemon(
+    workspace_path_str: &str,
+    debounce_ms: Option<u64>,
+    writer_ttl_seconds: u64,
+) -> ExitCode {
+    let settings = match load_user_settings_from_environment() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let options = daemon::DaemonOptions {
+        workspace_path: std::path::PathBuf::from(workspace_path_str),
+        debounce: daemon::resolve_debounce(debounce_ms),
+        writer_ttl: std::time::Duration::from_secs(writer_ttl_seconds),
+    };
+
+    if let Err(e) = daemon::run_daemon(&settings, &options) {
+        eprintln!("error: {e:#}");
+        return ExitCode::FAILURE;
+    }
+    ExitCode::SUCCESS
+}
+
+/// How long ago a status was written, in words, for the line that says the
+/// daemon behind it is gone.
+fn age_of(updated_at_unix_ms: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_millis() as u64)
+        .unwrap_or(0);
+    let Some(ms) = now.checked_sub(updated_at_unix_ms) else {
+        return "at a time this machine's clock is behind".to_string();
+    };
+    let seconds = ms / 1_000;
+    match seconds {
+        0 => "less than a second ago".to_string(),
+        1 => "1 second ago".to_string(),
+        2..=90 => format!("{seconds} seconds ago"),
+        _ => format!("{} minutes ago", seconds / 60),
+    }
+}
+
+fn run_daemon_status(workspace_path_str: &str, json: bool) -> ExitCode {
+    let root = match Path::new(workspace_path_str).canonicalize() {
+        Ok(root) => root,
+        Err(e) => {
+            eprintln!("error: cannot resolve {workspace_path_str}: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    match daemon::read_status(&root) {
+        Ok(status) => {
+            // The file is what the daemon last said, not proof it is still
+            // there to say it. A killed daemon leaves a status claiming the
+            // writer role and a fresh workspace, and reporting that as current
+            // is how a person concludes their machine is publishing when it is
+            // not.
+            let running = daemon::is_running(&status);
+            if json {
+                let mut value = serde_json::to_value(&status).unwrap();
+                if let Some(object) = value.as_object_mut() {
+                    object.insert("running".to_string(), serde_json::Value::Bool(running));
+                }
+                println!("{}", serde_json::to_string_pretty(&value).unwrap());
+            } else if !running {
+                println!("workspace: {}", status.workspace);
+                println!("  Root:      {}", status.workspace_root);
+                println!(
+                    "  Daemon:    not running — process {} is gone. What follows is what it said \
+                     last, {}.",
+                    status.pid,
+                    age_of(status.updated_at_unix_ms)
+                );
+                println!("  Published: {} operations", status.published_ops);
+                if let Some(op) = status.last_published_op.as_deref() {
+                    println!("  Last op:   {op}");
+                }
+                println!("  Start one with `tandem daemon {}`.", status.workspace_root);
+            } else {
+                println!("workspace: {}", status.workspace);
+                println!("  Root:      {}", status.workspace_root);
+                println!("  Server:    {}", status.server);
+                println!("  PID:       {}", status.pid);
+                println!("  Debounce:  {}ms", status.debounce_ms);
+                println!("  Published: {} operations", status.published_ops);
+                if let Some(op) = status.last_published_op.as_deref() {
+                    println!("  Last op:   {op}");
+                }
+                println!(
+                    "  Writer:    {}",
+                    if status.writer {
+                        "held".to_string()
+                    } else {
+                        format!(
+                            "not held ({})",
+                            status.writer_detail.as_deref().unwrap_or("unknown")
+                        )
+                    }
+                );
+                println!("  Stale:     {}", status.stale);
+                if status.stale {
+                    println!(
+                        "  The heads moved elsewhere. Run `tandem workspace update-stale` when \
+                         you want the files moved — nothing does it for you."
+                    );
+                }
+            }
+            if running {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        Err(e) => {
+            if json {
+                println!("{{\"running\":false}}");
+            } else {
+                eprintln!("error: {e:#}");
+            }
             ExitCode::FAILURE
         }
     }

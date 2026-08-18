@@ -16,6 +16,8 @@ mod bucket_durability;
 mod bucket_replay;
 #[path = "integration/client_cache.rs"]
 mod client_cache;
+#[path = "integration/clone.rs"]
+mod clone;
 #[path = "integration/contention.rs"]
 mod contention;
 #[path = "integration/control_socket.rs"]
@@ -36,5 +38,7 @@ mod log_streaming;
 mod up_down;
 #[path = "integration/watch.rs"]
 mod watch;
+#[path = "integration/workspace_daemon.rs"]
+mod workspace_daemon;
 #[path = "integration/workspace_setup.rs"]
 mod workspace_setup;
