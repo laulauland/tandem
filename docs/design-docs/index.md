@@ -11,6 +11,7 @@ This folder holds stable technical decisions.
 - [RPC error model](./rpc-error-model.md)
 - [Server lifecycle](./server-lifecycle.md) — `tandem up/down` + `tandem server status/logs`, daemon management
 - [Transport matrix](./transport-matrix.md) — transport compatibility (TCP/WSS/SSH-exec) and sandbox guidance
+- [The test suite](./test-suite.md) — the three homes (DST, properties, integration), where each old test went, and where a new one belongs
 
 ## Add a new design doc when
 

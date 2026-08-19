@@ -13,8 +13,11 @@
 //! that keeps the `integration` bookmark up to date.
 
 mod bucket;
-mod http;
+mod faults;
+pub mod http;
 mod integration;
+
+pub use faults::{CrashWindow, FaultPoints};
 
 use anyhow::{anyhow, bail, Context, Result};
 // blake2 is available if needed for raw hashing, but we use jj_lib::content_hash
@@ -32,7 +35,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
-use self::bucket::{crash_point_after_index_write, test_env_u64, DurableOps, PendingBlobs};
+use self::bucket::{DurableOps, PendingBlobs};
 use crate::control;
 use crate::hex::{from_hex, to_hex};
 use crate::logging;
@@ -225,8 +228,8 @@ pub struct Server {
     bootstrap_op_heads: Vec<String>,
     /// What materializing the repo from the bucket cost at startup.
     boot_replay: Mutex<bucket::BootReplay>,
-    /// Test hook: index writes still to be failed artificially.
-    test_index_conflicts: AtomicU64,
+    /// The faults this server is under. Inert unless a test says otherwise.
+    faults: Arc<FaultPoints>,
     integration_enabled: bool,
     integration_trigger: Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>,
     lock: Mutex<()>,
@@ -318,7 +321,23 @@ fn head_ids_for_wire(heads: &[String]) -> Vec<Vec<u8>> {
 }
 
 impl Server {
-    fn new(repo: PathBuf, integration_enabled: bool, bucket_spec: Option<&str>) -> Result<Self> {
+    /// A server over `repo`, with no faults injected.
+    pub fn new(repo: PathBuf, integration_enabled: bool, bucket_spec: Option<&str>) -> Result<Self> {
+        Self::new_with_faults(
+            repo,
+            integration_enabled,
+            bucket_spec,
+            FaultPoints::inert(),
+        )
+    }
+
+    /// The same, under a fault set a test can drive from the same process.
+    pub fn new_with_faults(
+        repo: PathBuf,
+        integration_enabled: bool,
+        bucket_spec: Option<&str>,
+        faults: Arc<FaultPoints>,
+    ) -> Result<Self> {
         fs::create_dir_all(&repo)?;
 
         // An empty directory is not an empty repo: with a bucket behind it, it
@@ -404,7 +423,7 @@ impl Server {
             bootstrapped,
             bootstrap_op_heads: Vec::new(),
             boot_replay: Mutex::new(bucket::BootReplay::default()),
-            test_index_conflicts: AtomicU64::new(test_env_u64("TANDEM_TEST_INDEX_CAS_CONFLICTS")),
+            faults,
             integration_enabled,
             integration_trigger: Mutex::new(None),
             lock: Mutex::new(()),
@@ -522,7 +541,7 @@ impl Server {
         // merge is computed against a base that is older than the rewrite the
         // descendant carries, so a commit the descendant replaced comes back
         // beside its replacement — two commits, one change id, a divergent
-        // change. That is the whole of the slice14 flake.
+        // change. That is the whole of the auto-workspace-name flake.
         //
         // So the candidates are filtered down to real heads, exactly as
         // `jj_lib::op_heads_store` does it. What is emphatically *not* dropped
@@ -932,6 +951,7 @@ impl Server {
         expected_version: u64,
         workspace_id: Option<String>,
     ) -> Result<UpdateResult> {
+        self.faults.refuse_if_halted()?;
         let _guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
         let metadata = self.read_heads_metadata()?;
 
@@ -988,6 +1008,7 @@ impl Server {
         //
         // 1. The WAL entry: this operation, its view, and every blob written
         //    since the last publish.
+        self.faults.crash(CrashWindow::BeforeWalWrite)?;
         if let Err(err) = self.write_publish_wal_entry(&new_hex) {
             // Nothing was acknowledged and nothing was applied locally, so the
             // client's transaction retry is free to start over.
@@ -997,6 +1018,7 @@ impl Server {
         // 2. The index object, naming the head set this update produces. The
         //    set is computed before the local apply so the bucket commits
         //    first: a crash after this point is replayed at the next start.
+        self.faults.crash(CrashWindow::AfterWalWrite)?;
         let prospective_heads = self.prospective_op_heads(&old_op_ids, &new_op_id)?;
         if self.inject_index_conflict()
             || !self.publish_index(next_version, &prospective_heads, &next_workspace_heads)?
@@ -1004,7 +1026,7 @@ impl Server {
             return self.index_conflict_result(metadata);
         }
 
-        crash_point_after_index_write();
+        self.faults.crash(CrashWindow::AfterIndexWrite)?;
 
         // ── Local apply ──
         //
@@ -1015,6 +1037,11 @@ impl Server {
         // the local repo cannot serve, since recovery runs only at startup.
         pollster::block_on(self.op_heads_store.update_op_heads(&old_op_ids, &new_op_id))
             .map_err(|e| anyhow!("update op heads via jj-lib: {e}"))?;
+
+        // A crash here is past the point of no return, which is exactly why it
+        // is worth generating: the process cannot promise not to die, so the
+        // next start has to make the same state converge anyway.
+        self.faults.crash(CrashWindow::AfterLocalApply)?;
 
         // ── Past the point of no return ──
         //
@@ -1054,6 +1081,8 @@ impl Server {
                 "could not record the new heads metadata locally; the bucket index still holds it"
             );
         }
+
+        self.faults.crash(CrashWindow::AfterMetadataWrite)?;
 
         // Reconciling divergent heads mints a merge operation the index does
         // not know about yet. Make it durable, then mirror the settled head set

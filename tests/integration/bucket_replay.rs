@@ -1,6 +1,6 @@
-//! Slice 23: the server repo is a cache; the bucket is the repo.
+//! The server repo is a cache; the bucket is the repo.
 //!
-//! Acceptance criteria (stage 2 of the target architecture):
+//! What is pinned here:
 //! - `tandem up --bucket` on an empty directory replays the WAL and serves
 //! - Destroying the server directory and re-upping yields identical op heads
 //!   and byte-identical file content
@@ -13,7 +13,8 @@
 //! must exist first (`curl -X PUT http://127.0.0.1:8333/tandem-test`); against a
 //! missing bucket the server dies at boot instead of reporting the cause.
 
-mod common;
+use crate::common;
+use crate::common::workspace::first_commit_id;
 
 use std::path::{Path, PathBuf};
 
@@ -24,7 +25,7 @@ use common::bucket_harness::{read_dir_names, using_s3, BucketHarness as Harness}
 // ─── Harness ──────────────────────────────────────────────────────────────────
 //
 // The shared parts live in `tests/common/bucket_harness.rs`. What follows is
-// only what this slice needs on top of them.
+// only what these tests need on top of them.
 
 impl Harness {
     /// Throw the server's disk away. The bucket is untouched: everything the
@@ -68,10 +69,7 @@ impl Harness {
             ws,
             &["log", "--no-graph", "-r", rev, "-T", "commit_id ++ \"\\n\""],
         );
-        common::assert_ok(&out, &format!("client log for {rev}"));
-        let id = common::stdout_str(&out).trim().to_string();
-        assert!(!id.is_empty(), "no commit id for {rev}");
-        id
+        first_commit_id(&out, &format!("client log for {rev}"))
     }
 }
 
@@ -122,9 +120,9 @@ fn publish_a_history(harness: &Harness, ws_a: &Path, ws_b: &Path) -> Published {
 /// with the same bucket, and the repo comes back: same op heads, same version,
 /// same operations, same file bytes.
 #[test]
-fn slice23_destroying_the_server_repo_and_reupping_replays_the_history() {
+fn destroying_the_server_repo_and_reupping_replays_the_history() {
     let mut harness = Harness::new("full-replay");
-    harness.start_server(&[]);
+    harness.start_server();
     let ws_a = harness.init_workspace("agent-a");
     let ws_b = harness.init_workspace("agent-b");
     let published = publish_a_history(&harness, &ws_a, &ws_b);
@@ -149,7 +147,7 @@ fn slice23_destroying_the_server_repo_and_reupping_replays_the_history() {
         !harness.repo.join(".jj").exists(),
         "the server directory must be empty before the replay"
     );
-    harness.start_server(&[]);
+    harness.start_server();
 
     assert_eq!(
         harness.local_version(),
@@ -232,9 +230,9 @@ fn slice23_destroying_the_server_repo_and_reupping_replays_the_history() {
 
 /// A materialized repo is a real colocated git repo: bookmark it and push it.
 #[test]
-fn slice23_git_push_works_from_a_materialized_repo() {
+fn git_push_works_from_a_materialized_repo() {
     let mut harness = Harness::new("replay-push");
-    harness.start_server(&[]);
+    harness.start_server();
     let ws = harness.init_workspace("agent-a");
 
     let content = b"pub fn feature() -> &'static str {\n    \"materialized\"\n}\n";
@@ -248,7 +246,7 @@ fn slice23_git_push_works_from_a_materialized_repo() {
     let commit_id = harness.client_commit_id(&ws, "@-");
 
     harness.destroy_repo();
-    harness.start_server(&[]);
+    harness.start_server();
 
     assert!(
         harness.repo.join(".git").exists(),
@@ -314,7 +312,7 @@ fn slice23_git_push_works_from_a_materialized_repo() {
 /// `tandem up --bucket` on an empty directory: the daemon materializes the
 /// repo before it serves, and says so.
 #[test]
-fn slice23_up_on_an_empty_directory_materializes_and_serves() {
+fn up_on_an_empty_directory_materializes_and_serves() {
     if using_s3() {
         eprintln!("skipping: this test keeps its bucket on disk (filesystem backend only)");
         return;
@@ -442,14 +440,14 @@ fn replayed_entries(log: &Path) -> usize {
 /// published since — must not fetch a single WAL entry, or every restart pays
 /// one bucket round trip per operation in history, inside the boot path.
 #[test]
-fn slice23_replay_is_incremental_on_a_warm_boot() {
+fn replay_is_incremental_on_a_warm_boot() {
     if using_s3() {
         eprintln!("skipping: this test counts bucket reads in the log (filesystem backend only)");
         return;
     }
 
     let mut harness = Harness::new("warm-boot");
-    harness.start_server(&[]);
+    harness.start_server();
     let ws = harness.init_workspace("agent-a");
     for n in 0..6 {
         common::assert_ok(
@@ -466,7 +464,7 @@ fn slice23_replay_is_incremental_on_a_warm_boot() {
     // Warm: the disk still holds everything the bucket names.
     harness.stop_server();
     let warm_log = harness.tmp.path().join("warm-boot.log");
-    harness.start_server_logging(&[], Some(&warm_log));
+    harness.start_server_logging(Some(&warm_log));
     assert_eq!(
         replayed_entries(&warm_log),
         0,
@@ -477,7 +475,7 @@ fn slice23_replay_is_incremental_on_a_warm_boot() {
     // the warm count mean something.
     harness.destroy_repo();
     let cold_log = harness.tmp.path().join("cold-boot.log");
-    harness.start_server_logging(&[], Some(&cold_log));
+    harness.start_server_logging(Some(&cold_log));
     let cold = replayed_entries(&cold_log);
     assert!(
         cold >= history,
@@ -488,7 +486,7 @@ fn slice23_replay_is_incremental_on_a_warm_boot() {
     // One more warm boot, now on the materialized disk: still nothing to fetch.
     harness.stop_server();
     let second_warm_log = harness.tmp.path().join("warm-boot-2.log");
-    harness.start_server_logging(&[], Some(&second_warm_log));
+    harness.start_server_logging(Some(&second_warm_log));
     assert_eq!(
         replayed_entries(&second_warm_log),
         0,

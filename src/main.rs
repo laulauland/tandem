@@ -5,19 +5,7 @@
 //!   tandem init --server <addr> [path]           → initialize tandem workspace
 //!   tandem <jj args>                             → stock jj via CliRunner
 
-mod backend;
-mod control;
-mod hex;
-mod http_client;
-mod logging;
-mod object_store;
-mod op_heads_store;
-mod op_store;
-mod proto_convert;
-mod server;
-mod wal;
-mod watch;
-mod wire;
+use jj_tandem::{control, server, watch, workspace_init};
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -763,24 +751,6 @@ fn load_user_settings_from_environment() -> Result<jj_lib::settings::UserSetting
 }
 
 fn run_tandem_init(server_addr: &str, workspace_name: &str, workspace_path_str: &str) -> ExitCode {
-    let workspace_path = Path::new(workspace_path_str);
-
-    // Create workspace directory if needed
-    if let Err(e) = std::fs::create_dir_all(workspace_path) {
-        eprintln!("error: cannot create workspace directory: {e}");
-        return ExitCode::FAILURE;
-    }
-
-    // Convert to absolute path
-    let workspace_path = match workspace_path.canonicalize() {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("error: cannot resolve workspace path: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    // Use jj-lib's workspace init with our custom factories
     let settings = match load_user_settings_from_environment() {
         Ok(s) => s,
         Err(e) => {
@@ -789,179 +759,13 @@ fn run_tandem_init(server_addr: &str, workspace_name: &str, workspace_path_str: 
         }
     };
 
-    let signer = match jj_lib::signing::Signer::from_settings(&settings) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error: cannot create signer: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let server_addr_owned = server_addr.to_string();
-    let sa1 = server_addr_owned.clone();
-    let sa2 = server_addr_owned.clone();
-    let sa3 = server_addr_owned.clone();
-    let workspace_name_owned = workspace_name.to_string();
-    let wn1 = workspace_name_owned.clone();
-
-    let backend_init: &dyn Fn(
-        &jj_lib::settings::UserSettings,
-        &Path,
-    ) -> Result<
-        Box<dyn jj_lib::backend::Backend>,
-        jj_lib::backend::BackendInitError,
-    > = &|_settings, store_path| Ok(Box::new(backend::TandemBackend::init(store_path, &sa1)?));
-
-    let op_store_init: &dyn Fn(
-        &jj_lib::settings::UserSettings,
-        &Path,
-        jj_lib::op_store::RootOperationData,
-    ) -> Result<
-        Box<dyn jj_lib::op_store::OpStore>,
-        jj_lib::backend::BackendInitError,
-    > = &|_settings, store_path, root_data| {
-        Ok(Box::new(op_store::TandemOpStore::init(
-            store_path, &sa2, root_data,
-        )?))
-    };
-
-    let op_heads_init: &dyn Fn(
-        &jj_lib::settings::UserSettings,
-        &Path,
-    ) -> Result<
-        Box<dyn jj_lib::op_heads_store::OpHeadsStore>,
-        jj_lib::backend::BackendInitError,
-    > = &|_settings, store_path| {
-        Ok(Box::new(op_heads_store::TandemOpHeadsStore::init(
-            store_path, &sa3, &wn1,
-        )?))
-    };
-
-    match jj_lib::workspace::Workspace::init_with_factories(
+    match workspace_init::init_tandem_workspace(
         &settings,
-        &workspace_path,
-        backend_init,
-        signer,
-        op_store_init,
-        op_heads_init,
-        jj_lib::repo::ReadonlyRepo::default_index_store_initializer(),
-        jj_lib::repo::ReadonlyRepo::default_submodule_store_initializer(),
-        &*jj_lib::workspace::default_working_copy_factory(),
-        jj_lib::ref_name::WorkspaceNameBuf::from(workspace_name.to_string()),
+        server_addr,
+        workspace_name,
+        Path::new(workspace_path_str),
     ) {
-        Ok((mut workspace, repo)) => {
-            use jj_lib::repo::Repo as _;
-
-            let head_repo = match repo.loader().load_at_head() {
-                Ok(repo) => repo,
-                Err(e) => {
-                    eprintln!("error: workspace init failed: cannot load repository head: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-
-            let source_parent_commits = if let Some(source_wc_commit_id) = head_repo
-                .view()
-                .get_wc_commit_id(jj_lib::ref_name::WorkspaceName::DEFAULT)
-            {
-                let source_wc_commit = match head_repo.store().get_commit(source_wc_commit_id) {
-                    Ok(commit) => commit,
-                    Err(e) => {
-                        eprintln!(
-                            "error: workspace init failed: cannot load source workspace commit: {e}"
-                        );
-                        return ExitCode::FAILURE;
-                    }
-                };
-
-                let mut parents = Vec::new();
-                for parent_id in source_wc_commit.parent_ids() {
-                    match head_repo.store().get_commit(parent_id) {
-                        Ok(parent) => parents.push(parent),
-                        Err(e) => {
-                            eprintln!(
-                                "error: workspace init failed: cannot load source workspace parent {parent_id}: {e}"
-                            );
-                            return ExitCode::FAILURE;
-                        }
-                    }
-                }
-
-                if parents.is_empty() {
-                    vec![head_repo.store().root_commit()]
-                } else {
-                    parents
-                }
-            } else {
-                vec![head_repo.store().root_commit()]
-            };
-
-            let merged_tree = match pollster::block_on(jj_lib::rewrite::merge_commit_trees(
-                head_repo.as_ref(),
-                &source_parent_commits,
-            )) {
-                Ok(tree) => tree,
-                Err(e) => {
-                    eprintln!(
-                        "error: workspace init failed: cannot merge source workspace parents: {e}"
-                    );
-                    return ExitCode::FAILURE;
-                }
-            };
-
-            let mut tx = head_repo.start_transaction();
-            let parent_ids: Vec<jj_lib::backend::CommitId> = source_parent_commits
-                .iter()
-                .map(|commit| commit.id().clone())
-                .collect();
-            let new_wc_commit = match tx
-                .repo_mut()
-                .new_commit(parent_ids, merged_tree)
-                .detach()
-                .write(tx.repo_mut())
-            {
-                Ok(commit) => commit,
-                Err(e) => {
-                    eprintln!(
-                        "error: workspace init failed: cannot create initial working-copy commit: {e}"
-                    );
-                    return ExitCode::FAILURE;
-                }
-            };
-
-            if let Err(e) = tx.repo_mut().edit(
-                jj_lib::ref_name::WorkspaceNameBuf::from(workspace_name.to_string()),
-                &new_wc_commit,
-            ) {
-                eprintln!(
-                    "error: workspace init failed: cannot move workspace to source context: {e}"
-                );
-                return ExitCode::FAILURE;
-            }
-
-            if let Err(e) = tx.repo_mut().rebase_descendants() {
-                eprintln!("error: workspace init failed: cannot rebase rewritten descendants: {e}");
-                return ExitCode::FAILURE;
-            }
-
-            let updated_repo = match tx.commit(format!(
-                "create initial working-copy commit in workspace {workspace_name}"
-            )) {
-                Ok(repo) => repo,
-                Err(e) => {
-                    eprintln!(
-                        "error: workspace init failed: cannot publish initial operation: {e}"
-                    );
-                    return ExitCode::FAILURE;
-                }
-            };
-
-            if let Err(e) = workspace.check_out(updated_repo.op_id().clone(), None, &new_wc_commit)
-            {
-                eprintln!("error: workspace init failed: cannot update working copy checkout: {e}");
-                return ExitCode::FAILURE;
-            }
-
+        Ok(workspace_path) => {
             eprintln!(
                 "Initialized tandem workspace '{}' at {} (server: {})",
                 workspace_name,
@@ -971,7 +775,14 @@ fn run_tandem_init(server_addr: &str, workspace_name: &str, workspace_path_str: 
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("error: workspace init failed: {e}");
+            // The whole chain, not just the top context. Every step of
+            // `workspace_init` used to print its own message and the cause
+            // under it — `error: workspace init failed: <step>: <cause>` — and
+            // the steps are `context` calls now, so `{e:#}` is what puts that
+            // line back together. It is not character-for-character the old
+            // text: where a cause has causes of its own, this prints those too,
+            // and the old code stopped at the first.
+            eprintln!("error: {e:#}");
             ExitCode::FAILURE
         }
     }
@@ -984,42 +795,8 @@ fn run_jj() -> ExitCode {
 
     CliRunner::init()
         .version(env!("CARGO_PKG_VERSION"))
-        .add_store_factories(tandem_factories())
+        .add_store_factories(workspace_init::tandem_factories())
         .run()
         .into()
 }
 
-/// Register tandem backend/opstore/opheadsstore factories so that jj
-/// can load repos with store/type = "tandem".
-fn tandem_factories() -> jj_lib::repo::StoreFactories {
-    let mut factories = jj_lib::repo::StoreFactories::empty();
-
-    factories.add_backend(
-        "tandem",
-        Box::new(|settings, store_path| {
-            Ok(Box::new(backend::TandemBackend::load(
-                settings, store_path,
-            )?))
-        }),
-    );
-
-    factories.add_op_store(
-        "tandem_op_store",
-        Box::new(|settings, store_path, root_data| {
-            Ok(Box::new(op_store::TandemOpStore::load(
-                settings, store_path, root_data,
-            )?))
-        }),
-    );
-
-    factories.add_op_heads_store(
-        "tandem_op_heads_store",
-        Box::new(|settings, store_path| {
-            Ok(Box::new(op_heads_store::TandemOpHeadsStore::load(
-                settings, store_path,
-            )?))
-        }),
-    );
-
-    factories
-}

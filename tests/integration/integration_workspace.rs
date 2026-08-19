@@ -1,21 +1,31 @@
-//! Slice 16: integration workspace mode flag plumbing
+//! The integration workspace mode, and how the flag reaches the server.
 //!
-//! Acceptance criteria:
-//! - Disabled by default: no integration bookmark updates
-//! - Enabled mode: successful op-head updates eventually refresh `integration` bookmark
-//! - Env fallback (`TANDEM_ENABLE_INTEGRATION_WORKSPACE=1`) enables mode without flag
-//! - `tandem up --enable-integration-workspace` forwards mode to daemonized serve
+//! What is pinned here:
+//! - disabled by default: nothing touches the `integration` bookmark
+//! - enabled: a published op head eventually moves that bookmark
+//! - `TANDEM_ENABLE_INTEGRATION_WORKSPACE=1` enables the mode without the flag
+//! - `tandem up --enable-integration-workspace` forwards it to the daemon
 
-mod common;
+use crate::common;
+use crate::common::ServerFixture;
 
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tempfile::TempDir;
 
-fn wait_for_integration_commit(workspace_dir: &std::path::Path, home: &std::path::Path) -> String {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
+/// Wait for the integration bookmark to name a commit.
+///
+/// This used to spawn a `tandem log` every fifty milliseconds until it liked
+/// the answer — up to three hundred processes to observe one bookmark move. The
+/// server publishes a head event when its heads change, so the wait subscribes
+/// and asks only when there is a reason to.
+fn wait_for_integration_commit(
+    addr: &str,
+    workspace_dir: &std::path::Path,
+    home: &std::path::Path,
+) -> String {
+    let found = common::workspace::wait_for(addr, Duration::from_secs(15), || {
         let out = common::run_tandem_in(
             workspace_dir,
             &[
@@ -28,21 +38,13 @@ fn wait_for_integration_commit(workspace_dir: &std::path::Path, home: &std::path
             ],
             home,
         );
-        if out.status.success() {
-            let commit = common::stdout_str(&out).trim().to_string();
-            if !commit.is_empty() {
-                return commit;
-            }
+        if !out.status.success() {
+            return None;
         }
-        if Instant::now() > deadline {
-            panic!(
-                "integration bookmark did not appear in time\nstdout:\n{}\nstderr:\n{}",
-                common::stdout_str(&out),
-                common::stderr_str(&out)
-            );
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
+        let commit = common::stdout_str(&out).trim().to_string();
+        (!commit.is_empty()).then_some(commit)
+    });
+    found.expect("the integration bookmark did not appear before the deadline")
 }
 
 fn write_single_commit(workspace_dir: &std::path::Path, home: &std::path::Path) {
@@ -80,25 +82,11 @@ fn commit_author_email(
 }
 
 #[test]
-fn slice16_flag_off_no_integration_bookmark() {
-    let tmp = TempDir::new().unwrap();
-    let home = common::isolated_home(tmp.path());
-    let server_repo = tmp.path().join("server-repo");
-    std::fs::create_dir_all(&server_repo).unwrap();
-    let ws = tmp.path().join("ws");
-    std::fs::create_dir_all(&ws).unwrap();
+fn flag_off_no_integration_bookmark() {
+    let mut fx = ServerFixture::builder().control_socket().start();
+    let home = fx.home.clone();
 
-    let addr = common::free_addr();
-    let sock = common::control_socket_path(tmp.path());
-    let sock_str = sock.to_str().unwrap();
-
-    let mut server =
-        common::spawn_server_with_args(&server_repo, &addr, &["--control-socket", sock_str], &home);
-    common::wait_for_server(&addr, &mut server);
-    common::wait_for_socket(&sock, Duration::from_secs(5));
-
-    let init = common::run_tandem_in(&ws, &["init", "--server", &addr, "."], &home);
-    common::assert_ok(&init, "init workspace");
+    let ws = fx.init_workspace("ws", None);
     let init_author_email = commit_author_email(&ws, "@", &home);
     assert_eq!(
         init_author_email, "test@tandem.dev",
@@ -127,10 +115,15 @@ fn slice16_flag_off_no_integration_bookmark() {
         common::stderr_str(&integration_log)
     );
 
-    let status = common::run_tandem_in(
-        tmp.path(),
-        &["server", "status", "--json", "--control-socket", sock_str],
-        &home,
+    let status = fx.run(
+        fx.path(),
+        &[
+            "server",
+            "status",
+            "--json",
+            "--control-socket",
+            fx.socket_str(),
+        ],
     );
     common::assert_ok(&status, "server status --json");
     let parsed: serde_json::Value =
@@ -139,41 +132,24 @@ fn slice16_flag_off_no_integration_bookmark() {
 
     #[cfg(unix)]
     unsafe {
-        libc::kill(server.id() as libc::pid_t, libc::SIGINT);
+        libc::kill(fx.server.id() as libc::pid_t, libc::SIGINT);
     }
-    let _ = server.wait();
+    let _ = fx.server.wait();
 }
 
 #[test]
-fn slice16_flag_on_creates_integration_bookmark_and_status() {
-    let tmp = TempDir::new().unwrap();
-    let home = common::isolated_home(tmp.path());
-    let server_repo = tmp.path().join("server-repo");
-    std::fs::create_dir_all(&server_repo).unwrap();
-    let ws = tmp.path().join("ws");
-    std::fs::create_dir_all(&ws).unwrap();
-
-    let addr = common::free_addr();
-    let sock = common::control_socket_path(tmp.path());
-    let sock_str = sock.to_str().unwrap();
-
-    let mut server = common::spawn_server_with_args(
-        &server_repo,
-        &addr,
-        &[
-            "--control-socket",
-            sock_str,
+fn flag_on_creates_integration_bookmark_and_status() {
+    let mut fx = ServerFixture::builder()
+        .control_socket()
+        .args(&[
             "--enable-integration-workspace",
             "--log-level",
             "error",
-        ],
-        &home,
-    );
-    common::wait_for_server(&addr, &mut server);
-    common::wait_for_socket(&sock, Duration::from_secs(5));
+        ])
+        .start();
+    let home = fx.home.clone();
 
-    let init = common::run_tandem_in(&ws, &["init", "--server", &addr, "."], &home);
-    common::assert_ok(&init, "init workspace");
+    let ws = fx.init_workspace("ws", None);
     let init_author_email = commit_author_email(&ws, "@", &home);
     assert_eq!(
         init_author_email, "test@tandem.dev",
@@ -181,7 +157,7 @@ fn slice16_flag_on_creates_integration_bookmark_and_status() {
     );
 
     write_single_commit(&ws, &home);
-    let integration_commit = wait_for_integration_commit(&ws, &home);
+    let integration_commit = wait_for_integration_commit(&fx.addr, &ws, &home);
     assert!(!integration_commit.is_empty());
     let integration_author_email = commit_author_email(&ws, &integration_commit, &home);
     assert_eq!(
@@ -189,10 +165,15 @@ fn slice16_flag_on_creates_integration_bookmark_and_status() {
         "integration commit should use configured user.email"
     );
 
-    let status = common::run_tandem_in(
-        tmp.path(),
-        &["server", "status", "--json", "--control-socket", sock_str],
-        &home,
+    let status = fx.run(
+        fx.path(),
+        &[
+            "server",
+            "status",
+            "--json",
+            "--control-socket",
+            fx.socket_str(),
+        ],
     );
     common::assert_ok(&status, "server status --json");
     let parsed: serde_json::Value =
@@ -205,13 +186,13 @@ fn slice16_flag_on_creates_integration_bookmark_and_status() {
 
     #[cfg(unix)]
     unsafe {
-        libc::kill(server.id() as libc::pid_t, libc::SIGINT);
+        libc::kill(fx.server.id() as libc::pid_t, libc::SIGINT);
     }
-    let _ = server.wait();
+    let _ = fx.server.wait();
 }
 
 #[test]
-fn slice16_env_fallback_and_up_forwarding() {
+fn env_fallback_and_up_forwarding() {
     let tmp = TempDir::new().unwrap();
     let home = common::isolated_home(tmp.path());
     let server_repo = tmp.path().join("server-repo");

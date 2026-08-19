@@ -78,9 +78,10 @@ materialization — kill the server, `tandem up --bucket` anywhere, it replays.
 
 Three tiers; each stage names the tier that gates it.
 
-1. **`cargo test` only** (stages 1–4): slice tests run server and clients
+1. **`cargo test` only** (stages 1–4): the simulation runs server and clients
    in-process; the object-store trait's filesystem backend (a directory as a
-   bucket) covers WAL/index semantics. No external services.
+   bucket) covers WAL/index semantics. No external services. See
+   [The test suite](./test-suite.md).
 2. **SeaweedFS container** (stages 1, 5): a real S3 API locally via
    `docker run -d -p 8333:8333 chrislusf/seaweedfs server -s3` (pin the tag;
    poll ListBuckets for readiness, ~3 s cold start; anonymous access is open

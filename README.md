@@ -417,20 +417,33 @@ agents to see each other's work without merging, tandem is what you want.
 cargo test
 ```
 
-38 integration tests covering:
+The suite has three homes. [The test suite](docs/design-docs/test-suite.md)
+says where a new test belongs and where every old one went.
 
-- Single-agent file round-trip (write → commit → read back exact bytes)
-- Two-agent cross-workspace file visibility
-- Concurrent writes from 2 and 5 agents (CAS convergence)
-- Transport correctness under rapid sequential writes (slice 4)
-- The HTTP API surface itself: cache headers, `ETag`/`If-Match` CAS, malformed frames, SSE
-- Real-time head notifications
-- Git round-trip (tandem → jj git objects)
-- End-to-end multi-agent with bookmarks
-- Signal handling and graceful shutdown
-- Control socket status reporting
-- Daemon lifecycle (up/down)
-- Log streaming
+**`tests/dst.rs` — deterministic simulation.** An in-process server and
+in-process agents, driven by a generated schedule of commits, index-CAS
+conflicts, injected bucket failures, crashes and restarts. Every invariant is
+checked after every step: agents converge, no divergent change ids, the API's
+head view matches the server's jj op heads, every head the index names has a
+WAL entry behind it, and every byte ever written still reads back. Every
+schedule ends by throwing the server's disk away and reading everything back
+out of the bucket alone, so an object that never reached a WAL entry has
+nowhere left to hide. A failure prints its seed, and the seed reproduces it
+exactly.
+
+**`tests/properties.rs` — generated round-trips.** Files survive commit
+boundaries byte for byte, from the client and from the server. The WAL framing
+and the HTTP serialization layer decode what they encode, and never panic or
+over-allocate on arbitrary bytes.
+
+**`tests/integration.rs` — real processes.** Kept where the subprocess is the
+coverage: a git round-trip that ends in a `git clone`, five agents contending
+from five processes, signal handling, the control socket, `tandem up`/`down`,
+`tandem watch`, log streaming, and the HTTP API surface — cache headers,
+`ETag`/`If-Match` CAS, malformed frames and SSE.
+
+Bucket tests run twice: against the filesystem backend by default, and against
+a real S3 API when `TANDEM_TEST_S3_BUCKET` is set.
 
 Performance evidence (latest local benchmark run):
 
@@ -479,10 +492,14 @@ src/
   proto_convert.rs     jj protobuf ↔ Rust struct conversion
   watch.rs             tandem watch command (SSE reader)
 tests/
-  common/mod.rs        Test harness (server spawn, HOME isolation, HTTP helpers)
-  http_api_surface.rs  The HTTP endpoints, cache headers, CAS and SSE
-  slice1-7 tests       Core integration tests (file round-trip, visibility, CAS, git)
-  slice10-13 tests     Server lifecycle tests (shutdown, control socket, up/down, logs)
+  dst.rs               Deterministic simulation: seeded schedules, checked every step
+  support/             The simulation: cluster, agent, oracle, schedule generator, rng
+  properties.rs        Generated round-trips: file bytes, WAL framing, HTTP bodies
+  properties/          roundtrip.rs, wal.rs, wire.rs
+  integration.rs       Real processes: git, signals, control socket, watch, HTTP API
+  integration/         One file per surface (13)
+  common/              Subprocess helpers: command runners, retry/settle, bucket
+                       harness, deadline line reads
 ```
 
 ## License

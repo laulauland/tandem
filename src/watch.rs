@@ -71,7 +71,7 @@ fn print_heads(client: &TandemClient, last_printed: &mut Option<u64>) -> Result<
 
 // ─── Server-sent events ───────────────────────────────────────────────────────
 
-/// The slice of `text/event-stream` tandem needs.
+/// The part of `text/event-stream` tandem needs.
 ///
 /// Events are blank-line-separated blocks of `field: value` lines. Only the
 /// `data:` lines matter here; comment lines (`:`), which are what a keep-alive

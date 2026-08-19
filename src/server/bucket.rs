@@ -16,7 +16,6 @@ use jj_lib::backend::{CommitId, TreeId, TreeValue};
 use jj_lib::object_id::ObjectId as _;
 use jj_lib::op_store::{Operation, OperationId};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use super::{
@@ -308,6 +307,9 @@ impl Server {
     fn put_wal_entry(&self, op_hex: &str, entry: &wal::WalEntry) -> Result<bool> {
         let encoded = entry.encode()?;
         let key = wal::wal_key(op_hex);
+        if self.faults.take_wal_write_failure() {
+            bail!("injected bucket failure while writing WAL entry {key}");
+        }
         let stored = self
             .bucket
             .put_immutable(&key, &encoded)
@@ -534,7 +536,7 @@ impl Server {
         workspace_heads: &BTreeMap<String, String>,
     ) -> Vec<String> {
         for head in op_heads {
-            let result = match derived_head_wal_fault() {
+            let result = match self.faults.derived_head_wal_fault() {
                 Some(err) => Err(err),
                 None => self
                     .ensure_wal_entry(head)
@@ -635,37 +637,30 @@ impl Server {
         })
     }
 
-    /// Test-only: force the next N index writes to look like CAS conflicts, so
-    /// the retryable path can be exercised without a second writer.
+    /// Whether the fault seam wants this index write to look like a CAS
+    /// conflict, so the retryable path can be exercised without a second
+    /// writer.
     pub(super) fn inject_index_conflict(&self) -> bool {
-        let remaining = self.test_index_conflicts.load(Ordering::Relaxed);
-        if remaining == 0 {
+        if !self.faults.take_index_cas_conflict() {
             return false;
         }
-        self.test_index_conflicts
-            .fetch_sub(1, Ordering::Relaxed);
-        tracing::warn!(remaining, "injecting an index CAS conflict (test hook)");
-        self.stage_test_object_during_conflict();
+        self.stage_injected_object_during_conflict();
         true
     }
 
-    /// Test-only: stand in for a second client whose object write lands between
-    /// two attempts of a retried publish, which is the window in which a
-    /// drained staging buffer can lose objects. Inert unless the var is set.
-    fn stage_test_object_during_conflict(&self) {
-        let Ok(content) = std::env::var("TANDEM_TEST_STAGE_OBJECT_ON_INDEX_CONFLICT") else {
+    /// The object a second client "wrote" between two attempts of a retried
+    /// publish — the window in which a drained staging buffer can lose objects.
+    fn stage_injected_object_during_conflict(&self) {
+        let Some(content) = self.faults.object_for_index_conflict() else {
             return;
         };
-        if content.is_empty() {
-            return;
-        }
-        match self.put_object_sync("file", content.as_bytes()) {
+        match self.put_object_sync("file", &content) {
             Ok((id, _)) => tracing::warn!(
                 object = %to_hex(&id),
-                "staged a test object during an injected index conflict"
+                "staged an injected object during an injected index conflict"
             ),
             Err(err) => {
-                tracing::error!(error = %err, "could not stage the test object")
+                tracing::error!(error = %err, "could not stage the injected object")
             }
         }
     }
@@ -1125,41 +1120,6 @@ impl Server {
             .map(|slot| *slot)
             .unwrap_or_default()
     }
-}
-
-// ─── Test hooks ───────────────────────────────────────────────────────────────
-
-/// Read a test hook's counter from the environment. Anything unset, empty or
-/// unparseable reads as zero, which is every hook's inert setting.
-pub(super) fn test_env_u64(name: &str) -> u64 {
-    std::env::var(name)
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .unwrap_or(0)
-}
-
-/// Test-only fault injection for the window this stage's recovery path exists
-/// for: the index write is durable in the bucket, the local repo has not
-/// applied it yet, and the client has not been acknowledged.
-pub(super) fn crash_point_after_index_write() {
-    if test_env_u64("TANDEM_TEST_CRASH_AFTER_INDEX_WRITE") == 0 {
-        return;
-    }
-    tracing::warn!("TANDEM_TEST_CRASH_AFTER_INDEX_WRITE set; exiting before the local apply");
-    std::process::exit(99);
-}
-
-/// Test-only: stand in for a bucket that fails while the server is writing the
-/// WAL entry of a merge operation it minted itself. That write happens after
-/// the publish is durable and applied, so the failure must never reach the
-/// client. Inert unless the var is set.
-fn derived_head_wal_fault() -> Option<anyhow::Error> {
-    if test_env_u64("TANDEM_TEST_FAIL_DERIVED_HEAD_WAL") == 0 {
-        return None;
-    }
-    Some(anyhow!(
-        "injected bucket failure while writing a derived op head (test hook)"
-    ))
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

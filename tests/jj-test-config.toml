@@ -1,0 +1,13 @@
+# The jj configuration every test runs under.
+#
+# Two module trees need it — `tests/common` for the integration binary and
+# `tests/support` for the simulation and property binaries — and they serve
+# different test binaries, so neither can call into the other. They
+# `include_str!` this file instead, which is what keeps the two suites from
+# drifting into different identities or a different fsmonitor.
+
+user.name = "Test User"
+user.email = "test@tandem.dev"
+
+[fsmonitor]
+backend = "none"

@@ -1,11 +1,11 @@
-//! The shared harness for the bucket slice tests.
+//! The shared harness for the bucket tests.
 //!
-//! Every bucket slice drives the same shape: a server started against a bucket,
+//! Every bucket test drives the same shape: a server started against a bucket,
 //! workspaces initialized against that server, and assertions read off the
 //! server's own disk. Tier 1 keeps the bucket on the filesystem; tier 2 points
 //! the same tests at SeaweedFS through `TANDEM_TEST_S3_BUCKET`.
 //!
-//! Only what every bucket slice needs lives here. A test file adds its own
+//! Only what every bucket test needs lives here. A test file adds its own
 //! methods in an `impl` block of its own — the type is local to the test crate,
 //! so that works without touching this file.
 
@@ -55,26 +55,20 @@ impl BucketHarness {
         }
     }
 
-    pub fn start_server(&mut self, env: &[(&str, &str)]) {
-        self.start_server_logging(env, None);
+    pub fn start_server(&mut self) {
+        self.start_server_logging(None);
     }
 
     /// Start a server whose log lands in a file, so a test can count what the
     /// server did rather than only what it left behind.
-    pub fn start_server_logging(&mut self, env: &[(&str, &str)], log: Option<&Path>) {
+    pub fn start_server_logging(&mut self, log: Option<&Path>) {
         assert!(self.server.is_none(), "server already running");
         let mut args: Vec<&str> = vec!["--bucket", &self.bucket_spec];
         if log.is_some() {
             args.extend(["--log-level", "debug"]);
         }
-        let mut child = spawn_server_with_args_env_and_log(
-            &self.repo,
-            &self.addr,
-            &args,
-            env,
-            &self.home,
-            log,
-        );
+        let mut child =
+            spawn_server_with_args_env_and_log(&self.repo, &self.addr, &args, &[], &self.home, log);
         wait_for_server(&self.addr, &mut child);
         self.server = Some(child);
     }

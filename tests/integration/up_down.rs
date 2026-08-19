@@ -1,6 +1,6 @@
-//! Slice 12: tandem up and tandem down
+//! `tandem up` and `tandem down`: the daemon lifecycle an operator drives.
 //!
-//! Acceptance criteria:
+//! What is pinned here:
 //! - `tandem up --repo ... --listen ...` returns immediately, daemon is running.
 //! - `tandem up --repo ...` auto-selects a listen address when omitted.
 //! - `tandem status` shows running after `tandem up`.
@@ -8,14 +8,14 @@
 //! - `tandem up` twice: second invocation errors with "already running".
 //! - PID file and control socket cleaned up after `tandem down`.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 use tempfile::TempDir;
 
 /// tandem up starts daemon, status shows running, down stops it.
 #[test]
-fn slice12_up_status_down() {
+fn up_status_down() {
     let tmp = TempDir::new().unwrap();
     let home = common::isolated_home(tmp.path());
     let server_repo = tmp.path().join("server-repo");
@@ -102,7 +102,7 @@ fn slice12_up_status_down() {
 
 /// tandem up with no --listen picks a free default port.
 #[test]
-fn slice12_up_auto_listen_port() {
+fn up_auto_listen_port() {
     let tmp = TempDir::new().unwrap();
     let home = common::isolated_home(tmp.path());
     let server_repo = tmp.path().join("server-repo");
@@ -160,7 +160,7 @@ fn slice12_up_auto_listen_port() {
 
 /// tandem up twice returns error on second invocation.
 #[test]
-fn slice12_up_twice_errors() {
+fn up_twice_errors() {
     let tmp = TempDir::new().unwrap();
     let home = common::isolated_home(tmp.path());
     let server_repo = tmp.path().join("server-repo");
@@ -221,7 +221,7 @@ fn slice12_up_twice_errors() {
 
 /// Full round-trip: up → init workspace → write file → read file → down.
 #[test]
-fn slice12_up_roundtrip_down() {
+fn up_roundtrip_down() {
     let tmp = TempDir::new().unwrap();
     let home = common::isolated_home(tmp.path());
     let server_repo = tmp.path().join("server-repo");
@@ -288,7 +288,7 @@ fn slice12_up_roundtrip_down() {
 
 /// tandem down with no daemon running exits 1.
 #[test]
-fn slice12_down_not_running() {
+fn down_not_running() {
     let tmp = TempDir::new().unwrap();
     let home = common::isolated_home(tmp.path());
 

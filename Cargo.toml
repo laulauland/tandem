@@ -17,6 +17,10 @@ exclude = [
     ".github/",
 ]
 
+[lib]
+name = "jj_tandem"
+path = "src/lib.rs"
+
 [[bin]]
 name = "tandem"
 path = "src/main.rs"

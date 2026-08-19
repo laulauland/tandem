@@ -1,11 +1,11 @@
 //! The HTTP API surface, exercised directly rather than through jj.
 //!
-//! The slice tests prove that jj still works over the new transport. This
+//! The end-to-end tests prove that jj still works over the new transport. This
 //! file proves the transport itself: the endpoints the design doc names, the
 //! cache headers on the immutable ones, the ETag/If-Match CAS on the mutable
 //! one, and the SSE wake-ups.
 
-mod common;
+use crate::common;
 
 use std::io::{BufRead, BufReader};
 use std::time::Duration;
@@ -15,54 +15,37 @@ use tempfile::TempDir;
 const REQUEST_MAGIC: &[u8; 4] = b"TBQ1";
 const RESPONSE_MAGIC: &[u8; 4] = b"TBS1";
 
+/// The shared server fixture plus the one workspace these tests publish from.
 struct Fixture {
-    _tmp: TempDir,
-    addr: String,
-    home: std::path::PathBuf,
+    server: common::ServerFixture,
     workspace: std::path::PathBuf,
-    server: std::process::Child,
 }
 
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = self.server.kill();
-        let _ = self.server.wait();
+/// So a test can still say `fx.addr` and `fx.home` without knowing that the
+/// server half of the fixture is shared with the rest of the suite.
+impl std::ops::Deref for Fixture {
+    type Target = common::ServerFixture;
+
+    fn deref(&self) -> &Self::Target {
+        &self.server
     }
 }
 
 /// A server and an initialized workspace, over the home directory the caller
-/// prepared. It is a function rather than inline setup so that every test —
-/// including the one that has to write a jj config before the first command
-/// runs — gets a `Fixture`, and with it the `Drop` that reaps the server
-/// however the test ends.
+/// prepared — for the one test that has to write a jj config before the first
+/// command runs.
 fn fixture_with_home(tmp: TempDir, home: std::path::PathBuf) -> Fixture {
-    let server_repo = tmp.path().join("server-repo");
-    std::fs::create_dir_all(&server_repo).unwrap();
-    let workspace = tmp.path().join("workspace");
-    std::fs::create_dir_all(&workspace).unwrap();
-
-    let addr = common::free_addr();
-    let mut server = common::spawn_server(&server_repo, &addr);
-    common::wait_for_server(&addr, &mut server);
-
-    let init = common::run_tandem_in(&workspace, &["init", "--server", &addr, "."], &home);
-    common::assert_ok(&init, "tandem init");
-
-    Fixture {
-        _tmp: tmp,
-        addr,
-        home,
-        workspace,
-        server,
-    }
+    let server = common::ServerFixture::builder().in_home(tmp, home).start();
+    let workspace = server.init_workspace("workspace", None);
+    Fixture { server, workspace }
 }
 
 /// A server with one workspace that has already published something, so the
 /// head version is past zero and there are real objects to read.
 fn fixture() -> Fixture {
-    let tmp = TempDir::new().unwrap();
-    let home = common::isolated_home(tmp.path());
-    let fx = fixture_with_home(tmp, home);
+    let server = common::ServerFixture::start();
+    let workspace = server.init_workspace("workspace", None);
+    let fx = Fixture { server, workspace };
 
     std::fs::write(fx.workspace.join("hello.txt"), b"hello over http\n").unwrap();
     let new = common::run_tandem_in(&fx.workspace, &["new", "-m", "http surface"], &fx.home);
@@ -434,7 +417,7 @@ fn the_event_stream_wakes_a_reader_when_the_heads_move() {
 // ─── Request size ─────────────────────────────────────────────────────────────
 //
 // axum caps a `Bytes` body at 2 MiB unless told otherwise, and nothing else in
-// the suite writes an object that big — every slice test commits a handful of
+// the suite writes an object that big — the other tests commit a handful of
 // short text files. The two tests below are the ones that would have caught a
 // default left in place: the first writes one blob straight over HTTP, the
 // second commits a tracked file of the same size through jj, which is how a
@@ -536,9 +519,10 @@ fn a_tracked_file_past_the_default_body_limit_commits_and_reads_back() {
     std::fs::create_dir_all(&config_dir).unwrap();
     std::fs::write(
         config_dir.join("config.toml"),
-        "user.name = \"Test User\"\nuser.email = \"test@tandem.dev\"\n\
-         [fsmonitor]\nbackend = \"none\"\n\
-         [snapshot]\nmax-new-file-size = \"64MiB\"\n",
+        format!(
+            "{}\n[snapshot]\nmax-new-file-size = \"64MiB\"\n",
+            common::JJ_TEST_CONFIG
+        ),
     )
     .unwrap();
 

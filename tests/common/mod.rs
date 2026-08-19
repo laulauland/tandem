@@ -1,21 +1,48 @@
 #![allow(dead_code)]
 
 pub mod bucket_harness;
+pub mod lines;
+pub mod server_fixture;
+pub mod workspace;
+
+pub use server_fixture::ServerFixture;
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// The jj configuration every test runs under, shared with `tests/support` so
+/// that the two suites cannot drift into different identities.
+pub const JJ_TEST_CONFIG: &str = include_str!("../jj-test-config.toml");
+
 pub fn tandem_bin() -> &'static str {
     env!("CARGO_BIN_EXE_tandem")
 }
 
+/// Ports this process has already handed out.
+///
+/// Asking the kernel for port 0 and then dropping the listener leaves a window
+/// where the port is free again. That was survivable when every test file was
+/// its own process; the whole integration suite is now one process with dozens
+/// of threads, so the kernel will happily hand the same port to two of them
+/// inside that window. Remembering what was handed out closes the half of the
+/// race this process controls.
+static HANDED_OUT_PORTS: std::sync::Mutex<Option<std::collections::HashSet<u16>>> =
+    std::sync::Mutex::new(None);
+
 pub fn free_addr() -> String {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind random port");
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
-    format!("127.0.0.1:{port}")
+    for _ in 0..64 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind random port");
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let mut taken = HANDED_OUT_PORTS.lock().expect("port registry");
+        if taken.get_or_insert_with(Default::default).insert(port) {
+            return format!("127.0.0.1:{port}");
+        }
+    }
+    panic!("could not find a port this process has not already used");
 }
 
 /// Create a temporary HOME directory for test isolation.
@@ -37,30 +64,8 @@ pub fn isolate_env(cmd: &mut Command, home: &Path) {
     let config_dir = home.join(".config").join("jj");
     if !config_dir.exists() {
         std::fs::create_dir_all(&config_dir).ok();
-        std::fs::write(
-            config_dir.join("config.toml"),
-            "user.name = \"Test User\"\nuser.email = \"test@tandem.dev\"\n\
-             [fsmonitor]\nbackend = \"none\"\n",
-        )
-        .ok();
+        std::fs::write(config_dir.join("config.toml"), JJ_TEST_CONFIG).ok();
     }
-}
-
-pub fn spawn_server(repo: &Path, addr: &str) -> Child {
-    Command::new(tandem_bin())
-        .args([
-            "serve",
-            "--listen",
-            addr,
-            "--repo",
-            repo.to_str().unwrap(),
-            "--log-level",
-            "warn",
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn tandem serve")
 }
 
 pub fn wait_for_server(addr: &str, child: &mut Child) {

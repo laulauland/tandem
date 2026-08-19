@@ -33,7 +33,7 @@ pub fn wal_key(op_hex: &str) -> String {
 
 // ─── WAL entry ────────────────────────────────────────────────────────────────
 
-const MAGIC: &[u8; 8] = b"TDMWAL\0\x01";
+pub const MAGIC: &[u8; 8] = b"TDMWAL\0\x01";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordKind {
@@ -253,107 +253,16 @@ impl IndexObject {
 mod tests {
     use super::*;
 
-    #[test]
-    fn wal_entry_round_trips() {
-        let entry = WalEntry {
-            op_id: vec![0xab, 0xcd],
-            parents: vec![vec![0x01], vec![0x02, 0x03]],
-            records: vec![
-                WalRecord {
-                    kind: RecordKind::File,
-                    id: vec![9, 9],
-                    data: b"hello".to_vec(),
-                },
-                WalRecord {
-                    kind: RecordKind::View,
-                    id: vec![7],
-                    data: b"view-proto".to_vec(),
-                },
-                WalRecord {
-                    kind: RecordKind::Operation,
-                    id: vec![0xab, 0xcd],
-                    data: b"op-proto".to_vec(),
-                },
-            ],
-        };
-        let encoded = entry.encode().unwrap();
-        assert_eq!(WalEntry::decode(&encoded).unwrap(), entry);
-    }
-
-    #[test]
-    fn wal_entry_with_no_records_round_trips() {
-        let entry = WalEntry {
-            op_id: vec![1, 2, 3],
-            parents: Vec::new(),
-            records: Vec::new(),
-        };
-        assert_eq!(WalEntry::decode(&entry.encode().unwrap()).unwrap(), entry);
-    }
-
-    #[test]
-    fn wal_entry_rejects_corruption() {
-        let entry = WalEntry {
-            op_id: vec![1],
-            parents: Vec::new(),
-            records: Vec::new(),
-        };
-        let encoded = entry.encode().unwrap();
-        assert!(WalEntry::decode(&encoded[..encoded.len() - 1]).is_err());
-
-        let mut wrong_magic = encoded.clone();
-        wrong_magic[0] = b'X';
-        assert!(WalEntry::decode(&wrong_magic).is_err());
-
-        let mut trailing = encoded.clone();
-        trailing.push(0);
-        assert!(WalEntry::decode(&trailing).is_err());
-    }
-
-    /// A count read off the wire must not be trusted as an allocation size.
-    #[test]
-    fn wal_entry_does_not_allocate_on_a_claimed_count() {
-        let mut hostile = Vec::new();
-        hostile.extend_from_slice(MAGIC);
-        hostile.extend_from_slice(&0u32.to_be_bytes()); // empty op id
-        hostile.extend_from_slice(&u32::MAX.to_be_bytes()); // "four billion parents"
-        assert!(WalEntry::decode(&hostile).is_err());
-
-        let mut hostile_records = Vec::new();
-        hostile_records.extend_from_slice(MAGIC);
-        hostile_records.extend_from_slice(&0u32.to_be_bytes());
-        hostile_records.extend_from_slice(&0u32.to_be_bytes());
-        hostile_records.extend_from_slice(&u32::MAX.to_be_bytes());
-        assert!(WalEntry::decode(&hostile_records).is_err());
-    }
-
     /// The 32-bit framing is a hard limit, not a truncation point.
+    ///
+    /// The rest of the framing properties live in `tests/properties/wal.rs`,
+    /// where they are generated. This one stays here because it reaches a
+    /// private function: a record id of `u32::MAX + 1` bytes cannot be framed,
+    /// and building one is not worth 4 GiB of RAM.
     #[test]
-    fn wal_entry_rejects_a_field_too_large_for_the_framing() {
+    fn a_field_too_large_for_the_framing_is_an_error() {
         let mut lengths = Vec::new();
-        // A record id of exactly u32::MAX + 1 bytes cannot be framed. Building
-        // one is not worth 4 GiB of RAM, so exercise the check directly.
         assert!(push_u32(&mut lengths, u32::MAX as usize + 1).is_err());
         assert!(push_u32(&mut lengths, u32::MAX as usize).is_ok());
-    }
-
-    #[test]
-    fn index_object_round_trips() {
-        let index = IndexObject {
-            version: 42,
-            op_heads: vec!["aa".into(), "bb".into()],
-            workspace_heads: BTreeMap::from([("agent-a".to_string(), "aa".to_string())]),
-        };
-        let encoded = index.encode().unwrap();
-        assert_eq!(IndexObject::decode(&encoded).unwrap(), index);
-
-        // Older/partial objects still parse.
-        let minimal = IndexObject::decode(br#"{"version":3}"#).unwrap();
-        assert_eq!(minimal.version, 3);
-        assert!(minimal.op_heads.is_empty());
-    }
-
-    #[test]
-    fn wal_key_is_the_operation_id() {
-        assert_eq!(wal_key("deadbeef"), "wal/deadbeef");
     }
 }
