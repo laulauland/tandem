@@ -75,3 +75,9 @@ capnpc = "0.20"
 tempfile = "3"
 libc = "0.2"
 serde_json = "1"
+
+# Dependencies (jj-lib especially) are far too slow unoptimized for the
+# process-heavy integration tests; the tandem crate itself stays at opt 0
+# for fast rebuilds.
+[profile.dev.package."*"]
+opt-level = 2
