@@ -23,7 +23,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - run: cargo build --release --target ${{ matrix.target }}
+      - run: python3 scripts/check_workspace.py --version "${GITHUB_REF_NAME#v}"
+      - run: cargo build --release -p jj-tandem --bin tandem --target ${{ matrix.target }}
       - name: Package bottle
         run: |
           VERSION=${GITHUB_REF_NAME#v}
@@ -91,7 +92,7 @@ jobs:
             depends_on "rust" => :build
 
             def install
-              system "cargo", "install", *std_cargo_args
+              system "cargo", "install", *std_cargo_args(path: "crates/cli")
             end
 
             test do

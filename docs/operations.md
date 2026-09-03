@@ -50,9 +50,30 @@ Workspace tokens expire and are not refreshable in place. There is no
 individual revocation; rotate the admin token to invalidate all tokens minted
 from it. Treat the admin token as repository-wide authority.
 
-One workspace identity has one writer lease. Starting two daemons for the same
-identity does not create parallelism; the second cannot publish until the lease
-expires. Use distinct identities for distinct agents.
+One workspace identity has one writer lease. Cooperating daemons refuse to
+snapshot while another holder owns it. This is coordination, not a publish
+authorization lock: the publish endpoint checks token scope but does not check
+the lease. Use distinct identities for distinct agents.
+
+Foreground `tandem serve` requires a configured admin token and never generates
+one into its logs. `tandem up` can generate one for local interactive startup;
+its terminal output is sensitive and must not be captured as log evidence.
+
+## Workspace distribution
+
+All production packages share `[workspace.package].version`; every production
+path dependency also names that version in `[workspace.dependencies]`. Keep
+these in lockstep while Tandem remains pre-1.0. Do not bump internal packages
+independently. The CLI package remains `jj-tandem` and the binary remains
+`tandem`; install a source checkout with `cargo install --path crates/cli`.
+
+The release skill derives a dependency-first publication order from Cargo
+metadata, checks it against architecture boundaries, and excludes non-published
+test and benchmark packages. A coordinated crates.io release must publish each
+dependency and wait for registry indexing before its consumers, with the CLI
+last. Local packaging is not proof of registry availability. New package names
+and their ownership must be verified during the separately authorized first
+publication; this repository refactor does not perform one.
 
 ## Observability
 

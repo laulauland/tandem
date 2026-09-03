@@ -26,7 +26,10 @@ Read `docs/operations.md` and use `tandem --help` for the exact installed CLI.
 1. Choose an opaque run ID safe for filenames and labels. Provision three
    independently addressable machines and a bucket prefix containing that ID.
    Record exact IDs in the evidence directory.
-2. Build one release binary, record its version and checksum, and install the
+2. Build with `cargo build --release -p jj-tandem --bin tandem`. Locate the
+   executable from Cargo's `--message-format=json` compiler-artifact output
+   (rather than assuming a package-local target directory). Record its version
+   and checksum, and install the
    same bytes on every machine. Record OS and architecture. Reject incompatible
    runtimes instead of rebuilding different untracked binaries.
 3. Run `scripts/preflight.sh <server-ssh> <client-a-ssh> <client-b-ssh>` from

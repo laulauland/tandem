@@ -57,12 +57,12 @@ ARG RUNTIME_IMAGE=debian:trixie-slim
 
 FROM ${RUST_IMAGE} AS builder
 WORKDIR /src
-COPY Cargo.toml Cargo.lock ./
-COPY src ./src
-COPY benches ./benches
+COPY Cargo.toml README.md ./
+COPY crates ./crates
+COPY testing ./testing
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --bin tandem \
+    cargo build --release -p jj-tandem --bin tandem \
     && mkdir -p /out && cp target/release/tandem /out/tandem
 
 # ─── The sandbox ──────────────────────────────────────────────────────────────
@@ -158,7 +158,7 @@ ARG BAKE_STAMP=unstamped
 # index was built from. The boot then merges one delta into an index that is
 # already there. Measured at 20 reads whether the server has 4 commands of
 # history behind it or 80 — see
-# `tests/integration/baked_image.rs::what_a_boot_costs_is_the_delta_and_not_the_server_s_history`.
+# `crates/cli/tests/integration/baked_image.rs::what_a_boot_costs_is_the_delta_and_not_the_server_s_history`.
 #
 # It is a separate `&&` and not a separate `RUN` because it needs the token,
 # and the token is mounted for this command only.

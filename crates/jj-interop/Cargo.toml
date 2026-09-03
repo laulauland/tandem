@@ -1,0 +1,16 @@
+[package]
+name = "jj-tandem-jj"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Jujutsu encoding and shared repository semantics for Tandem"
+
+[dependencies]
+anyhow.workspace = true
+jj-lib.workspace = true
+prost.workspace = true
+smallvec.workspace = true
+
+[lints]
+workspace = true

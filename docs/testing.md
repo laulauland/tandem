@@ -5,7 +5,7 @@ need more than one seam only when each adds a distinct kind of evidence.
 
 | Home | Use it when | Do not use it for |
 | --- | --- | --- |
-| Unit tests beside `src/` | Pure policy or a private boundary is the subject: parsing, authorization decisions, writer leases, cache bookkeeping | Cross-process behavior or broad product claims |
+| Unit tests beside each crate's source | Pure policy or a private boundary is the subject: parsing, authorization decisions, writer leases, cache bookkeeping | Cross-process behavior or broad product claims |
 | Property tests | A codec, framing format, or value transformation must round-trip across a large input space; hostile bytes must never panic or over-allocate | Stateful schedules or OS behavior |
 | Deterministic simulation (DST) | Correctness depends on interleavings, CAS loss, faults, restart, replay, convergence, or an invariant that should hold after every step | Signals, real Git, CLI text, or filesystem/process integration |
 | Integration tests | The subprocess, socket, signal, real filesystem, genuine concurrent process, S3 API, Git round-trip, or user-facing CLI is itself the behavior | Repeating state-space coverage already owned by the DST or properties |
@@ -19,8 +19,10 @@ need more than one seam only when each adds a distinct kind of evidence.
   state through the shared workspace/event helpers.
 - Keep environment-dependent tests opt-in and make local deterministic coverage
   the first gate.
-- Put reusable subprocess setup in `tests/common/`; put simulation actors,
-  schedules, and the oracle in `tests/support/`.
+- Put subprocess setup with the CLI integration tests in `crates/cli/tests/common/`;
+  shared readiness/configuration and simulation actors belong in
+  `testing/test-support/`. Stateful round-trip properties run with simulation;
+  wire and WAL properties stay with their owning format crates.
 - A generated failure must print a reproducer. Pin a DST seed only when it
   captured a real regression or otherwise guarantees a rare schedule.
 - The in-process suites disable the client disk cache so a server read cannot
@@ -53,15 +55,21 @@ needed.
 ```bash
 # Documentation and inventory drift
 python3 scripts/check_docs.py
+python3 scripts/check_workspace.py
+python3 -m unittest discover -s scripts -p 'test_*.py'
 
-# Focused generated storage checks
-cargo test --test properties wal
+# Focused durable-format and storage checks
+cargo test -p jj-tandem-wal
+cargo test -p jj-tandem-storage
+
+# Opt-in S3 contract (use an isolated non-production prefix)
+TANDEM_TEST_S3_BUCKET=<isolated-s3-url> cargo test -p jj-tandem-storage --features s3
 
 # Deterministic crash and concurrency schedules
-cargo test --test dst
+cargo test -p jj-tandem-simulation
 
 # Full local suite
-cargo test
+cargo test --workspace
 ```
 
 Set `TANDEM_TEST_S3_BUCKET` to an existing test bucket to run the S3-backed

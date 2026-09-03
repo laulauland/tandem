@@ -1,0 +1,29 @@
+[package]
+name = "jj-tandem-workspace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Working-copy lifecycle and snapshot automation for Tandem"
+
+[dependencies]
+anyhow.workspace = true
+jj-cli.workspace = true
+jj-lib.workspace = true
+jj-tandem-client.workspace = true
+jj-tandem-jj.workspace = true
+jj-tandem-protocol.workspace = true
+libc.workspace = true
+notify.workspace = true
+pollster.workspace = true
+prost.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

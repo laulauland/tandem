@@ -6,6 +6,18 @@ write under `target/benchmarks/` by default, and only put a number here when
 `TANDEM_BENCH_RECORD=1` says so. Committing a measurement is meant to be a
 decision rather than a side effect of having run one.
 
+## Workspace build-cache isolation
+
+Run `python3 scripts/check_build_cache.py` from the checkout. It warms the named
+CLI build, touches one server source and one client source without modifying
+their contents, then checks Cargo's artifact freshness and emits HTML timings.
+Default evidence stays under the Cargo target directory; use `--record <path>`
+only for a measurement intended for review.
+
+The [recorded workspace probe](workspace-build-cache.json) rebuilt only the CLI
+and server after a server touch, and only the CLI, client, and workspace after a
+client touch. These are warm invalidation checks, not a cold-build speedup claim.
+
 ## snapshot → publish latency
 
 The gate metric: how long a file change takes to become durable.
@@ -21,33 +33,37 @@ policy number a person sets (`--debounce-ms`, `TANDEM_DEBOUNCE_MS`) and it
 would swamp everything else; what this answers is the question the window is
 set against — what the machinery itself costs, once it has been told to go.
 
-Source: [`benches/snapshot_publish_latency.rs`](../../benches/snapshot_publish_latency.rs).
+Source: [`testing/benchmarks/benches/snapshot_publish_latency.rs`](../../testing/benchmarks/benches/snapshot_publish_latency.rs).
 
 ### Running it
 
 One command per tier, and the tier is chosen by environment alone.
+The harness builds the named CLI package and discovers its release executable
+from Cargo output. Set `TANDEM_BENCH_BIN` to an explicit existing binary only
+when intentionally measuring that artifact (relative paths are checkout-root
+relative); no stale debug fallback is used.
 
 ```bash
 # The filesystem bucket backend. Nothing external.
-cargo bench --bench snapshot_publish_latency
+cargo bench -p jj-tandem-benchmarks --bench snapshot_publish_latency
 
 # A real S3 API. Create the bucket once; SeaweedFS answers 403, not 404, for
 # one that does not exist.
 docker run -d --name seaweed-test -p 8333:8333 chrislusf/seaweedfs:4.42 server -s3
 curl -X PUT http://127.0.0.1:8333/tandem-bench
 TANDEM_TEST_S3_BUCKET='s3://tandem-bench?endpoint=http://127.0.0.1:8333&anonymous=true' \
-  cargo bench --bench snapshot_publish_latency
+  cargo bench -p jj-tandem-benchmarks --bench snapshot_publish_latency
 
 # A stand-in for distance: a fixed delay added to every client request.
 TANDEM_BENCH_INJECT_RTT_MS=50 \
 TANDEM_TEST_S3_BUCKET='s3://tandem-bench?endpoint=http://127.0.0.1:8333&anonymous=true' \
-  cargo bench --bench snapshot_publish_latency
+  cargo bench -p jj-tandem-benchmarks --bench snapshot_publish_latency
 
 # Real distance: a server that is already running somewhere else, with a
 # bucket of its own. This is the only one of the four that measures rather
 # than models.
 TANDEM_BENCH_SERVER=https://tandem-bench.exe.xyz TANDEM_BENCH_TOKEN=tdma_… \
-  cargo bench --bench snapshot_publish_latency
+  cargo bench -p jj-tandem-benchmarks --bench snapshot_publish_latency
 ```
 
 Add `TANDEM_BENCH_RECORD=1` to any of them to write the result here instead of
@@ -97,14 +113,14 @@ prices a publish at roughly a third of a second.
 
 ## Commit-path latency and in-flight throughput
 
-Older benches from the v1 transport work, kept because the code they drive is
+Older transport benchmarks, kept because the code they drive is
 still live: `TANDEM_BENCH_INJECT_RTT_MS` and
 `TANDEM_BENCH_DISABLE_OPTIMISTIC_OP_HEAD_VERSION_CACHE` are both read by the
 client today.
 
 ```bash
-cargo bench --bench tcp_commit_path
-cargo bench --bench tcp_inflight_throughput
+cargo bench -p jj-tandem-benchmarks --bench tcp_commit_path
+cargo bench -p jj-tandem-benchmarks --bench tcp_inflight_throughput
 ```
 
 Artifacts: [`tcp_commit_path_latest.json`](./tcp_commit_path_latest.json),

@@ -50,7 +50,9 @@ this document.
 
 The daemon turns a burst of relevant filesystem events into one jj snapshot and
 publish. The debounce interval is therefore the unacknowledged durability
-window. A server lease enforces one writer per workspace identity. Remote head
+window. A server lease coordinates one cooperating daemon per workspace
+identity; it is not an authorization lock checked by the publish endpoint.
+Remote head
 events are wake-ups: the daemon marks local state stale but never moves files
 under an active editor.
 
@@ -62,9 +64,12 @@ heads, token minting, writer leases, and server-sent event wake-ups. See the
 [generated implementation inventory](docs/generated/implementation.md) for the
 current surface and source owners.
 
-The HTTP layer parses and authenticates requests; server modules enforce view
-scope, serialize head updates, persist the durability transaction, apply it to
-jj, and notify watchers. Reads of heads are read-only. Reconciliation belongs
+The `jj-tandem-server` HTTP host parses and authenticates requests, manages
+writer leases and event streams, and owns control sockets and lifecycle. The headless
+`jj-tandem-repository` crate enforces view scope, serializes head updates,
+persists the durability transaction, applies it to jj, and emits head wake-ups.
+It accepts an already-authenticated publish identity and has no HTTP or client
+dependency. Reads of heads are read-only. Reconciliation belongs
 to the publish path because a read that mutates heads can force retries and
 diverge a change ID.
 
@@ -96,8 +101,9 @@ detail. See [docs/reliability.md](docs/reliability.md).
    staged content durable, and compare-and-swaps the durable index.
 4. Only then does it apply the update locally, reconcile heads through jj, and
    acknowledge a state it can both serve and recover.
-5. A CAS loss is normal contention. The client refreshes state and jj retries
-   the transaction without discarding the other writer's head.
+5. A CAS loss is normal contention. The op-heads adapter refreshes the version
+   and retries publishing the same operation, preserving every concurrent head;
+   it does not rerun the jj transaction.
 
 ## Security boundary
 
@@ -131,6 +137,30 @@ push directly.
   deletion need an explicit design before immutable history can be removed.
 
 ## Derived implementation detail
+
+### Build boundaries
+
+Tandem is a pre-1.0 Cargo workspace. The root centralizes dependency versions,
+profiles, and lints; the `jj-tandem` package is only the executable composition
+layer. Dependency arrows always point toward lower-level contracts:
+
+- Wire protocol and WAL formats are separate low-churn leaves. Storage owns
+  conditional object writes, not repository policy. jj interoperability owns
+  the version-sensitive jj encodings shared by both sides.
+- Client integration depends on protocol and jj interoperability. Workspace
+  automation depends on those client stores, never on server implementation.
+- Repository authority depends on WAL, storage, protocol values, and jj
+  interoperability. The network/lifecycle host depends on the repository,
+  never on the client or workspace implementation.
+- CLI composition depends on both branches. Simulation, shared test support,
+  and benchmarks are non-published packages allowed to exercise both branches.
+
+Keep format and interoperability APIs narrow: changes there rebuild both
+branches. Client/server behavior changes should invalidate only their own
+branch and its consumers. “Low churn” describes build boundaries, not a stable
+public API promise. `python3 scripts/check_workspace.py` checks production
+dependency direction and lockstep package versions. The generated inventory
+lists actual packages and edges; do not maintain a second tree here.
 
 Do not add hand-maintained command, route, module, trait, or test inventories to
 prose. `python3 scripts/check_docs.py --update-inventory` regenerates the narrow

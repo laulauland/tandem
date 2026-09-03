@@ -1,0 +1,32 @@
+[package]
+name = "jj-tandem-benchmarks"
+version.workspace = true
+edition.workspace = true
+publish = false
+autobenches = false
+
+[[bench]]
+name = "tcp_commit_path"
+harness = false
+
+[[bench]]
+name = "tcp_inflight_throughput"
+harness = false
+
+[[bench]]
+name = "snapshot_publish_latency"
+harness = false
+
+[dev-dependencies]
+anyhow.workspace = true
+jj-tandem-server.workspace = true
+jj-tandem-workspace.workspace = true
+jj-tandem-test-support.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+
+[lints]
+workspace = true

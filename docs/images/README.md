@@ -252,7 +252,7 @@ answers for it. The last row grows with the repository; the first does not grow
 with either the repository or the history.
 
 The same measurements are made without Docker, on every `cargo test`, in
-[`tests/integration/baked_image.rs`](../../tests/integration/baked_image.rs) —
+[`crates/cli/tests/integration/baked_image.rs`](../../crates/cli/tests/integration/baked_image.rs) —
 what a container adds over a directory is a filesystem namespace, and the
 image's warmth is a directory either way. The test that pins this claim runs the
 whole recipe twice, against a server with four commands of history and against
@@ -301,5 +301,5 @@ them, and the commit that points at that tree.
   bake recorded; jj then re-reads each file, and tandem's backend learns an
   object's id by writing it to the server. A client that hashed files locally
   before uploading would avoid it, at the cost of carrying a copy of git's
-  hashing rules on this side of the wire — which is a decision `src/cache.rs`
+  hashing rules on this side of the wire — which is a decision `crates/client/src/cache.rs`
   documents having deliberately declined. Left as it stands for now.

@@ -1,102 +1,55 @@
-[package]
-name = "jj-tandem"
+[workspace]
+members = ["crates/*", "testing/*"]
+default-members = ["crates/cli"]
+resolver = "2"
+
+[workspace.package]
 version = "0.4.0"
 edition = "2021"
-description = "jj workspaces over the network — one server, many agents, real files"
 license = "MIT"
 repository = "https://github.com/laulauland/tandem"
-homepage = "https://github.com/laulauland/tandem"
-readme = "README.md"
-keywords = ["jj", "jujutsu", "vcs", "distributed", "collaboration"]
-categories = ["development-tools", "command-line-utilities"]
-exclude = [
-    ".github/",
-]
 
-[lib]
-name = "jj_tandem"
-path = "src/lib.rs"
-
-[[bin]]
-name = "tandem"
-path = "src/main.rs"
-
-[[bench]]
-name = "tcp_commit_path"
-harness = false
-
-[[bench]]
-name = "tcp_inflight_throughput"
-harness = false
-
-# The gate metric: snapshot→publish latency against a server whose durable
-# tier is a real S3 bucket. Needs one (SeaweedFS locally), so it is a bench and
-# not a test — see the stage's Verification note for how it is run.
-[[bench]]
-name = "snapshot_publish_latency"
-harness = false
-
-[dependencies]
-# jj integration
-jj-lib = { version = "0.38.0", features = ["git"] }
-jj-cli = { version = "0.38.0", default-features = false, features = ["git"] }
-
-# CLI
-clap = { version = "4", features = ["derive", "env"] }
-
-# HTTP transport — axum serves the API, reqwest is the client behind the
-# store traits. reqwest is already in the tree through object_store's aws
-# feature; this pins it as a direct dependency and adds the blocking client.
-axum = "0.8"
-reqwest = { version = "0.13", features = ["blocking", "json"] }
-
-# Async runtime
-tokio = { version = "1", features = ["full"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
-tokio-util = { version = "0.7", features = ["compat"] }
-
-# Trait / stream / proto support
-async-trait = "0.1"
-futures = "0.3"
-prost = "0.14"
-smallvec = "1"
-
-# Hashing
-blake2 = "0.10"
-digest = "0.10"
-
-# Randomness — bearer tokens have to be unguessable, which a hash of a counter
-# and a clock is not. The major is the one jj-lib itself resolves, so the tree
-# keeps a single `rand`.
-rand = "0.9"
-
-# Sync bridge for async backend methods
-pollster = "0.4"
-
-# Server-side deps (from v0)
+[workspace.dependencies]
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+proptest = "1"
+blake2 = "0.10"
 dunce = "1"
 libc = "0.2"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["fmt", "json", "registry"] }
 object_store = { version = "0.14.1", features = ["aws"] }
-
-# What tells the workspace daemon that a file changed. The daemon is
-# event-driven rather than polled on purpose: a poll interval is a floor on
-# how late a snapshot can be, and the debounce window is meant to be the only
-# such floor.
-notify = "8"
-
-[dev-dependencies]
 tempfile = "3"
-libc = "0.2"
-serde_json = "1"
-proptest = "1"
+tokio = { version = "1", features = ["full"] }
+jj-lib = { version = "0.38.0", features = ["git"] }
+prost = "0.14"
+smallvec = "1"
+async-trait = "0.1"
+futures = "0.3"
+reqwest = { version = "0.13", features = ["blocking", "json"] }
+tracing = "0.1"
+axum = "0.8"
+clap = { version = "4", features = ["derive", "env"] }
+jj-cli = { version = "0.38.0", default-features = false, features = ["git"] }
+notify = "8"
+pollster = "0.4"
+rand = "0.9"
+tokio-stream = { version = "0.1", features = ["sync"] }
+tracing-subscriber = { version = "0.3", features = ["fmt", "json", "registry"] }
 
-# Dependencies (jj-lib especially) are far too slow unoptimized for the
-# process-heavy integration tests; the tandem crate itself stays at opt 0
-# for fast rebuilds.
+jj-tandem-protocol = { package = "jj-tandem-protocol", path = "crates/protocol", version = "0.4.0" }
+jj-tandem-wal = { package = "jj-tandem-wal", path = "crates/wal", version = "0.4.0" }
+jj-tandem-storage = { package = "jj-tandem-storage", path = "crates/storage", version = "0.4.0" }
+jj-tandem-jj = { package = "jj-tandem-jj", path = "crates/jj-interop", version = "0.4.0" }
+jj-tandem-client = { package = "jj-tandem-client", path = "crates/client", version = "0.4.0" }
+jj-tandem-workspace = { package = "jj-tandem-workspace", path = "crates/workspace", version = "0.4.0" }
+jj-tandem-repository = { package = "jj-tandem-repository", path = "crates/repository", version = "0.4.0" }
+jj-tandem-server = { package = "jj-tandem-server", path = "crates/server", version = "0.4.0" }
+jj-tandem-test-support = { package = "jj-tandem-test-support", path = "testing/test-support" }
+
+
+[workspace.lints.rust]
+unused_must_use = "warn"
+
+# Optimize heavy dependencies while keeping local workspace rebuilds quick.
 [profile.dev.package."*"]
 opt-level = 2

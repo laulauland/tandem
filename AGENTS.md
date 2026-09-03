@@ -59,9 +59,13 @@ CLI flags, routes, traits, source trees, or test lists into prose.
 - Run `python3 scripts/check_docs.py` after documentation changes. It checks
   local links, repo-path references, retired terminology in active docs, and
   the generated implementation inventory.
-- Run focused tests while iterating and `cargo test` before handoff. For storage
+- Run focused package tests while iterating and `cargo test --workspace` before handoff. For storage
   or concurrency changes, include the relevant property and DST targets.
 
-Published crate: `jj-tandem`; binary: `tandem`. Release and distributed
+Run `python3 scripts/check_workspace.py` after manifest changes; production
+dependencies must remain acyclic and respect the client/server split.
+
+User-facing crate: `jj-tandem`; binary: `tandem`. All production crates use the
+root's lockstep pre-1.0 version. Release and distributed
 verification procedures are executable repo-local skills under
 `.agents/skills/`.

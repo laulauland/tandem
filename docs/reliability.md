@@ -74,9 +74,10 @@ overwritten.
 
 The client publishes against the version it read. A stale version or bucket
 index conflict is a normal concurrency result, not storage failure: the server
-adopts any newer durable index it can replay, reports the current state, and jj
-retries its transaction. No writer may replace the head set with only its own
-head.
+adopts any newer durable index it can replay and reports the current state. The
+client op-heads adapter then retries the same operation against the refreshed
+version; it does not rerun the jj transaction. No writer may replace the head
+set with only its own head.
 
 Head reads never reconcile. Reconciliation during a read previously moved the
 version inside a client command, causing a needless transaction retry and the

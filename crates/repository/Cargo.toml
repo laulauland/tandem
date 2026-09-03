@@ -1,0 +1,25 @@
+[package]
+name = "jj-tandem-repository"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Headless durable repository authority for Tandem"
+
+[dependencies]
+anyhow.workspace = true
+dunce.workspace = true
+jj-lib.workspace = true
+jj-tandem-jj.workspace = true
+jj-tandem-protocol.workspace = true
+jj-tandem-storage = { workspace = true, features = ["s3"] }
+jj-tandem-wal.workspace = true
+pollster.workspace = true
+prost.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

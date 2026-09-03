@@ -16,7 +16,7 @@ Git worktrees are simpler.
 cargo install jj-tandem
 ```
 
-A source build is just `cargo build --release`; no schema compiler or code
+A source build is just `cargo build --release -p jj-tandem --bin tandem`; no schema compiler or code
 generation is required.
 
 ## Quick start
@@ -83,7 +83,7 @@ Deployment, backup, restore, observability, and incident procedures are in
 
 ```bash
 python3 scripts/check_docs.py
-cargo test
+cargo test --workspace
 ```
 
 Read [AGENTS.md](AGENTS.md) before changing the repository. It routes to the

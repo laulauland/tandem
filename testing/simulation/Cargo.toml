@@ -1,0 +1,15 @@
+[package]
+name = "jj-tandem-simulation"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dev-dependencies]
+anyhow.workspace = true
+jj-lib.workspace = true
+proptest.workspace = true
+jj-tandem-test-support.workspace = true
+jj-tandem-repository.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,27 @@
+[package]
+name = "jj-tandem-test-support"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+dunce.workspace = true
+jj-cli.workspace = true
+jj-lib.workspace = true
+jj-tandem-server.workspace = true
+jj-tandem-client.workspace = true
+jj-tandem-protocol.workspace = true
+jj-tandem-repository.workspace = true
+jj-tandem-wal.workspace = true
+jj-tandem-workspace.workspace = true
+pollster.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

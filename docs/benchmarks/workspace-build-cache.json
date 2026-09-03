@@ -1,0 +1,36 @@
+{
+  "recorded_at": "2026-09-03T19:00:22.280485+00:00",
+  "cargo": "cargo 1.97.0 (c980f4866 2026-06-30)",
+  "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+  "command": [
+    "cargo",
+    "build",
+    "-p",
+    "jj-tandem",
+    "--bin",
+    "tandem",
+    "--timings",
+    "--message-format=json"
+  ],
+  "probes": [
+    {
+      "source_touch": "crates/server/src/http.rs",
+      "seconds": 1.362,
+      "rebuilt": [
+        "jj-tandem",
+        "jj-tandem-server"
+      ]
+    },
+    {
+      "source_touch": "crates/client/src/backend.rs",
+      "seconds": 1.322,
+      "rebuilt": [
+        "jj-tandem",
+        "jj-tandem-client",
+        "jj-tandem-workspace"
+      ]
+    }
+  ],
+  "verdict": "pass",
+  "note": "Warm dev-profile invalidation evidence, not a cold-build speed comparison. Cargo HTML timings remain in target/cargo-timings."
+}
