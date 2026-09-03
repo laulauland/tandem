@@ -1,233 +1,67 @@
 # AGENTS
 
-Execution guide for working on the `tandem` codebase.
+Tandem is jj workspaces over the network. Read only as far as the task needs:
 
-## How to read these docs
+- [README.md](README.md) — product and user entry point.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — canonical current boundaries and state
+  ownership.
+- [docs/reliability.md](docs/reliability.md) — publish ordering, WAL, crash
+  recovery, and storage risks.
+- [docs/testing.md](docs/testing.md) — unit, property, deterministic simulation,
+  and integration test placement.
+- [docs/operations.md](docs/operations.md) — deployment, monitoring, backup,
+  restore, and incident recovery.
+- [docs/decision-ledger.md](docs/decision-ledger.md) — historical decisions,
+  evidence, rejected directions, and unresolved work.
+- [docs/benchmarks/README.md](docs/benchmarks/README.md) and
+  [docs/images/README.md](docs/images/README.md) — specialized procedures.
 
-1. Read `ARCHITECTURE.md` for system boundaries and project structure.
-2. Read `docs/design-docs/workflow.md` for the orchestrator→agents→git workflow.
-3. Read `docs/design-docs/jj-lib-integration.md` for trait signatures and registration.
-4. Read `docs/exec-plans/tech-debt-tracker.md` for known issues to work on.
-5. Check `docs/exec-plans/completed/` for context on how each slice was built.
-6. Implement changes via failing integration test first.
+Use code and generated help for implementation-derived detail. Run
+`tandem --help`, inspect the relevant module, or regenerate
+[the implementation inventory](docs/generated/implementation.md); do not copy
+CLI flags, routes, traits, source trees, or test lists into prose.
 
-## What tandem is
+## Non-negotiable engineering rules
 
-Tandem applies a **server-client model to jj's store layer**. The server hosts
-a normal jj+git colocated repo. Agents on remote machines use the `tandem`
-binary (which embeds jj-cli with a custom tandem backend) to read and write
-objects over an HTTP API.
+1. Use `jj`, never Git, for repository operations. Inspect `jj status` and
+   `jj log` before editing; preserve existing work and create a child revision
+   when work needs isolation. Use conventional commit descriptions.
+2. The client is stock jj with remote store implementations. Do not invent
+   custom equivalents of jj commands.
+3. The bucket WAL and index are the durable authority. A publish is not
+   acknowledged until its reachable data and head set are durable. Never move
+   a local write ahead of the bucket commit; see the reliability contract.
+4. jj's server-side op-heads store is the live head authority. The Tandem
+   metadata sidecar is not a second authority, and head reads never reconcile
+   or publish.
+5. Preserve all concurrent heads and let jj converge them. Last-writer-wins is
+   a correctness failure.
+6. One workspace has one active writer. A daemon may mark a workspace stale,
+   but must not move files with `workspace update-stale` on the user's behalf.
+7. Authentication and publish-scope checks are server-enforced. Never log or
+   persist bearer tokens in images, evidence, command lines, or fixtures.
+8. Integration acceptance claims about repository content must assert exact
+   file bytes, not descriptions alone.
+9. Tandem-owned help and argument errors must work without a server and name
+   the failed address or missing input where relevant.
+10. Use structured tracing and existing fault seams; do not add ad-hoc debug
+    prints, sleeps, or process-wide test controls.
 
-The server is the **point of origin** — it typically runs on a VM/VPS as a
-long-running service. It's where git operations happen (`jj git push`,
-`jj git fetch`, `gh pr create`). The orchestrator/teamlead runs these on the
-server to ship code upstream. The tandem server is the source of truth, with
-GitHub as a mirror.
+## Change workflow
 
-## Installation
+- Start with a failing test in the home selected by
+  [docs/testing.md](docs/testing.md). Keep networked tests opt-in.
+- Prefer the smallest change that makes the invariant true. Remove superseded
+  paths and prose instead of maintaining compatibility scaffolding nobody
+  requested.
+- Keep each durable fact under one documentation owner. Historical documents
+  do not become current references.
+- Run `python3 scripts/check_docs.py` after documentation changes. It checks
+  local links, repo-path references, retired terminology in active docs, and
+  the generated implementation inventory.
+- Run focused tests while iterating and `cargo test` before handoff. For storage
+  or concurrency changes, include the relevant property and DST targets.
 
-Published on [crates.io](https://crates.io/crates/jj-tandem) as `jj-tandem`:
-
-```bash
-cargo install jj-tandem
-```
-
-Requires a Rust toolchain and nothing else — there is no code-generation step.
-Or build from source: `cargo build --release`.
-
-## Single binary, three modes
-
-```
-tandem up --repo <path> --listen <addr>       # start background daemon
-tandem serve --listen <addr> --repo <path>    # foreground server (systemd/docker)
-tandem [jj args...]                           # client mode (stock jj via CliRunner)
-```
-
-Plus lifecycle commands that talk to a running server:
-
-```
-tandem down                                   # stop daemon
-tandem server status [--json]                 # health check
-tandem server logs [--level <level>] [--json] # stream logs from daemon
-```
-
-The client mode is `CliRunner::init().add_store_factories(tandem_factories()).run()`.
-All stock jj commands work transparently: `tandem status`, `tandem new`,
-`tandem log`, `tandem diff`, `tandem file show`, `tandem bookmark create`
-are all jj commands running through our binary.
-
-Server mode embeds jj-lib and uses the Git backend internally. When a client
-calls `putObject(file, bytes)`, the server stores the object. Objects are real
-jj-compatible blobs — `jj git push` on the server just works.
-
-`tandem up` is the easy way to start the server — it forks `tandem serve --daemon`
-in the background, waits for the control socket to become healthy, prints the PID,
-and exits. `tandem serve` is the foreground mode for systemd, Docker, or debugging.
-Both create a control socket so `tandem down`, `tandem server status`, and
-`tandem server logs` work against either.
-
-## Source layout
-
-```
-src/
-  main.rs              CLI dispatch (clap) + CliRunner passthrough
-  server/
-    mod.rs             Server — jj Git backend, heads authority, lifecycle
-    http.rs            HTTP API surface + SSE
-    bucket.rs          Object-store WAL and index
-  wire.rs              Wire types: object kinds, JSON bodies, batch codec
-  control.rs           Control socket — daemon management (Unix socket, JSON lines)
-  backend.rs           TandemBackend (jj-lib Backend trait)
-  op_store.rs          TandemOpStore (jj-lib OpStore trait)
-  op_heads_store.rs    TandemOpHeadsStore (jj-lib OpHeadsStore trait)
-  http_client.rs       HTTP client behind the three store traits
-  proto_convert.rs     jj protobuf ↔ Rust struct conversion
-  watch.rs             tandem watch command (SSE reader)
-tests/
-  common/mod.rs        Test harness (server spawn, HOME isolation, HTTP helpers)
-  http_api_surface.rs  The HTTP endpoints, cache headers, CAS and SSE
-  slice1-7 tests       Core integration tests (file round-trip, visibility, CAS, git)
-  slice10-13 tests     Server lifecycle tests (shutdown, control socket, up/down, logs)
-```
-
-## Docs layout
-
-```
-docs/
-  README.md                          Overview and pointers
-  design-docs/
-    workflow.md                      Orchestrator→agents→git workflow
-    jj-lib-integration.md            Trait signatures and store registration
-    rpc-protocol.md                  Store protocol details (pre-HTTP; historical)
-    rpc-error-model.md               Error handling conventions
-    server-lifecycle.md              tandem up/down + server status/logs design
-    core-beliefs.md                  Design principles
-  exec-plans/
-    completed/                       Completion notes for all 13 slices
-    tech-debt-tracker.md             Known issues (P1/P2/P3)
-  product-specs/
-    core-product.md                  Product intent and scope
-```
-
-## Critical invariants
-
-1. **The client is stock `jj`.** Tandem implements jj-lib's `Backend`, `OpStore`,
-   and `OpHeadsStore` traits as HTTP clients. There is no custom
-   `tandem new/log/describe/diff` CLI — those are all jj commands.
-
-2. **Tests assert on file bytes, not descriptions.** Every integration test
-   must verify file content round-trips correctly via `jj cat`. Description-only
-   assertions are insufficient.
-
-3. **Help text works without a server.** `tandem --help`, `tandem serve --help`,
-   and `tandem` with no args must print usage locally. Error messages must
-   suggest alternatives for unknown commands and include addresses for
-   connection failures.
-
-## Help text and error handling (P0)
-
-These are required, not nice-to-haves. QA found agents spend 50% of their time
-guessing commands when help is missing.
-
-- `tandem --help` — prints usage without server connection
-- `tandem serve --help` — explains `--listen` and `--repo` flags
-- `tandem` with no args — prints usage, not a cryptic error
-- Unknown commands — suggest alternatives ("did you mean `new`?")
-- Connection errors — include the address that was tried
-- Missing args — say what's needed ("serve requires `--listen <addr>`")
-- `TANDEM_SERVER` env var — fallback for `--server` flag on client commands
-- `TANDEM_WORKSPACE` env var — workspace name for client
-
-## Workflow
-
-See `docs/design-docs/workflow.md` for the full picture. Summary:
-
-1. **Orchestrator** sets up server on a VM/VPS: `tandem up --repo /srv/project --listen 0.0.0.0:13013`
-2. **Agents** init workspaces: `tandem init --server=host:13013 ~/work/project`
-3. **Agents** use stock jj commands: write files, `tandem new -m "feat: add auth"`, etc.
-4. **Agents** see each other's files: `tandem file show -r <other-commit> src/auth.rs`
-5. **Orchestrator** ships from server: `jj bookmark create main -r <tip>`, `jj git push`
-
-Git operations are server-only. Agents never touch git directly.
-
-## What exists
-
-All core functionality is implemented across 13 slices:
-
-| Capability | Test coverage |
-|------------|--------------|
-| Single-agent file round-trip | `tests/slice1_single_agent_round_trip.rs` |
-| Two-agent file visibility | `tests/slice2_two_agent_visibility.rs` |
-| Concurrent file writes converge | `tests/slice3_concurrent_convergence.rs` |
-| Promise pipelining for writes | `tests/slice4_promise_pipelining.rs` |
-| WatchHeads real-time notifications | `tests/slice5_watch_heads.rs` |
-| Git push/fetch round-trip | `tests/slice6_git_round_trip.rs` |
-| End-to-end multi-agent + git | `tests/slice7_end_to_end.rs` |
-| Bookmark management via RPC | Slice 8 (see `docs/exec-plans/completed/`) |
-| CLI help and discoverability | Slice 9 (see `docs/exec-plans/completed/`) |
-| Signal handling + graceful shutdown | `tests/slice10_graceful_shutdown.rs` |
-| Control socket + tandem server status | `tests/slice11_control_socket.rs` |
-| tandem up + tandem down | `tests/slice12_up_down.rs` |
-| tandem server logs (streaming) | `tests/slice13_log_streaming.rs` |
-
-See `docs/exec-plans/completed/` for detailed completion notes on each slice.
-See `docs/exec-plans/tech-debt-tracker.md` for known issues and next work.
-
-## Testing policy
-
-- Integration tests are the primary source of truth.
-- Tests use the `tandem` binary which runs jj commands — never a separate jj binary.
-- Acceptance criteria assert on **file bytes** via `jj cat`, not just log descriptions.
-- Local deterministic tests first; cross-machine tests second.
-- Use `sprites.dev` / `exe.dev` for distributed smoke tests.
-- Keep networked tests opt-in (ignored by default / env-gated).
-- Run: `cargo test`
-
-## QA policy
-
-- After major milestones, run agent-based QA (see `qa/`).
-- QA uses **subagent programs**, not shell scripts — agents evaluate usability.
-- Naive agent (zero-docs trial-and-error) tests discoverability.
-- Workflow agent tests realistic multi-agent file collaboration.
-- Stress agent tests concurrent write correctness.
-- Reports go to `qa/REPORT.md`.
-- Use opus for all implementation and evaluation models.
-
-## Debug policy
-
-Structured tracing is built in. Do not add ad-hoc debug prints.
-
-Flags:
-
-- `--tandem-debug`
-- `--tandem-debug-format pretty|json`
-- `--tandem-debug-file <path>`
-- `--tandem-debug-filter <filter>`
-
-Minimum events emitted:
-
-- command lifecycle
-- RPC lifecycle
-- object read/write (kind, id, size)
-- CAS heads success/failure + retries
-- watcher subscribe/notify/reconnect
-
-## Commits
-
-Use conventional commits. The changelog is generated from these prefixes:
-- `feat:` / `fix:` / `refactor:` / `perf:` / `docs:` / `chore:` / `style:`
-- Scoped prefixes are fine: `feat(rpc): add retry logic`
-- `chore(release):` and `release:` commits are excluded from the changelog
-
-## Releasing
-
-Binary: `tandem`. Crate: `jj-tandem`. Version lives in `Cargo.toml`.
-
-To cut a release:
-1. Bump version in `Cargo.toml`, commit: `chore(release): vX.Y.Z`
-2. Push to main, then tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
-3. CI builds cross-platform bottles, generates changelog, creates GitHub release, and updates the Homebrew formula in `laulauland/homebrew-tap`
-
-To publish to crates.io separately: `cargo publish`.
-
-Requires `TAP_GITHUB_TOKEN` repo secret (PAT with write access to `laulauland/homebrew-tap`).
+Published crate: `jj-tandem`; binary: `tandem`. Release and distributed
+verification procedures are executable repo-local skills under
+`.agents/skills/`.

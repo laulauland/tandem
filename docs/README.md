@@ -1,19 +1,19 @@
-# Docs
+# Repository knowledge
 
-Minimal docs structure for the project:
+Current documents have one owner per topic:
 
-- `../AGENTS.md` — execution/testing/debugging conventions
-- `../ARCHITECTURE.md` — system shape and boundaries
-- `design-docs/` — durable technical decisions; start at
-  `design-docs/target-architecture.md`
-- `benchmarks/` — recorded numbers, and the one command each of them takes
-- `images/` — the sandbox image template: `tandem clone` at image build time
-- `exec-plans/` — active/completed implementation plans
-- `product-specs/` — concise product intent and scope
+- [Product and usage](../README.md)
+- [Architecture and boundaries](../ARCHITECTURE.md)
+- [WAL and reliability](reliability.md)
+- [Testing strategy](testing.md)
+- [Deployment and recovery](operations.md)
+- [Decision and evidence ledger](decision-ledger.md)
+- [Benchmarks](benchmarks/README.md)
+- [Sandbox image building](images/README.md)
+- [Generated implementation inventory](generated/implementation.md)
+- [Release procedure](../.agents/skills/release/SKILL.md)
+- [Distributed smoke procedure](../.agents/skills/distributed-smoke/SKILL.md)
 
-## Build notes
-
-`cargo build` is the whole story: a Rust toolchain, no schema compiler, and no
-code-generation step. The wire types are plain Rust in `src/wire.rs`.
-
-This docs set is the canonical source of project direction and architecture.
+The decision ledger is historical evidence, not a source for current behavior.
+Current CLI details come from `tandem --help`; implementation surfaces come
+from code and the generated inventory.

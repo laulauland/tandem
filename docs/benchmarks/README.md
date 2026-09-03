@@ -89,9 +89,9 @@ VM ran ~170 ms — so the fourth row is 3.3× the third for the same reason the
 third is 200× the second. The remarkable thing about the fourth row is how
 tight it is: 40 samples between 2508 and 2535 ms, which says the cost is
 structural — serialized round trips — and not network noise. That is the
-number the checkpoint story depends on (see
-[the target architecture](../design-docs/target-architecture.md)'s gate
-metric), and it is why collapsing the publish path's request count is the
+number the durability window depends on (see
+[the architecture](../../ARCHITECTURE.md)), and it is why collapsing the
+publish path's request count is the
 next thing worth doing: at two round trips instead of fifteen, the same link
 prices a publish at roughly a third of a second.
 

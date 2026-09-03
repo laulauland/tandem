@@ -1,0 +1,3 @@
+interface:
+  display_name: "Distributed Smoke"
+  short_description: "Qualify Tandem across disposable machines"

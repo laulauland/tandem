@@ -10,10 +10,6 @@ readme = "README.md"
 keywords = ["jj", "jujutsu", "vcs", "distributed", "collaboration"]
 categories = ["development-tools", "command-line-utilities"]
 exclude = [
-    "opensrc/",
-    "qa/",
-    "demos/",
-    ".fp/",
     ".github/",
 ]
 

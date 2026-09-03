@@ -1,7 +1,7 @@
 //! The bucket half of the server: WAL entries and the index object.
 //!
-//! The bucket is the durable source of truth (see
-//! `docs/design-docs/target-architecture.md`). Everything in this file exists
+//! The bucket is the durable source of truth (see `docs/reliability.md`).
+//! Everything in this file exists
 //! to keep one ordering: a WAL entry, then the index compare-and-swap, and only
 //! then any local state — so a crash anywhere in between leaves the bucket
 //! ahead of the repo, which `recover_from_bucket` replays on the next start.

@@ -4,11 +4,9 @@
 //! these through an `Arc`. Every method is blocking, because the jj traits
 //! that call them are driven by `pollster::block_on` on a plain thread.
 //!
-//! There is no background thread and no channel here. The transport this
-//! replaced needed both, because Cap'n Proto's RPC types are `!Send` and had
-//! to live on a reactor of their own. `reqwest::blocking::Client` is
-//! `Send + Sync + Clone` and pools its own connections, so a call is just a
-//! call.
+//! There is no background thread or channel here. A
+//! `reqwest::blocking::Client` is `Send + Sync + Clone` and pools its own
+//! connections, so a call is just a call.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};

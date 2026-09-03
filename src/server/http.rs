@@ -53,10 +53,9 @@ const SERVER_QUEUE_DEPTH: u32 = 0;
 //
 // axum defaults every `Bytes` body to 2 MiB, which is not a size anyone chose
 // here — it is smaller than plenty of ordinary source files, and a tracked
-// file that grows past it stops the workspace snapshotting at all. Cap'n Proto
-// allowed 64 MiB per message (its default traversal limit of 8 Mi words), so
-// that is the ceiling this transport keeps: no smaller than what it replaced,
-// and still bounded, because each handler copies the body onto the heap.
+// file that grows past it stops the workspace snapshotting at all. The 64 MiB
+// ceiling preserves the established compatibility limit while remaining
+// bounded, because each handler copies the body onto the heap.
 //
 // The batch endpoint is the one that will press against it — filling a cache
 // or cloning a repo means many blobs in one request. A batch that would not

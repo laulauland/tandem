@@ -1,7 +1,7 @@
 //! ObjectStore — the bucket abstraction behind tandem's write-ahead log.
 //!
-//! The bucket is the durable source of truth (see
-//! `docs/design-docs/target-architecture.md`): immutable WAL entries plus one
+//! The bucket is the durable source of truth (see `docs/reliability.md`):
+//! immutable WAL entries plus one
 //! CAS-updated index object. Two backends exist — a directory on disk (dev and
 //! `cargo test`) and any S3-compatible endpoint (SeaweedFS locally, a real
 //! bucket in production).
