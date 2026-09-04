@@ -523,24 +523,42 @@ impl TandemClient {
         Ok((id, normalized))
     }
 
-    /// Write several objects in one round trip.
-    ///
-    /// Nothing on the jj store traits batches yet, so this is the endpoint's
-    /// only caller besides its tests — it exists because a client cache
-    /// (stage 4) and a clone (stage 5) both fill from a list of ids.
-    #[allow(dead_code)]
-    pub fn put_objects_batch(&self, items: &[wire::BatchItem]) -> Result<Vec<wire::BatchOutcome>> {
+    /// Large files use the single-object endpoint to keep its full body limit.
+    pub(crate) fn put_file(&self, expected_id: &[u8], data: &[u8]) -> Result<()> {
+        let response = self.post_octets("/api/objects/file", data, "put file")?;
+        let id = header_id(&response, wire::HEADER_OBJECT_ID)?;
+        let normalized = response.bytes()?;
+        validate_file_response(expected_id, data, &id, &normalized)?;
+        self.store_in_cache("file", &id, data);
+        Ok(())
+    }
+
+    /// Upload buffered files, validating the entire response before making
+    /// any of it available through the immutable read cache.
+    pub(crate) fn put_files_batch(&self, files: &BTreeMap<Vec<u8>, Vec<u8>>) -> Result<()> {
+        let items = files
+            .values()
+            .map(|data| wire::BatchItem {
+                kind: wire::KIND_FILE,
+                data: data.clone(),
+            })
+            .collect::<Vec<_>>();
         let response = Self::check(
             self.send(
                 self.http
                     .post(self.url("/api/objects:batch"))
                     .header(reqwest::header::CONTENT_TYPE, wire::CONTENT_TYPE_BATCH)
-                    .body(wire::encode_batch_request(items)),
+                    .body(wire::encode_batch_request(&items)),
             )?,
             "put objects batch",
         )?;
-        wire::decode_batch_response(&response.bytes()?)
-            .map_err(|e| anyhow!("decode batch response: {e}"))
+        let outcomes = wire::decode_batch_response(&response.bytes()?)
+            .map_err(|e| anyhow!("decode batch response: {e}"))?;
+        validate_file_batch(files, &outcomes)?;
+        for (id, data) in files {
+            self.store_in_cache("file", id, data);
+        }
+        Ok(())
     }
 
     // Operations and views are content-addressed too — the server hashes each
@@ -681,6 +699,43 @@ impl TandemClient {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+fn validate_file_response(
+    expected_id: &[u8],
+    data: &[u8],
+    id: &[u8],
+    normalized: &[u8],
+) -> Result<()> {
+    if id != expected_id {
+        bail!("file upload returned a different Git object ID");
+    }
+    if normalized != data {
+        bail!("file upload returned different file bytes");
+    }
+    Ok(())
+}
+
+fn validate_file_batch(
+    files: &BTreeMap<Vec<u8>, Vec<u8>>,
+    outcomes: &[wire::BatchOutcome],
+) -> Result<()> {
+    if outcomes.len() != files.len() {
+        bail!(
+            "file batch returned {} results for {} files",
+            outcomes.len(),
+            files.len()
+        );
+    }
+    for ((expected_id, data), outcome) in files.iter().zip(outcomes) {
+        match outcome {
+            wire::BatchOutcome::Written { id, normalized } => {
+                validate_file_response(expected_id, data, id, normalized)?;
+            }
+            wire::BatchOutcome::Failed { message } => bail!("file batch upload failed: {message}"),
+        }
+    }
+    Ok(())
+}
+
 fn header_id(response: &reqwest::blocking::Response, header: &str) -> Result<Vec<u8>> {
     let value = response
         .headers()
@@ -749,8 +804,8 @@ fn validate_repo_info(
         );
     }
 
-    if info.commit_id_length == 0 {
-        bail!("repo compatibility mismatch: commit_id_length must be > 0");
+    if info.commit_id_length != 20 {
+        bail!("repo compatibility mismatch: Tandem requires 20-byte Git SHA-1 object IDs");
     }
 
     if info.change_id_length == 0 {
@@ -827,12 +882,148 @@ mod tests {
     /// state at the far end of a socket.
     const TEST_TOKEN: &str = "tdmw_testtoken";
 
+    #[test]
+    fn failed_or_invalid_file_batches_retain_pending_bytes_and_do_not_warm_cache() {
+        use crate::pending_files::PendingFiles;
+        let files = BTreeMap::from([
+            (vec![1; 20], vec![0, 255]),
+            (vec![2; 20], b"second".to_vec()),
+        ]);
+        let good = files
+            .iter()
+            .map(|(id, data)| wire::BatchOutcome::Written {
+                id: id.clone(),
+                normalized: data.clone(),
+            })
+            .collect::<Vec<_>>();
+        let mut partial = good.clone();
+        partial[1] = wire::BatchOutcome::Failed {
+            message: "staging full".into(),
+        };
+        let mut wrong_id = good.clone();
+        wrong_id[1] = wire::BatchOutcome::Written {
+            id: vec![3; 20],
+            normalized: b"second".to_vec(),
+        };
+        let mut wrong_bytes = good.clone();
+        wrong_bytes[1] = wire::BatchOutcome::Written {
+            id: vec![2; 20],
+            normalized: b"changed".to_vec(),
+        };
+        let mut extra = good.clone();
+        extra.push(good[0].clone());
+        let responses = [
+            wire::encode_batch_response(&partial),
+            wire::encode_batch_response(&good[..1]),
+            wire::encode_batch_response(&extra),
+            wire::encode_batch_response(&wrong_id),
+            wire::encode_batch_response(&wrong_bytes),
+            b"truncated".to_vec(),
+        ];
+        for response in responses {
+            let server =
+                CountingServer::start(HashMap::from([("/api/objects:batch".into(), response)]));
+            let cache_dir = tempfile::tempdir().unwrap();
+            let cache = Arc::new(DiskCache::open(cache_dir.path()));
+            let client = TandemClient::connect_with_cache(
+                &server.addr,
+                TEST_TOKEN,
+                &[],
+                Some(cache.clone()),
+            )
+            .unwrap();
+            let mut pending = PendingFiles::default();
+            for (id, data) in &files {
+                pending.insert(id.clone(), data.clone());
+            }
+            assert!(pending
+                .flush(|files| client.put_files_batch(files))
+                .is_err());
+            for (id, data) in &files {
+                assert_eq!(pending.get(id), Some(data));
+                assert!(cache.get("file", id).is_none());
+            }
+            // Even successes from a partial response are sent again. The
+            // server's content-addressed writes make this retry harmless.
+            pending
+                .flush(|retried| {
+                    assert_eq!(retried, &files);
+                    validate_file_batch(retried, &good)
+                })
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_valid_file_batch_populates_the_cache_after_validation() {
+        let files = BTreeMap::from([(vec![1; 20], vec![0, 255])]);
+        let response = wire::encode_batch_response(&[wire::BatchOutcome::Written {
+            id: vec![1; 20],
+            normalized: vec![0, 255],
+        }]);
+        let server =
+            CountingServer::start(HashMap::from([("/api/objects:batch".into(), response)]));
+        let cache_dir = tempfile::tempdir().unwrap();
+        let cache = Arc::new(DiskCache::open(cache_dir.path()));
+        let client =
+            TandemClient::connect_with_cache(&server.addr, TEST_TOKEN, &[], Some(cache.clone()))
+                .unwrap();
+        client.put_files_batch(&files).unwrap();
+        assert_eq!(cache.get("file", &[1; 20]), Some(vec![0, 255]));
+    }
+
+    #[test]
+    fn a_lost_connection_preserves_the_batch_and_keeps_the_cache_empty() {
+        use crate::pending_files::PendingFiles;
+        let server = CountingServer::start(HashMap::new());
+        let cache_dir = tempfile::tempdir().unwrap();
+        let cache = Arc::new(DiskCache::open(cache_dir.path()));
+        let client =
+            TandemClient::connect_with_cache(&server.addr, TEST_TOKEN, &[], Some(cache.clone()))
+                .unwrap();
+        drop(server);
+
+        let mut pending = PendingFiles::default();
+        pending.insert(vec![1; 20], vec![0, 255]);
+        let error = pending
+            .flush(|files| client.put_files_batch(files))
+            .unwrap_err();
+        assert!(
+            error.downcast_ref::<reqwest::Error>().is_some(),
+            "actual transport error: {error:#}"
+        );
+        assert_eq!(pending.get(&[1; 20]), Some(&vec![0, 255]));
+        assert!(cache.get("file", &[1; 20]).is_none());
+    }
+
+    #[test]
+    fn the_handshake_rejects_non_sha1_git_object_ids() {
+        let mut info = RepoInfoResponse {
+            protocol_major: PROTOCOL_MAJOR,
+            protocol_minor: PROTOCOL_MINOR,
+            backend_name: EXPECTED_BACKEND_NAME.into(),
+            op_store_name: EXPECTED_OP_STORE_NAME.into(),
+            commit_id_length: 32,
+            ..Default::default()
+        };
+        assert!(validate_repo_info(&info, &[])
+            .unwrap_err()
+            .to_string()
+            .contains("20-byte Git SHA-1"));
+        info.commit_id_length = 0;
+        assert!(validate_repo_info(&info, &[])
+            .unwrap_err()
+            .to_string()
+            .contains("20-byte Git SHA-1"));
+    }
+
     struct CountingServer {
         addr: String,
         requests: Arc<AtomicU64>,
         authorizations: Arc<Mutex<Vec<String>>>,
         stop: Arc<AtomicBool>,
         acceptor: Option<std::thread::JoinHandle<()>>,
+        connections: Arc<Mutex<Vec<std::net::TcpStream>>>,
     }
 
     impl CountingServer {
@@ -847,15 +1038,21 @@ mod tests {
             let authorizations = Arc::new(Mutex::new(Vec::new()));
             let stop = Arc::new(AtomicBool::new(false));
             let objects = Arc::new(objects);
+            let connections = Arc::new(Mutex::new(Vec::new()));
 
             let acceptor = {
                 let requests = Arc::clone(&requests);
                 let authorizations = Arc::clone(&authorizations);
                 let stop = Arc::clone(&stop);
+                let connections = Arc::clone(&connections);
                 std::thread::spawn(move || {
                     while !stop.load(Ordering::Relaxed) {
                         match listener.accept() {
                             Ok((stream, _)) => {
+                                connections
+                                    .lock()
+                                    .unwrap()
+                                    .push(stream.try_clone().unwrap());
                                 let requests = Arc::clone(&requests);
                                 let authorizations = Arc::clone(&authorizations);
                                 let objects = Arc::clone(&objects);
@@ -878,6 +1075,7 @@ mod tests {
                 authorizations,
                 stop,
                 acceptor: Some(acceptor),
+                connections,
             }
         }
 
@@ -895,6 +1093,9 @@ mod tests {
             self.stop.store(true, Ordering::Relaxed);
             if let Some(handle) = self.acceptor.take() {
                 let _ = handle.join();
+            }
+            for connection in self.connections.lock().unwrap().drain(..) {
+                let _ = connection.shutdown(std::net::Shutdown::Both);
             }
         }
     }

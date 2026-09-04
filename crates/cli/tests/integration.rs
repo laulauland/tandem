@@ -26,6 +26,8 @@ mod contention;
 mod control_socket;
 #[path = "integration/daemon_lifecycle.rs"]
 mod daemon_lifecycle;
+#[path = "integration/file_batching.rs"]
+mod file_batching;
 #[path = "integration/fixture_readiness.rs"]
 mod fixture_readiness;
 #[path = "integration/git_round_trip.rs"]

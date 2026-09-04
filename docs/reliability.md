@@ -51,6 +51,19 @@ successful operation until a head update carries them.
 
 ## Blob attribution
 
+The client may buffer files until a dependent tree or commit is written. The
+buffer has bounded bytes and item count; a file larger than its budget uses the
+ordinary single-object upload. A buffered file is readable in its originating
+backend, but returning its ID is not a durability acknowledgement. Dropping the
+client before publishing can discard those unacknowledged bytes.
+
+The client sends a complete batch before sending dependent objects. A partial
+failure, lost response, or mismatched ID or file bytes leaves the buffered
+batch intact and fails the dependent write. A later attempt may resend the
+same files; only a fully validated response releases the buffer and populates
+the immutable read cache. This changes upload timing, not the index commit
+point or the acknowledgement guarantee.
+
 Backend objects, operations, and heads travel through separate jj store
 connections, so the server has no trustworthy per-client session with which to
 say which upload belongs to which operation. A WAL entry therefore carries

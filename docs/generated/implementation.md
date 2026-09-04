@@ -61,6 +61,7 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/client/src/lib.rs`
 - `crates/client/src/op_heads_store.rs`
 - `crates/client/src/op_store.rs`
+- `crates/client/src/pending_files.rs`
 - `crates/client/src/repo_link.rs`
 - `crates/jj-interop/src/ids.rs`
 - `crates/jj-interop/src/lib.rs`
@@ -113,6 +114,7 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/cli/tests/integration/contention.rs`
 - `crates/cli/tests/integration/control_socket.rs`
 - `crates/cli/tests/integration/daemon_lifecycle.rs`
+- `crates/cli/tests/integration/file_batching.rs`
 - `crates/cli/tests/integration/fixture_readiness.rs`
 - `crates/cli/tests/integration/git_round_trip.rs`
 - `crates/cli/tests/integration/handshake.rs`

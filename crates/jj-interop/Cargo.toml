@@ -8,9 +8,15 @@ description = "Jujutsu encoding and shared repository semantics for Tandem"
 
 [dependencies]
 anyhow.workspace = true
+gix-hash.workspace = true
+gix-object.workspace = true
 jj-lib.workspace = true
 prost.workspace = true
 smallvec.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+pollster.workspace = true
 
 [lints]
 workspace = true

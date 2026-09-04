@@ -8,6 +8,7 @@ pub mod env;
 pub mod http_client;
 pub mod op_heads_store;
 pub mod op_store;
+mod pending_files;
 pub mod repo_link;
 
 pub use http_client::TandemClient;

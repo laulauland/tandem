@@ -1,7 +1,7 @@
 # Benchmarks
 
-Recorded numbers, and the commands that produce them. Every file in this
-directory is written by a bench run that was asked to record — the benches
+Recorded numbers, and the commands that produce them. Benchmark reports and
+reviewed comparisons are recorded deliberately — the benches
 write under `target/benchmarks/` by default, and only put a number here when
 `TANDEM_BENCH_RECORD=1` says so. Committing a measurement is meant to be a
 decision rather than a side effect of having run one.
@@ -34,6 +34,26 @@ would swamp everything else; what this answers is the question the window is
 set against — what the machinery itself costs, once it has been told to go.
 
 Source: [`testing/benchmarks/benches/snapshot_publish_latency.rs`](../../testing/benchmarks/benches/snapshot_publish_latency.rs).
+
+### File batching comparison (2026-09-04)
+
+The [paired results and raw samples](publish-batching.json) compare the
+workspace-refactor baseline with publish improvement stages 1–3. Each variant
+uses its own compiled daemon/client benchmark and matching CLI/server binary.
+Both use the same host, separate temporary filesystem buckets, 3 warmups,
+and 40 measured snapshots of 8 files in a src directory inside the test workspace.
+
+| Environment | Baseline p50 / p95 | With batching p50 / p95 |
+|---|---|---|
+| Loopback | 2.347 / 2.590 ms | 1.833 / 1.960 ms |
+| Loopback + 50 ms added per request | 761.370 / 762.925 ms | 406.833 / 407.603 ms |
+
+The integration test separately verifies that eight files use one upload
+batch, with exact binary content read back through the server. Its files are
+at the repository root; the benchmark's src directory adds a tree write.
+The timer excludes cloning, debounce, writer acquisition, and the subsequent
+staleness refresh. These are single local runs, not real-distance or S3
+qualification. exe.dev measurements remain pending SSH-agent authentication.
 
 ### Running it
 
@@ -107,9 +127,9 @@ tight it is: 40 samples between 2508 and 2535 ms, which says the cost is
 structural — serialized round trips — and not network noise. That is the
 number the durability window depends on (see
 [the architecture](../../ARCHITECTURE.md)), and it is why collapsing the
-publish path's request count is the
-next thing worth doing: at two round trips instead of fifteen, the same link
-prices a publish at roughly a third of a second.
+publish path's request count was worth reducing. The current batching
+comparison above measures that change locally; these older distant results
+must not be presented as measurements of the new implementation.
 
 ## Commit-path latency and in-flight throughput
 

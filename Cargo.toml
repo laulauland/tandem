@@ -15,6 +15,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 proptest = "1"
 blake2 = "0.10"
+gix-hash = "0.22"
+gix-object = "0.55"
 dunce = "1"
 libc = "0.2"
 object_store = { version = "0.14.1", features = ["aws"] }

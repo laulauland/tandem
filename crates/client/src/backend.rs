@@ -5,7 +5,7 @@ use std::fmt;
 use std::io::Cursor;
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use async_trait::async_trait;
@@ -19,6 +19,7 @@ use prost::Message as _;
 use tokio::io::AsyncRead;
 
 use crate::http_client::TandemClient;
+use crate::pending_files::PendingFiles;
 use crate::repo_link;
 use jj_tandem_jj::{ids, proto_convert};
 // Object kind discriminants. `wire` owns them because they also name the
@@ -33,6 +34,7 @@ pub struct TandemBackend {
     root_commit_id: CommitId,
     root_change_id: ChangeId,
     empty_tree_id: TreeId,
+    pending_files: Mutex<PendingFiles>,
 }
 
 impl fmt::Debug for TandemBackend {
@@ -64,6 +66,7 @@ impl TandemBackend {
             root_commit_id: ids::commit(info.root_commit_id),
             root_change_id: ids::change(info.root_change_id),
             empty_tree_id: ids::tree(info.empty_tree_id),
+            pending_files: Mutex::new(PendingFiles::default()),
         })
     }
 
@@ -82,7 +85,16 @@ impl TandemBackend {
             root_commit_id: ids::commit(info.root_commit_id),
             root_change_id: ids::change(info.root_change_id),
             empty_tree_id: ids::tree(info.empty_tree_id),
+            pending_files: Mutex::new(PendingFiles::default()),
         })
+    }
+
+    fn flush_files(&self) -> BackendResult<()> {
+        self.pending_files
+            .lock()
+            .map_err(|_| to_backend_err(anyhow::anyhow!("pending file uploads lock poisoned")))?
+            .flush(|files| self.client.put_files_batch(files))
+            .map_err(to_backend_err)
     }
 }
 
@@ -125,6 +137,15 @@ impl Backend for TandemBackend {
         _path: &RepoPath,
         id: &FileId,
     ) -> BackendResult<Pin<Box<dyn AsyncRead + Send>>> {
+        let pending = self
+            .pending_files
+            .lock()
+            .map_err(|_| to_backend_err(anyhow::anyhow!("pending file uploads lock poisoned")))?
+            .get(id.as_bytes())
+            .cloned();
+        if let Some(data) = pending {
+            return Ok(Box::pin(Cursor::new(data)));
+        }
         let data = self
             .client
             .get_object(KIND_FILE, id.as_bytes())
@@ -145,11 +166,27 @@ impl Backend for TandemBackend {
         tokio::io::AsyncReadExt::read_to_end(contents, &mut buf)
             .await
             .map_err(|e| to_backend_err(e.into()))?;
-        let (id, _) = self
-            .client
-            .put_object(KIND_FILE, &buf)
-            .map_err(to_backend_err)?;
-        Ok(FileId::new(id))
+        let id = ids::git_file(&buf).map_err(to_backend_err)?;
+        let mut pending = self
+            .pending_files
+            .lock()
+            .map_err(|_| to_backend_err(anyhow::anyhow!("pending file uploads lock poisoned")))?;
+        if pending.get(id.as_bytes()).is_some() {
+            return Ok(id);
+        }
+        if !pending.fits(buf.len()) {
+            pending
+                .flush(|files| self.client.put_files_batch(files))
+                .map_err(to_backend_err)?;
+        }
+        if PendingFiles::fits_empty(buf.len()) {
+            pending.insert(id.as_bytes().to_vec(), buf);
+        } else {
+            self.client
+                .put_file(id.as_bytes(), &buf)
+                .map_err(to_backend_err)?;
+        }
+        Ok(id)
     }
 
     async fn read_symlink(&self, _path: &RepoPath, id: &SymlinkId) -> BackendResult<String> {
@@ -216,6 +253,7 @@ impl Backend for TandemBackend {
     }
 
     async fn write_tree(&self, _path: &RepoPath, contents: &Tree) -> BackendResult<TreeId> {
+        self.flush_files()?;
         let proto = proto_convert::tree_to_proto(contents);
         let data = proto.encode_to_vec();
         let (id, _) = self
@@ -257,6 +295,8 @@ impl Backend for TandemBackend {
                 "Cannot write a commit with no parents".into(),
             ));
         }
+
+        self.flush_files()?;
 
         let mut proto = jj_lib::simple_backend::commit_to_proto(&commit);
         if let Some(sign) = sign_with {
