@@ -73,7 +73,6 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/repository/src/authority.rs`
 - `crates/repository/src/bucket.rs`
 - `crates/repository/src/faults.rs`
-- `crates/repository/src/integration.rs`
 - `crates/repository/src/lib.rs`
 - `crates/repository/src/repair.rs`
 - `crates/repository/src/scope.rs`
@@ -118,7 +117,6 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/cli/tests/integration/git_round_trip.rs`
 - `crates/cli/tests/integration/handshake.rs`
 - `crates/cli/tests/integration/http_api.rs`
-- `crates/cli/tests/integration/integration_workspace.rs`
 - `crates/cli/tests/integration/log_streaming.rs`
 - `crates/cli/tests/integration/up_down.rs`
 - `crates/cli/tests/integration/watch.rs`

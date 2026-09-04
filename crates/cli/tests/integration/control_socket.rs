@@ -43,6 +43,10 @@ fn status_json_while_running() {
     assert!(parsed["repo"].is_string(), "should have repo string");
     assert!(parsed["listen"].is_string(), "should have listen string");
     assert!(parsed["version"].is_string(), "should have version string");
+    assert!(
+        parsed.get("integration").is_none(),
+        "automatic integration was removed"
+    );
 
     // Cleanup
     #[cfg(unix)]

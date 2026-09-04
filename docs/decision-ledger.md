@@ -36,10 +36,11 @@ that may no longer describe current performance.
 - A separate Tandem head authority was rejected in favor of jj's op-heads
   store. The metadata file remains only for version and workspace-pointer
   materialization.
-- Continuous server-side integration was implemented experimentally and then
-  parked. Recomputing on each file-save snapshot merges mid-edit states. The
-  viable future shape is an on-demand, read-only conflict query over work that
-  actors have explicitly marked ready.
+- Automatic server-side integration was removed after being parked. Its worker
+  published local operations outside the WAL commit protocol, and recomputing
+  on each file-save snapshot merged mid-edit states. Explicit integration uses
+  ordinary jj commands. A future conflict query should be on-demand and
+  read-only over work that actors have explicitly marked ready.
 - Large suites of one-scenario subprocess tests were consolidated. Pure codecs
   moved to properties; schedule-dependent correctness moved to the DST; only
   behavior that needs a real process, socket, filesystem, S3 API, or Git remains
@@ -83,8 +84,7 @@ that may no longer describe current performance.
 - The pre-publish blob buffer is process memory. Its cap supplies backpressure,
   but objects not attached to an acknowledged operation are not recoverable
   after process loss.
-- Continuous integration remains parked; conflict inspection has no on-demand
-  replacement yet.
+- Conflict inspection has no on-demand query yet.
 - Publish latency over real distance remains sensitive to request depth.
 - Capacity and recovery must be requalified against the actual object store,
   proxy, latency, and agent count before production use.

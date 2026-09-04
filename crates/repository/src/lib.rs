@@ -9,15 +9,13 @@
 //! This file holds the state, the object and operation stores, and the heads
 //! logic. Siblings hold the rest: `bucket`
 //! is the durability half — WAL entries, the index object, and the recovery
-//! that replays them — `integration` is the off-request worker that keeps the
-//! `integration` bookmark up to date, `repair` puts back a workspace a merge
+//! that replays them — `repair` puts back a workspace a merge
 //! settled on an interrupted clone's placeholder, and `authority` enforces
 //! publish scope using the caller's already-authenticated identity.
 
 mod authority;
 mod bucket;
 mod faults;
-mod integration;
 mod repair;
 mod scope;
 
@@ -84,8 +82,6 @@ pub struct Repository {
     boot_replay: Mutex<bucket::BootReplay>,
     /// The faults this server is under. Inert unless a test says otherwise.
     faults: Arc<FaultPoints>,
-    integration_enabled: bool,
-    integration_trigger: Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>,
     lock: Mutex<()>,
     /// Wake-ups for every `/api/events` subscriber.
     heads_events: broadcast::Sender<u64>,
@@ -223,23 +219,15 @@ impl Repository {
     pub fn new(
         settings: &jj_lib::settings::UserSettings,
         repo: PathBuf,
-        integration_enabled: bool,
         bucket_spec: Option<&str>,
     ) -> Result<Self> {
-        Self::new_with_faults(
-            settings,
-            repo,
-            integration_enabled,
-            bucket_spec,
-            FaultPoints::from_environment(),
-        )
+        Self::new_with_faults(settings, repo, bucket_spec, FaultPoints::from_environment())
     }
 
     /// The same, under a fault set a test can drive from the same process.
     pub fn new_with_faults(
         settings: &jj_lib::settings::UserSettings,
         repo: PathBuf,
-        integration_enabled: bool,
         bucket_spec: Option<&str>,
         faults: Arc<FaultPoints>,
     ) -> Result<Self> {
@@ -328,12 +316,9 @@ impl Repository {
             bootstrap_op_heads: Vec::new(),
             boot_replay: Mutex::new(bucket::BootReplay::default()),
             faults,
-            integration_enabled,
-            integration_trigger: Mutex::new(None),
             lock: Mutex::new(()),
             heads_events: broadcast::channel(HEADS_EVENT_BUFFER).0,
         };
-        server.initialize_integration_metadata()?;
         if bootstrapped {
             // Read before the replay, so recovery can tell the operation this
             // init just minted from the ones the bucket is about to hand back.
@@ -1045,9 +1030,6 @@ impl Repository {
         let heads_bytes = head_ids_for_wire(&acked_heads);
 
         self.notify_watchers(next_metadata.version);
-        if self.integration_enabled {
-            self.enqueue_integration_recompute();
-        }
 
         Ok(UpdateResult {
             ok: true,

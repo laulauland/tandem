@@ -102,7 +102,6 @@ pub fn start_background(
     log_level: &str,
     log_file: Option<&str>,
     control_socket: Option<&str>,
-    enable_integration_workspace: bool,
     bucket: Option<&str>,
     admin_token: Option<&str>,
 ) -> Result<StartedServer, String> {
@@ -153,9 +152,6 @@ pub fn start_background(
         &log_file_path,
         "--daemon",
     ]);
-    if enable_integration_workspace {
-        cmd.arg("--enable-integration-workspace");
-    }
     if let Some(bucket) = bucket {
         cmd.args(["--bucket", bucket]);
     }

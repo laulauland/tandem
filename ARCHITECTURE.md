@@ -126,9 +126,10 @@ push directly.
 
 ## Deliberately parked
 
-- Continuous server-side integration. Recomputing a merge for every debounced
-  file burst operates on mid-edit states. A future design should be an
-  on-demand, read-only conflict query over explicitly ready work.
+- Automatic server-side integration was removed: merging every file burst
+  operates on mid-edit states and adds a separate mutation path. Explicit
+  integration uses ordinary jj commands. A future conflict query should be
+  on-demand and read-only over explicitly ready work.
 - A cache-management command. Clone and workspace catch-up warm the cache;
   image baking preserves it without another product surface.
 - Built-in TLS and multi-tenant isolation. They require security boundaries

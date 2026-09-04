@@ -81,7 +81,6 @@ impl Cluster {
         let repository = jj_tandem_repository::Repository::new_with_faults(
             &super::test_settings()?,
             self.repo.clone(),
-            false,
             Some(&self.bucket.to_string_lossy()),
             Arc::clone(&self.faults),
         )

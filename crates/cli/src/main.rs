@@ -6,7 +6,6 @@
 //!   tandem daemon [dir]                          → watch, snapshot, publish
 //!   tandem <jj args>                             → stock jj via CliRunner
 
-use jj_tandem_client::env::env_flag_enabled;
 use jj_tandem_server::{self as server, control, resolve_control_socket};
 use jj_tandem_workspace::{
     clone_tandem_workspace, init_tandem_workspace, is_running, read_status, resolve_debounce,
@@ -46,9 +45,6 @@ ENVIRONMENT:
     TANDEM_TOKEN            The token `tandem init` and `tandem watch` present.
                             Either the admin token or one already scoped to the
                             workspace
-    TANDEM_ENABLE_INTEGRATION_WORKSPACE
-                            Set to 1/true to enable server-side integration
-                            workspace recompute mode
     TANDEM_LISTEN           Listen address for `tandem up` (host:port).
                             If unset, tandem auto-selects a free port
                             in 0.0.0.0:13013-13063
@@ -161,9 +157,6 @@ enum Commands {
         /// Log file path (used in daemon mode)
         #[arg(long)]
         log_file: Option<String>,
-        /// Enable server-side integration workspace recompute mode
-        #[arg(long)]
-        enable_integration_workspace: bool,
         /// Bucket holding the write-ahead log: a directory path, file://…, or
         /// s3://<bucket>[/<prefix>][?endpoint=…&region=…&anonymous=true].
         /// Defaults to a directory inside the repo.
@@ -259,9 +252,6 @@ enum Commands {
         /// Path to control socket
         #[arg(long)]
         control_socket: Option<String>,
-        /// Enable server-side integration workspace recompute mode
-        #[arg(long)]
-        enable_integration_workspace: bool,
         /// Bucket holding the write-ahead log (see `tandem serve --bucket`)
         #[arg(long, env = "TANDEM_BUCKET")]
         bucket: Option<String>,
@@ -345,7 +335,6 @@ fn main() -> ExitCode {
             control_socket,
             daemon,
             log_file,
-            enable_integration_workspace,
             bucket,
             admin_token,
         }) => run_serve(
@@ -356,7 +345,6 @@ fn main() -> ExitCode {
             control_socket.as_deref(),
             daemon,
             log_file.as_deref(),
-            enable_integration_workspace,
             bucket.as_deref(),
             admin_token.as_deref(),
         ),
@@ -398,7 +386,6 @@ fn main() -> ExitCode {
             log_level,
             log_file,
             control_socket,
-            enable_integration_workspace,
             bucket,
             admin_token,
         }) => run_up(
@@ -407,7 +394,6 @@ fn main() -> ExitCode {
             &log_level,
             log_file.as_deref(),
             control_socket.as_deref(),
-            enable_integration_workspace,
             bucket.as_deref(),
             admin_token.as_deref(),
         ),
@@ -446,7 +432,6 @@ fn run_serve(
     control_socket: Option<&str>,
     daemon: bool,
     log_file: Option<&str>,
-    enable_integration_workspace_flag: bool,
     bucket: Option<&str>,
     admin_token: Option<&str>,
 ) -> ExitCode {
@@ -469,9 +454,6 @@ fn run_serve(
         control_socket: control_socket.map(|s| s.to_string()),
         daemon,
         log_file: log_file.map(|s| s.to_string()),
-        enable_integration_workspace: resolve_integration_workspace_enabled(
-            enable_integration_workspace_flag,
-        ),
         bucket: bucket.map(|s| s.to_string()),
         admin_token: admin_token.map(|s| s.to_string()),
     };
@@ -486,17 +468,12 @@ fn run_serve(
 
 // ─── Up / Down / Status / Logs ────────────────────────────────────────────────
 
-fn resolve_integration_workspace_enabled(flag: bool) -> bool {
-    flag || env_flag_enabled("TANDEM_ENABLE_INTEGRATION_WORKSPACE")
-}
-
 fn run_up(
     repo: &str,
     listen: Option<&str>,
     log_level: &str,
     log_file: Option<&str>,
     control_socket: Option<&str>,
-    enable_integration_workspace: bool,
     bucket: Option<&str>,
     admin_token: Option<&str>,
 ) -> ExitCode {
@@ -506,7 +483,6 @@ fn run_up(
         log_level,
         log_file,
         control_socket,
-        resolve_integration_workspace_enabled(enable_integration_workspace),
         bucket,
         admin_token,
     ) {
@@ -574,23 +550,6 @@ fn run_status(json: bool, control_socket: Option<&str>) -> ExitCode {
                             "  {verb} from the bucket: {} op heads, {} WAL entries in {}ms",
                             bucket.replayed_heads, bucket.replayed_entries, bucket.replay_ms
                         );
-                    }
-                }
-                println!(
-                    "  Integration workspace: {}",
-                    if status.integration.enabled {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    }
-                );
-                if status.integration.enabled {
-                    println!("  Integration status: {}", status.integration.last_status);
-                    if let Some(commit) = status.integration.last_integration_commit.as_deref() {
-                        println!("  Integration commit: {commit}");
-                    }
-                    if let Some(error) = status.integration.last_error.as_deref() {
-                        println!("  Integration error:  {error}");
                     }
                 }
             }

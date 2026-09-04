@@ -34,8 +34,6 @@ mod git_round_trip;
 mod handshake;
 #[path = "integration/http_api.rs"]
 mod http_api;
-#[path = "integration/integration_workspace.rs"]
-mod integration_workspace;
 #[path = "integration/log_streaming.rs"]
 mod log_streaming;
 #[path = "integration/up_down.rs"]

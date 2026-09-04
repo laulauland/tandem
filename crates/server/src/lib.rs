@@ -29,15 +29,10 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new(
-        repo: PathBuf,
-        integration_enabled: bool,
-        bucket: Option<&str>,
-        admin_token: &str,
-    ) -> Result<Self> {
+    pub fn new(repo: PathBuf, bucket: Option<&str>, admin_token: &str) -> Result<Self> {
         let settings = user_settings()?;
         Ok(Self::from_repository(
-            Repository::new(&settings, repo, integration_enabled, bucket)?,
+            Repository::new(&settings, repo, bucket)?,
             admin_token,
         ))
     }
@@ -185,7 +180,6 @@ pub struct ServeOptions {
     pub control_socket: Option<String>,
     pub daemon: bool,
     pub log_file: Option<String>,
-    pub enable_integration_workspace: bool,
     pub bucket: Option<String>,
     pub admin_token: Option<String>,
 }
@@ -193,7 +187,7 @@ pub struct ServeOptions {
 pub async fn run_serve(opts: ServeOptions) -> Result<()> {
     let (log_tx, _) = broadcast::channel::<control::LogEvent>(1024);
     logging::init_tracing(&opts.log_level, &opts.log_format, log_tx.clone())?;
-    tracing::info!(listen_addr = %opts.listen_addr, repo = %opts.repo_path, daemon = opts.daemon, log_level = %opts.log_level, log_format = %opts.log_format, integration_workspace = opts.enable_integration_workspace, bucket = opts.bucket.as_deref().unwrap_or("<repo-local>"), "starting tandem server");
+    tracing::info!(listen_addr = %opts.listen_addr, repo = %opts.repo_path, daemon = opts.daemon, log_level = %opts.log_level, log_format = %opts.log_format, bucket = opts.bucket.as_deref().unwrap_or("<repo-local>"), "starting tandem server");
     if let Some(path) = opts.log_file.as_deref() {
         tracing::debug!(log_file = %path, "serve log file argument");
     }
@@ -203,11 +197,9 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
     };
     let server = Arc::new(Server::new(
         PathBuf::from(&opts.repo_path),
-        opts.enable_integration_workspace,
         opts.bucket.as_deref(),
         &admin_token,
     )?);
-    server.repository.start_integration_worker();
     let listener = tokio::net::TcpListener::bind(&opts.listen_addr)
         .await
         .with_context(|| format!("failed to bind {}", opts.listen_addr))?;
@@ -223,12 +215,6 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
             listen: local_addr.to_string(),
             shutdown_tx: shutdown_tx.clone(),
             log_tx,
-            integration_enabled: opts.enable_integration_workspace,
-            integration_metadata_path: server
-                .repository
-                .integration_metadata_path()
-                .to_string_lossy()
-                .into(),
             bucket: server.repository.bucket_status().into(),
         });
         tokio::spawn(async move {
