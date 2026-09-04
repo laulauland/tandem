@@ -23,7 +23,6 @@ pub use faults::{CrashWindow, FaultPoints};
 pub use scope::ScopeDenied;
 
 use anyhow::{anyhow, bail, Context, Result};
-// blake2 is available if needed for raw hashing, but we use jj_lib::content_hash
 use jj_lib::backend::{CommitId, TreeId};
 use jj_lib::object_id::ObjectId as _;
 use jj_lib::op_store::OperationId;
@@ -211,6 +210,25 @@ fn head_ids_for_wire(heads: &[String]) -> Vec<Vec<u8>> {
             }
         })
         .collect()
+}
+
+// jj IDs hash semantic values, not protobuf bytes. Upload and replay must use
+// the same decoding and hashing even when protobuf encodings differ.
+fn decode_operation_with_id(data: &[u8]) -> Result<(Vec<u8>, jj_lib::op_store::Operation)> {
+    let proto = jj_lib::protos::simple_op_store::Operation::decode(data)
+        .context("decode operation proto")?;
+    let operation =
+        proto_convert::operation_from_proto(proto).context("convert operation from proto")?;
+    Ok((
+        jj_lib::content_hash::blake2b_hash(&operation).to_vec(),
+        operation,
+    ))
+}
+
+fn decode_view_with_id(data: &[u8]) -> Result<(Vec<u8>, jj_lib::op_store::View)> {
+    let proto = jj_lib::protos::simple_op_store::View::decode(data).context("decode view proto")?;
+    let view = proto_convert::view_from_proto(proto).context("convert view from proto")?;
+    Ok((jj_lib::content_hash::blake2b_hash(&view).to_vec(), view))
 }
 
 impl Repository {
@@ -755,14 +773,7 @@ impl Repository {
     }
 
     pub fn put_operation_sync(&self, data: &[u8]) -> Result<Vec<u8>> {
-        // Decode proto → Operation struct → compute ContentHash-based ID
-        let proto = jj_lib::protos::simple_op_store::Operation::decode(data)
-            .context("decode operation proto")?;
-        let operation =
-            proto_convert::operation_from_proto(proto).context("convert operation from proto")?;
-
-        let hash = jj_lib::content_hash::blake2b_hash(&operation);
-        let id: Vec<u8> = hash.to_vec();
+        let (id, _) = decode_operation_with_id(data)?;
         let hex = to_hex(&id);
 
         let dir = self.op_store_path.join("operations");
@@ -778,13 +789,7 @@ impl Repository {
     }
 
     pub fn put_view_sync(&self, data: &[u8]) -> Result<Vec<u8>> {
-        // Decode proto → View struct → compute ContentHash-based ID
-        let proto =
-            jj_lib::protos::simple_op_store::View::decode(data).context("decode view proto")?;
-        let view = proto_convert::view_from_proto(proto).context("convert view from proto")?;
-
-        let hash = jj_lib::content_hash::blake2b_hash(&view);
-        let id: Vec<u8> = hash.to_vec();
+        let (id, _) = decode_view_with_id(data)?;
         let hex = to_hex(&id);
 
         let dir = self.op_store_path.join("views");

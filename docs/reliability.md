@@ -134,7 +134,24 @@ Startup reads the local metadata and bucket index before serving:
 - Replay writes are idempotent: stored content is addressed by hash, operations
   have stable IDs, and making an existing operation a head is a no-op.
 
-An index version is adopted only after every named head has landed locally.
+Before replay trusts an entry's ancestry or writes its records, it verifies
+that the bucket key, operation header, operation record, and semantic jj
+operation hash agree. The ordered parent list must match that operation.
+Records must contain only blobs followed by exactly one view and one operation;
+the view record and its semantic hash must match the operation's view ID.
+These are jj content hashes, not hashes of the protobuf encoding.
+
+Writing the operation last is also the replay completion boundary. An operation
+file lets a later boot stop walking that ancestry, so an entry with an early
+operation record must fail before it writes anything. Retrying recovery over a
+partially rebuilt disk cannot skip that corrupt entry. Malformed operation or
+view data fails recovery instead of being accepted under a claimed ID.
+
+An index version is adopted only after every named non-root head's operation
+and view have been verified locally, including heads whose markers already
+existed. The synthetic root requires only its head marker.
+The head set must be nonempty and use canonical operation IDs of jj's full
+length; abbreviated zero IDs are not accepted as the synthetic root.
 Adopting a version without its heads would allow the next writer to pass CAS
 while silently dropping history.
 

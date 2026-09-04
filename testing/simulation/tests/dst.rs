@@ -52,6 +52,166 @@ fn an_index_write_failure_does_not_strand_another_workspaces_uploads() -> anyhow
     abandoned_publish(true)
 }
 
+/// An operation file is the replay stop sentinel. Corrupt framing must be
+/// rejected before writing it, or a second boot may skip unfinished ancestry.
+#[test]
+fn a_failed_ancestor_replay_cannot_be_skipped_on_the_next_boot() -> anyhow::Result<()> {
+    use jj_tandem_wal::{IndexObject, RecordKind, WalEntry, WalRecord, INDEX_KEY};
+    use support::{agent::Agent, cluster::Cluster, oracle};
+
+    let mut cluster = Cluster::start()?;
+    let mut agent = Agent::join(&cluster, "recovery")?;
+    let ancestor_bytes = b"ancestor file survives repair\n".to_vec();
+    let ancestor_commit = agent.commit_files(
+        &[("ancestor.txt".to_string(), ancestor_bytes.clone())],
+        "ancestor",
+    )?;
+    let ancestor = oracle::api_heads(&cluster)?
+        .heads
+        .into_iter()
+        .next()
+        .unwrap();
+    let tip_bytes = b"tip file survives repair\n".to_vec();
+    let tip_commit = agent.commit_files(&[("tip.txt".to_string(), tip_bytes.clone())], "tip")?;
+    let index = IndexObject::decode(&std::fs::read(cluster.bucket.join(INDEX_KEY))?)?;
+    assert!(
+        !index.op_heads.contains(&ancestor),
+        "corrupt an ancestor, not the tip"
+    );
+    let key = cluster.bucket.join(jj_tandem_wal::wal_key(&ancestor));
+    let original = std::fs::read(&key)?;
+    let mut corrupt = WalEntry::decode(&original)?;
+    let operation = corrupt.records.pop().unwrap();
+    assert_eq!(operation.kind, RecordKind::Operation);
+    corrupt.records.insert(0, operation);
+    corrupt.records.push(WalRecord {
+        kind: RecordKind::File,
+        id: vec![0; 20],
+        data: b"does not hash to the recorded file id".to_vec(),
+    });
+    std::fs::write(&key, corrupt.encode()?)?;
+
+    assert!(
+        cluster.cold_restart().is_err(),
+        "corrupt ancestry must fail cold recovery"
+    );
+    let metadata_path = cluster.repo.join(".jj/repo/tandem/heads.json");
+    let metadata: serde_json::Value = serde_json::from_slice(&std::fs::read(&metadata_path)?)?;
+    assert!(metadata["version"].as_u64().unwrap() < index.version);
+    assert!(
+        cluster.restart().is_err(),
+        "a second boot must not skip an incompletely replayed ancestor"
+    );
+    let metadata: serde_json::Value = serde_json::from_slice(&std::fs::read(&metadata_path)?)?;
+    assert!(metadata["version"].as_u64().unwrap() < index.version);
+
+    std::fs::write(&key, original)?;
+    cluster.restart()?;
+    let snapshot = agent.snapshot()?;
+    assert_eq!(
+        snapshot.read_file(&ancestor_commit, "ancestor.txt")?,
+        ancestor_bytes
+    );
+    assert_eq!(snapshot.read_file(&tip_commit, "tip.txt")?, tip_bytes);
+    Ok(())
+}
+
+#[test]
+fn an_existing_head_marker_cannot_hide_a_missing_indexed_operation() -> anyhow::Result<()> {
+    use jj_tandem_wal::{IndexObject, INDEX_KEY};
+    use support::{agent::Agent, cluster::Cluster};
+
+    let mut cluster = Cluster::start()?;
+    let mut agent = Agent::join(&cluster, "missing-head")?;
+    let content = b"recover after restoring the indexed operation\n".to_vec();
+    let commit = agent.commit_files(&[("file.txt".to_string(), content.clone())], "published")?;
+    cluster.stop();
+    let index_path = cluster.bucket.join(INDEX_KEY);
+    let mut index = IndexObject::decode(&std::fs::read(&index_path)?)?;
+    let operation_path = cluster
+        .repo
+        .join(".jj/repo/op_store/operations")
+        .join(&index.op_heads[0]);
+    let operation_bytes = std::fs::read(&operation_path)?;
+    std::fs::remove_file(&operation_path)?;
+    index.version += 1;
+    std::fs::write(&index_path, index.encode()?)?;
+
+    assert!(
+        cluster.restart().is_err(),
+        "head markers must not bypass materialization checks"
+    );
+    let metadata: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        cluster.repo.join(".jj/repo/tandem/heads.json"),
+    )?)?;
+    assert!(metadata["version"].as_u64().unwrap() < index.version);
+    std::fs::write(&operation_path, operation_bytes)?;
+    cluster.restart()?;
+    assert_eq!(agent.snapshot()?.read_file(&commit, "file.txt")?, content);
+    Ok(())
+}
+
+#[test]
+fn malformed_indexed_heads_cannot_replace_the_repository() -> anyhow::Result<()> {
+    use jj_tandem_wal::{IndexObject, INDEX_KEY};
+    use support::{agent::Agent, cluster::Cluster};
+
+    let mut cluster = Cluster::start()?;
+    let mut agent = Agent::join(&cluster, "root-validation")?;
+    let content = b"malformed root aliases must not replace this history\n".to_vec();
+    let commit = agent.commit_files(&[("file.txt".to_string(), content.clone())], "published")?;
+    cluster.stop();
+    let index_path = cluster.bucket.join(INDEX_KEY);
+    let original = std::fs::read(&index_path)?;
+    let mut index = IndexObject::decode(&original)?;
+    index.version += 1;
+    for invalid in [vec!["0".to_string()], vec!["0000".to_string()], Vec::new()] {
+        index.op_heads = invalid;
+        std::fs::write(&index_path, index.encode()?)?;
+        assert!(
+            cluster.restart().is_err(),
+            "invalid heads were adopted: {:?}",
+            index.op_heads
+        );
+        let metadata: serde_json::Value = serde_json::from_slice(&std::fs::read(
+            cluster.repo.join(".jj/repo/tandem/heads.json"),
+        )?)?;
+        assert!(metadata["version"].as_u64().unwrap() < index.version);
+    }
+    std::fs::write(&index_path, original)?;
+    cluster.restart()?;
+    assert_eq!(agent.snapshot()?.read_file(&commit, "file.txt")?, content);
+    Ok(())
+}
+
+#[test]
+fn the_full_root_operation_materializes_without_a_wal_entry() -> anyhow::Result<()> {
+    use jj_tandem_wal::{IndexObject, INDEX_KEY};
+    use support::{agent::Agent, cluster::Cluster, oracle};
+
+    let mut cluster = Cluster::start()?;
+    cluster.stop();
+    let index_path = cluster.bucket.join(INDEX_KEY);
+    let mut index = IndexObject::decode(&std::fs::read(&index_path)?)?;
+    let root = "00".repeat(64);
+    index.version += 1;
+    index.op_heads = vec![root.clone()];
+    index.workspace_heads.clear();
+    std::fs::write(&index_path, index.encode()?)?;
+    assert!(!cluster.bucket.join(jj_tandem_wal::wal_key(&root)).exists());
+
+    cluster.cold_restart()?;
+    let heads = oracle::api_heads(&cluster)?;
+    assert_eq!(heads.version, index.version);
+    assert_eq!(heads.heads, std::collections::BTreeSet::from([root]));
+    let mut agent = Agent::join(&cluster, "from-root")?;
+    let content = b"new work after recovering the synthetic root\n".to_vec();
+    let commit = agent.commit_files(&[("file.txt".to_string(), content.clone())], "published")?;
+    cluster.cold_restart()?;
+    assert_eq!(agent.snapshot()?.read_file(&commit, "file.txt")?, content);
+    Ok(())
+}
+
 fn abandoned_publish(index_write_failure: bool) -> anyhow::Result<()> {
     use support::agent::Agent;
     use support::cluster::Cluster;

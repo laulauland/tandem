@@ -138,6 +138,10 @@ fn published_workspace_head(
     // server listed the heads.
     let mut candidates: Vec<CommitId> = Vec::new();
     for head in &heads.heads {
+        // The synthetic root has no stored operation/view or workspace pointer.
+        if head == &client.repo_info().root_operation_id {
+            continue;
+        }
         let operation_bytes = client
             .get_operation(head)
             .context("cannot read an operation the server named as a head")?;

@@ -356,9 +356,9 @@ pub fn view_from_proto(proto: jj_lib::protos::simple_op_store::View) -> anyhow::
         .into_iter()
         .map(|tag_proto| {
             let name: RefNameBuf = tag_proto.name.into();
-            (name, ref_target_from_proto(tag_proto.target))
+            Ok((name, ref_target_from_proto(tag_proto.target)?))
         })
-        .collect();
+        .collect::<anyhow::Result<_>>()?;
 
     let git_refs: BTreeMap<_, _> = proto
         .git_refs
@@ -366,14 +366,14 @@ pub fn view_from_proto(proto: jj_lib::protos::simple_op_store::View) -> anyhow::
         .map(|git_ref| {
             let name: GitRefNameBuf = git_ref.name.into();
             let target = if git_ref.target.is_some() {
-                ref_target_from_proto(git_ref.target)
+                ref_target_from_proto(git_ref.target)?
             } else {
                 #[allow(deprecated)]
                 RefTarget::normal(CommitId::new(git_ref.commit_id))
             };
-            (name, target)
+            Ok((name, target))
         })
-        .collect();
+        .collect::<anyhow::Result<_>>()?;
 
     // Use new remote_views format when available
     if !proto.remote_views.is_empty() {
@@ -382,7 +382,7 @@ pub fn view_from_proto(proto: jj_lib::protos::simple_op_store::View) -> anyhow::
 
     #[allow(deprecated)]
     let git_head = if proto.git_head.is_some() {
-        ref_target_from_proto(proto.git_head)
+        ref_target_from_proto(proto.git_head)?
     } else if !proto.git_head_legacy.is_empty() {
         RefTarget::normal(CommitId::new(proto.git_head_legacy))
     } else {
@@ -419,30 +419,40 @@ fn ref_target_to_proto(value: &RefTarget) -> Option<jj_lib::protos::simple_op_st
 
 fn ref_target_from_proto(
     maybe_proto: Option<jj_lib::protos::simple_op_store::RefTarget>,
-) -> RefTarget {
+) -> anyhow::Result<RefTarget> {
     let Some(proto) = maybe_proto else {
-        return RefTarget::absent();
+        return Ok(RefTarget::absent());
     };
-    match proto.value.unwrap() {
-        #[allow(deprecated)]
-        jj_lib::protos::simple_op_store::ref_target::Value::CommitId(id) => {
-            RefTarget::normal(CommitId::new(id))
-        }
-        #[allow(deprecated)]
-        jj_lib::protos::simple_op_store::ref_target::Value::ConflictLegacy(conflict) => {
-            let removes = conflict.removes.into_iter().map(CommitId::new);
-            let adds = conflict.adds.into_iter().map(CommitId::new);
-            RefTarget::from_legacy_form(removes, adds)
-        }
-        jj_lib::protos::simple_op_store::ref_target::Value::Conflict(conflict) => {
-            let term_from_proto = |term: jj_lib::protos::simple_op_store::ref_conflict::Term| {
-                term.value.map(CommitId::new)
-            };
-            let removes = conflict.removes.into_iter().map(term_from_proto);
-            let adds = conflict.adds.into_iter().map(term_from_proto);
-            RefTarget::from_merge(Merge::from_removes_adds(removes, adds))
-        }
-    }
+    Ok(
+        match proto
+            .value
+            .ok_or_else(|| anyhow::anyhow!("ref target is missing its value"))?
+        {
+            #[allow(deprecated)]
+            jj_lib::protos::simple_op_store::ref_target::Value::CommitId(id) => {
+                RefTarget::normal(CommitId::new(id))
+            }
+            #[allow(deprecated)]
+            jj_lib::protos::simple_op_store::ref_target::Value::ConflictLegacy(conflict) => {
+                let removes = conflict.removes.into_iter().map(CommitId::new);
+                let adds = conflict.adds.into_iter().map(CommitId::new);
+                RefTarget::from_legacy_form(removes, adds)
+            }
+            jj_lib::protos::simple_op_store::ref_target::Value::Conflict(conflict) => {
+                anyhow::ensure!(
+                    conflict.adds.len() == conflict.removes.len() + 1,
+                    "ref target conflict must have one more add than removes"
+                );
+                let term_from_proto =
+                    |term: jj_lib::protos::simple_op_store::ref_conflict::Term| {
+                        term.value.map(CommitId::new)
+                    };
+                let removes = conflict.removes.into_iter().map(term_from_proto);
+                let adds = conflict.adds.into_iter().map(term_from_proto);
+                RefTarget::from_merge(Merge::from_removes_adds(removes, adds))
+            }
+        },
+    )
 }
 
 // ─── Bookmark/RemoteView helpers ──────────────────────────────────────────────
@@ -504,7 +514,7 @@ fn bookmark_views_from_proto_legacy(
     let mut remote_views: BTreeMap<RemoteNameBuf, RemoteView> = BTreeMap::new();
     for bookmark_proto in bookmarks_legacy {
         let bookmark_name: RefNameBuf = bookmark_proto.name.into();
-        let local_target = ref_target_from_proto(bookmark_proto.local_target);
+        let local_target = ref_target_from_proto(bookmark_proto.local_target)?;
         #[allow(deprecated)]
         let remote_bookmarks = bookmark_proto.remote_bookmarks;
         for remote_bookmark in remote_bookmarks {
@@ -515,7 +525,7 @@ fn bookmark_views_from_proto_legacy(
             };
             let remote_view = remote_views.entry(remote_name).or_default();
             let remote_ref = RemoteRef {
-                target: ref_target_from_proto(remote_bookmark.target),
+                target: ref_target_from_proto(remote_bookmark.target)?,
                 state,
             };
             remote_view
@@ -637,6 +647,25 @@ fn remote_ref_state_from_proto(proto_value: i32) -> anyhow::Result<RemoteRefStat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_ref_targets_are_errors_instead_of_panics() {
+        use jj_lib::protos::simple_op_store::{
+            ref_target, RefTarget as ProtoRefTarget, View as ProtoView,
+        };
+        for target in [
+            ProtoRefTarget { value: None },
+            ProtoRefTarget {
+                value: Some(ref_target::Value::Conflict(Default::default())),
+            },
+        ] {
+            assert!(view_from_proto(ProtoView {
+                git_head: Some(target),
+                ..Default::default()
+            })
+            .is_err());
+        }
+    }
 
     #[test]
     fn canonical_operation_encoding_is_stable() {

@@ -19,8 +19,8 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::Instant;
 
 use super::{
-    from_hex, head_ids_for_wire, to_hex, write_bytes_if_missing, HeadsMetadata, Repository,
-    UpdateResult,
+    decode_operation_with_id, decode_view_with_id, from_hex, head_ids_for_wire, to_hex,
+    write_bytes_if_missing, HeadsMetadata, Repository, UpdateResult,
 };
 use jj_tandem_jj::ids::is_root_operation_hex;
 use jj_tandem_storage::CasError;
@@ -44,6 +44,45 @@ fn object_kind_for_record(kind: wal::RecordKind) -> Option<&'static str> {
         wal::RecordKind::Symlink => Some("symlink"),
         wal::RecordKind::Operation | wal::RecordKind::View => None,
     }
+}
+
+/// Validate before trusting ancestry or writing the operation-file replay
+/// sentinel. A decodable frame alone is not a consistent jj operation.
+fn validate_wal_entry(op_hex: &str, entry: &wal::WalEntry) -> Result<()> {
+    anyhow::ensure!(
+        op_hex == to_hex(&entry.op_id),
+        "WAL operation ID does not match its key"
+    );
+    let [blobs @ .., view_record, operation_record] = entry.records.as_slice() else {
+        bail!("WAL entry must end with one view and one operation");
+    };
+    anyhow::ensure!(
+        view_record.kind == wal::RecordKind::View
+            && operation_record.kind == wal::RecordKind::Operation
+            && blobs
+                .iter()
+                .all(|record| object_kind_for_record(record.kind).is_some()),
+        "WAL records must be blobs followed by exactly one view and one operation"
+    );
+    let (operation_id, operation) = decode_operation_with_id(&operation_record.data)?;
+    anyhow::ensure!(
+        operation_record.id == entry.op_id && operation_id == entry.op_id,
+        "WAL operation content and record ID do not match its header"
+    );
+    anyhow::ensure!(
+        entry
+            .parents
+            .iter()
+            .map(Vec::as_slice)
+            .eq(operation.parents.iter().map(|id| id.as_bytes())),
+        "WAL parent IDs do not match its operation parents"
+    );
+    let (view_id, _) = decode_view_with_id(&view_record.data)?;
+    anyhow::ensure!(
+        view_record.id == operation.view_id.as_bytes() && view_id == view_record.id,
+        "WAL view content and record ID do not match its operation view"
+    );
+    Ok(())
 }
 
 // ─── Boot-time replay ─────────────────────────────────────────────────────────
@@ -807,7 +846,10 @@ impl Repository {
                 )
             })?;
         tracing::debug!(op_id = %op_hex, bytes = bytes.len(), "replaying a WAL entry");
-        wal::WalEntry::decode(&bytes).with_context(|| format!("decode WAL entry {key}"))
+        let entry =
+            wal::WalEntry::decode(&bytes).with_context(|| format!("decode WAL entry {key}"))?;
+        validate_wal_entry(op_hex, &entry).with_context(|| format!("validate WAL entry {key}"))?;
+        Ok(entry)
     }
 
     /// Replay one op head and every ancestor the local repo is missing, parents
@@ -881,10 +923,21 @@ impl Repository {
         let mut heads = 0usize;
         let mut entries = 0usize;
         for head in &index.op_heads {
-            if local_heads.contains(head) || is_root_operation_hex(head) {
+            if local_heads.contains(head) {
                 continue;
             }
-            entries += self.replay_ancestry(head)?;
+            if is_root_operation_hex(head) {
+                // Synthetic roots need a head marker, but no operation/view
+                // files or WAL. This also anchors retirement of the boot's
+                // temporary init head when the indexed repository is empty.
+                pollster::block_on(
+                    self.op_heads_store
+                        .update_op_heads(&[], self.repo_loader.op_store().root_operation_id()),
+                )
+                .map_err(|e| anyhow!("materialize the indexed root operation: {e}"))?;
+            } else {
+                entries += self.replay_ancestry(head)?;
+            }
             heads += 1;
         }
         Ok((heads, entries))
@@ -900,7 +953,46 @@ impl Repository {
     /// heads behind it lets the next write CAS a set that silently drops
     /// another writer's head, against invariant 6.
     fn adopt_index(&self, index: &wal::IndexObject) -> Result<(usize, usize)> {
+        // Even an empty jj repository has a synthetic root operation. Reject
+        // malformed roots before replay can mistake all-zero aliases for it.
+        anyhow::ensure!(
+            !index.op_heads.is_empty(),
+            "bucket index has no operation heads"
+        );
+        let id_length = self
+            .repo_loader
+            .op_store()
+            .root_operation_id()
+            .as_bytes()
+            .len();
+        for head in &index.op_heads {
+            let id = from_hex(head)?;
+            anyhow::ensure!(
+                id.len() == id_length && to_hex(&id) == *head,
+                "indexed head must be a canonical {id_length}-byte operation ID: {head}"
+            );
+        }
         let replayed = self.replay_index_heads(index)?;
+        // Existing head markers are not proof that their operation and view
+        // are materialized. Check every non-root indexed head before adopting
+        // its version; the synthetic root needs only its head marker.
+        for head in &index.op_heads {
+            if is_root_operation_hex(head) {
+                continue;
+            }
+            let expected = from_hex(head)?;
+            let (id, operation) = decode_operation_with_id(&self.get_operation_sync(&expected)?)?;
+            anyhow::ensure!(
+                id == expected,
+                "materialized operation does not match indexed head {head}"
+            );
+            let (view_id, _) =
+                decode_view_with_id(&self.get_view_sync(operation.view_id.as_bytes())?)?;
+            anyhow::ensure!(
+                view_id == operation.view_id.as_bytes(),
+                "materialized view does not match indexed head {head}"
+            );
+        }
         self.retire_bootstrap_heads(index)?;
         self.write_heads_metadata(&HeadsMetadata {
             version: index.version,
@@ -1177,6 +1269,133 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prost::Message as _;
+
+    fn valid_wal_entry() -> wal::WalEntry {
+        let view = jj_lib::protos::simple_op_store::View::default().encode_to_vec();
+        let (view_id, _) = decode_view_with_id(&view).unwrap();
+        let parents = vec![vec![3; 64], vec![5; 64]];
+        let operation = jj_lib::protos::simple_op_store::Operation {
+            view_id: view_id.clone(),
+            parents: parents.clone(),
+            ..Default::default()
+        }
+        .encode_to_vec();
+        let (op_id, _) = decode_operation_with_id(&operation).unwrap();
+        wal::WalEntry {
+            op_id: op_id.clone(),
+            parents,
+            records: vec![
+                wal::WalRecord {
+                    kind: wal::RecordKind::View,
+                    id: view_id,
+                    data: view,
+                },
+                wal::WalRecord {
+                    kind: wal::RecordKind::Operation,
+                    id: op_id,
+                    data: operation,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn wal_identity_validation_rejects_inconsistent_but_decodable_entries() {
+        let valid = valid_wal_entry();
+        validate_wal_entry(&to_hex(&valid.op_id), &valid).unwrap();
+        assert!(
+            validate_wal_entry(&to_hex(&vec![0; 64]), &valid).is_err(),
+            "wrong key"
+        );
+        assert!(
+            validate_wal_entry(&to_hex(&valid.op_id).to_uppercase(), &valid).is_err(),
+            "uppercase key alias"
+        );
+
+        type Mutation = fn(&mut wal::WalEntry);
+        let cases: &[(&str, Mutation)] = &[
+            ("header ID", |entry| entry.op_id[0] ^= 1),
+            ("operation record ID", |entry| entry.records[1].id[0] ^= 1),
+            ("operation content", |entry| {
+                let mut proto = jj_lib::protos::simple_op_store::Operation::decode(
+                    entry.records[1].data.as_slice(),
+                )
+                .unwrap();
+                proto.metadata = Some(jj_lib::protos::simple_op_store::OperationMetadata {
+                    description: "altered".to_string(),
+                    ..Default::default()
+                });
+                entry.records[1].data = proto.encode_to_vec();
+            }),
+            ("view record ID", |entry| entry.records[0].id[0] ^= 1),
+            ("view content", |entry| {
+                entry.records[0].data = jj_lib::protos::simple_op_store::View {
+                    head_ids: vec![vec![1; 20]],
+                    ..Default::default()
+                }
+                .encode_to_vec();
+            }),
+            ("operation view link", |entry| {
+                let mut proto = jj_lib::protos::simple_op_store::Operation::decode(
+                    entry.records[1].data.as_slice(),
+                )
+                .unwrap();
+                proto.view_id = vec![9; 64];
+                entry.records[1].data = proto.encode_to_vec();
+                let (id, _) = decode_operation_with_id(&entry.records[1].data).unwrap();
+                entry.records[1].id = id.clone();
+                entry.op_id = id;
+            }),
+            ("parent ID", |entry| entry.parents[0][0] ^= 1),
+            ("parent order", |entry| entry.parents.reverse()),
+            ("missing operation", |entry| {
+                entry.records.pop();
+            }),
+            ("missing view", |entry| {
+                entry.records.remove(0);
+            }),
+            ("duplicate view", |entry| {
+                entry.records.insert(0, entry.records[0].clone())
+            }),
+            ("duplicate operation", |entry| {
+                entry.records.insert(0, entry.records[1].clone())
+            }),
+            ("tail order", |entry| entry.records.swap(0, 1)),
+            ("blob after operation", |entry| {
+                entry.records.push(blob(1, 1))
+            }),
+            ("malformed operation", |entry| {
+                entry.records[1].data = vec![255]
+            }),
+            ("malformed view", |entry| entry.records[0].data = vec![255]),
+            ("missing ref target value", |entry| {
+                entry.records[0].data = jj_lib::protos::simple_op_store::View {
+                    git_head: Some(Default::default()),
+                    ..Default::default()
+                }
+                .encode_to_vec();
+            }),
+        ];
+        for (name, mutate) in cases {
+            let mut entry = valid.clone();
+            mutate(&mut entry);
+            assert!(
+                validate_wal_entry(&to_hex(&entry.op_id), &entry).is_err(),
+                "accepted {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn wal_identity_hashes_semantic_values_not_protobuf_bytes() {
+        let mut entry = valid_wal_entry();
+        for record in &mut entry.records {
+            // Unknown field 127, varint 1: protobuf ignores it, jj IDs do too.
+            record.data.extend_from_slice(&[0xf8, 0x07, 0x01]);
+        }
+        validate_wal_entry(&to_hex(&entry.op_id), &entry).unwrap();
+    }
 
     fn blob(tag: u8, len: usize) -> wal::WalRecord {
         wal::WalRecord {

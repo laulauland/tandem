@@ -10,6 +10,8 @@ jj-lib.workspace = true
 proptest.workspace = true
 jj-tandem-test-support.workspace = true
 jj-tandem-repository.workspace = true
+jj-tandem-wal.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

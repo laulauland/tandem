@@ -46,6 +46,12 @@ workspace uploads first, a publisher loses index CAS or encounters an index
 write failure and never retries, then the first workspace publishes and
 immediately cold-restarts. Its exact bytes must survive without reupload.
 
+Recovery regressions corrupt a WAL ancestor, fail cold recovery, and retry on
+the same partial materialization before restoring the valid entry. Both failed
+boots must leave the index version unadopted; repaired recovery must return the
+original file bytes. Repository unit tests cover WAL identity and record-order
+validation, including protobuf encodings with unchanged semantic jj hashes.
+
 Integration coverage remains where reality adds evidence: authentication and
 scope at HTTP/CLI boundaries, clone and daemon lifecycle, cache and baked-image
 behavior, process contention, control sockets, Git shipping, API cache/CAS
