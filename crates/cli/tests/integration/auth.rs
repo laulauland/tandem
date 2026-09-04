@@ -18,6 +18,15 @@ use crate::common;
 fn foreground_server_requires_an_explicit_admin_token_without_logging_secrets() {
     let tmp = tempfile::tempdir().unwrap();
     let home = common::isolated_home(tmp.path());
+    let help = common::run_tandem_in(tmp.path(), &["--help"], &home);
+    assert!(help.status.success());
+    let help = common::stdout_str(&help);
+    assert!(help.contains("Required for `tandem serve`"), "{help}");
+    assert!(!help.contains("`tandem serve` logs it"), "{help}");
+    assert!(
+        help.contains("`tandem init`, `tandem clone`, and"),
+        "{help}"
+    );
     let mut command = std::process::Command::new(common::tandem_bin());
     common::isolate_env(&mut command, &home);
     // An invalid address also bounds the old behavior: it used to generate and

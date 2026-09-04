@@ -1,0 +1,732 @@
+{
+  "run_id": "f8db2110",
+  "date": "2026-09-04",
+  "status": "behavior_and_cleanup_passed_with_setup_caveats",
+  "topology": {
+    "provider": "exe.dev",
+    "machines": [
+      {
+        "id": "tq-f8db2110-server",
+        "region": "dal",
+        "placement": "Dallas, USA",
+        "cpu": 2,
+        "memory_gb": 2,
+        "disk_gb": 10
+      },
+      {
+        "id": "tq-f8db2110-a",
+        "region": "dal",
+        "placement": "Dallas, USA",
+        "cpu": 2,
+        "memory_gb": 2,
+        "disk_gb": 10
+      },
+      {
+        "id": "tq-f8db2110-b",
+        "region": "dal",
+        "placement": "Dallas, USA",
+        "cpu": 2,
+        "memory_gb": 2,
+        "disk_gb": 10
+      }
+    ],
+    "timing_client": "controller; Cloudflare trace reports FI/HEL network egress, not verified physical placement",
+    "timing_route": "controller through provider HTTPS endpoint to Dallas server",
+    "collaboration_route": "two independent Dallas VMs through provider HTTPS endpoint to Dallas server",
+    "runtime": "Linux 6.12.93 x86_64",
+    "storage": {
+      "api": "S3",
+      "implementation": "SeaweedFS 4.42",
+      "image_digest": "sha256:f7cbc8bdbbf60a1aaba7d61784a3bdff3ec1e0657f6ad0b26d5b6ab2cd9d0dc6",
+      "endpoint": "http://127.0.0.1:8333",
+      "bucket": "tq-f8db2110",
+      "prefixes": [
+        "baseline/",
+        "final/"
+      ],
+      "conditional_put": true,
+      "limitation": "S3 service stays alive on the same VM; tests loss of Tandem materialization, not host/disk or independently hosted bucket failure"
+    }
+  },
+  "network": {
+    "icmp_resolved_endpoint": "161.210.92.133",
+    "icmp_samples": 5,
+    "icmp_loss_percent": 0,
+    "icmp_mean_ms": 33.645,
+    "icmp_min_ms": 33.555,
+    "icmp_max_ms": 33.835,
+    "limitation": "ICMP and TCP may terminate at provider ingress; these are not claimed as direct RTT to the Dallas VM",
+    "https_unauthenticated_first_byte_ms": [
+      548.556,
+      224.514,
+      223.934,
+      224.518,
+      427.143
+    ],
+    "https_tcp_connect_ms": [
+      270.622,
+      34.516,
+      34.512,
+      34.624,
+      236.823
+    ],
+    "https_status": 401
+  },
+  "timing": {
+    "baseline": {
+      "generated_at_epoch_secs": 1788556776,
+      "bucket_tier": "the server's own",
+      "bucket_location": "the server's own",
+      "server": "https://tq-f8db2110-server.exe.xyz",
+      "injected_rtt_ms": 0,
+      "warmup_rounds": 3,
+      "files_per_round": 8,
+      "snapshot_publish": {
+        "sample_count": 40,
+        "p50_ms": 2288.434571,
+        "p95_ms": 2295.420155,
+        "mean_ms": 2288.3640996249997,
+        "min_ms": 2281.1585600000003,
+        "max_ms": 2296.486123,
+        "samples_ms": [
+          2290.9731930000003,
+          2291.950489,
+          2288.377809,
+          2286.373066,
+          2288.6877019999997,
+          2290.673606,
+          2288.434571,
+          2291.203936,
+          2291.543252,
+          2287.0265289999998,
+          2286.919861,
+          2291.4871639999997,
+          2282.918962,
+          2285.384069,
+          2281.166512,
+          2286.294523,
+          2288.293488,
+          2296.486123,
+          2287.827869,
+          2289.754507,
+          2288.4931979999997,
+          2291.259364,
+          2289.930124,
+          2284.1915940000004,
+          2289.181905,
+          2293.8840410000003,
+          2286.5950399999997,
+          2289.787428,
+          2285.174875,
+          2291.534471,
+          2295.420155,
+          2288.277726,
+          2283.3346570000003,
+          2284.780929,
+          2289.403146,
+          2296.186263,
+          2281.1585600000003,
+          2287.5232770000002,
+          2283.6912709999997,
+          2282.97873
+        ]
+      }
+    },
+    "final": {
+      "generated_at_epoch_secs": 1788556885,
+      "bucket_tier": "the server's own",
+      "bucket_location": "the server's own",
+      "server": "https://tq-f8db2110-server.exe.xyz",
+      "injected_rtt_ms": 0,
+      "warmup_rounds": 3,
+      "files_per_round": 8,
+      "snapshot_publish": {
+        "sample_count": 40,
+        "p50_ms": 1225.0871690000001,
+        "p95_ms": 1233.34552,
+        "mean_ms": 1231.147084075,
+        "min_ms": 1219.05388,
+        "max_ms": 1453.8589210000002,
+        "samples_ms": [
+          1219.2493849999998,
+          1221.0238310000002,
+          1219.05388,
+          1227.100521,
+          1221.971272,
+          1226.8070500000001,
+          1224.613969,
+          1229.783654,
+          1224.7495239999998,
+          1230.824139,
+          1235.374351,
+          1223.366319,
+          1226.34621,
+          1219.773404,
+          1221.648878,
+          1224.423203,
+          1222.8666580000001,
+          1228.300601,
+          1233.34552,
+          1226.162896,
+          1230.4515279999998,
+          1224.711634,
+          1227.9454999999998,
+          1226.520857,
+          1225.0871690000001,
+          1220.434292,
+          1226.9754449999998,
+          1221.6245729999998,
+          1229.43871,
+          1220.863172,
+          1228.7113000000002,
+          1222.99126,
+          1228.85328,
+          1229.451515,
+          1225.590791,
+          1223.858351,
+          1224.117799,
+          1223.512136,
+          1224.099865,
+          1453.8589210000002
+        ]
+      }
+    },
+    "p50_reduction_percent": 46.46614832144134,
+    "p95_reduction_percent": 46.26929116600006,
+    "caveat": "One paired run, fixed baseline-then-final order; excludes clone, debounce, role acquisition and post-publish staleness refresh; no injected RTT"
+  },
+  "requests": [
+    {
+      "variant": "baseline",
+      "snapshot_rounds": 43,
+      "measured_requests": 600,
+      "round_shapes": [
+        {
+          "round_count": 1,
+          "shape": {
+            "getHeads": 1,
+            "getObject": 1,
+            "putObject:commit": 1,
+            "putObject:file": 8,
+            "putObject:tree": 2,
+            "putOperation": 1,
+            "putView": 1,
+            "updateOpHeads": 1
+          }
+        },
+        {
+          "round_count": 42,
+          "shape": {
+            "getHeads": 1,
+            "putObject:commit": 1,
+            "putObject:file": 8,
+            "putObject:tree": 2,
+            "putOperation": 1,
+            "putView": 1,
+            "updateOpHeads": 1
+          }
+        }
+      ],
+      "cas_412_responses": 0,
+      "integration_events": {},
+      "baseline_integration_enabled": false,
+      "caveat": "Counts cover logged RPC request events; getInfo is TRACE and absent at DEBUG. Groups require one isolated benchmark client and no unrelated publishes. Server timestamps are not client elapsed timings."
+    },
+    {
+      "variant": "final",
+      "snapshot_rounds": 43,
+      "measured_requests": 320,
+      "round_shapes": [
+        {
+          "round_count": 1,
+          "shape": {
+            "getHeads": 1,
+            "getObject": 1,
+            "putObject:commit": 1,
+            "putObject:tree": 2,
+            "putObjectsBatch": 1,
+            "putOperation": 1,
+            "putView": 1,
+            "updateOpHeads": 1
+          }
+        },
+        {
+          "round_count": 42,
+          "shape": {
+            "getHeads": 1,
+            "putObject:commit": 1,
+            "putObject:tree": 2,
+            "putObjectsBatch": 1,
+            "putOperation": 1,
+            "putView": 1,
+            "updateOpHeads": 1
+          }
+        }
+      ],
+      "cas_412_responses": 0,
+      "integration_events": {},
+      "baseline_integration_enabled": null,
+      "caveat": "Counts cover logged RPC request events; getInfo is TRACE and absent at DEBUG. Groups require one isolated benchmark client and no unrelated publishes. Server timestamps are not client elapsed timings."
+    }
+  ],
+  "payloads": [
+    {
+      "commit": "499569f2d69cf136577d09a909d7532b2b47cbef",
+      "path": "proof-a.bin",
+      "sha256": "dc7e478956a7364b25b50b7a526b51151a30c06729edd6114add5ad93fdb0f61",
+      "bytes": 65536
+    },
+    {
+      "commit": "29b1bbd233ea60e9776e2d16e027bad6c9bcc9b5",
+      "path": "concurrent-a.bin",
+      "sha256": "41c62038f0ddb9f7c82fb11d0a7719c958878c7c49375019531b3366049bcd4a",
+      "bytes": 65536
+    },
+    {
+      "commit": "a312e00a7a619aced21a5d6dcde4ffcf3bfdaa4b",
+      "path": "concurrent-b.bin",
+      "sha256": "7209a39d7c34d7129c02afd2a5efc8684bcee8a8feaddce19bf37db2d4a77b8e",
+      "bytes": 65536
+    },
+    {
+      "commit": "5be3eb06f5994318b181d62a2e016f0291dfe475",
+      "path": "simultaneous-a.bin",
+      "sha256": "93452d43d31e711825cd7178f25ce61d070fe833690f15f4e1eb9cc7f02f6540",
+      "bytes": 65536
+    },
+    {
+      "commit": "d181340f16a90ad03f8193403e667ca155dbdabc",
+      "path": "simultaneous-b.bin",
+      "sha256": "fa4c350781cb338169c17e5098391c0cd6632bafe452e1b2efb2c088245cb446",
+      "bytes": 65536
+    },
+    {
+      "commit": "bbbf89780a7d1fb5a1a24796ea996cc55dbbc4d6",
+      "path": "post-cold.bin",
+      "sha256": "e21eb7039656ed76ac8cc0fe516933f649617830b42529180d20028eaf6e94a3",
+      "bytes": 65536
+    }
+  ],
+  "recovery": {
+    "before": {
+      "version": 69,
+      "heads": [
+        "bd830f1603312bd679233e46e191dd8425d80ec03099e2ce7062feebf3f316bf08e7b7bcc0125bf2baa8756adb8a28b9060f333c2d6cee56c8a3a3bb8690e41f"
+      ],
+      "workspaceHeads": {
+        "bench": "b2d946673b0030a9720faa9b39b6b58e907832bce2fbbf647c440ad19088f88a3b3f680c3dfe8f8695558e215cda1f859f66e8b0a4f6ec2abe8061b87b8ac620",
+        "smoke-a": "0ae342905a7f3253e637700f3110950a85f5e9fd0573bac8dc67ff8abb3c11eafb927e42b014065335a6deb28a8a2af8313d3abc51b6575d86e03322501cf472",
+        "smoke-b": "42110eb010e30d6b3fd21b651c266efd65fae786c7c207675e99f2ee663cae6f74a05d7758d5824dbfbc580edc813da480ead77f255585bad5e170ec8e6bd2f8"
+      }
+    },
+    "warm": {
+      "entries": 0,
+      "replay_ms": 1,
+      "heads_and_workspace_pointers_unchanged": true,
+      "both_clients_all_five_digests": true
+    },
+    "cold": {
+      "entries": 90,
+      "heads": 1,
+      "replay_ms": 186,
+      "heads_and_workspace_pointers_unchanged": true,
+      "both_clients_and_server_all_five_digests": true
+    },
+    "post_cold": {
+      "new_publish_acknowledged": true,
+      "opposite_client_digest_before_and_after_restart": true,
+      "restart_entries": 0,
+      "replay_ms": 1
+    },
+    "cache_disabled": true,
+    "op_log_traversed": true,
+    "namespaced_bookmark": "smoke-a/qualification",
+    "collaboration_cas_412_responses": 4
+  },
+  "findings": [
+    "Initial concurrent clones produced stale working copies and no first daemon acknowledgement. Preserved the sole payload outside the workspace, explicitly updated each stale workspace, then restored it and verified publication. This is an operator workaround, not a fixed clone issue.",
+    "Initial foreground serve omitted an explicit control socket, so default server status reported running=false despite healthy authenticated HTTP. Recovery launches use an explicit socket.",
+    "Timing controller physical location is unverified; FI/HEL records network egress only. The three provider-verified VMs are all Dallas, not separate geographical regions.",
+    "heads-before capture exited 1 because the status control socket was absent. Its heads GET succeeded; heads-stable and subsequent explicit-socket warm/cold/post-cold status checks passed. Not every attempted command passed.",
+    "publish-a-ack initially timed out with no acknowledgement, but its shell wrapper returned the following cat exit code (0). Treat that attempt as failed, not successful. publish-a-aligned used set -e and required an actual acknowledgement."
+  ],
+  "optional_checks": {
+    "upstream_git_push": "not run; no throwaway upstream provisioned"
+  },
+  "evidence_directory": "target/exe-f8db2110",
+  "cleanup": {
+    "status": "verified",
+    "deleted_vm_ids": [
+      "tq-f8db2110-server",
+      "tq-f8db2110-a",
+      "tq-f8db2110-b"
+    ],
+    "remaining_test_vms": [],
+    "existing_vms_still_present": true,
+    "bucket_disposition": "Ephemeral S3 bucket and both prefixes removed with server VM; no external bucket exists",
+    "secret_disposition": "Standalone admin/scoped token files removed before VM deletion; local admin-token removed; workspace credentials removed with client VMs",
+    "verification": "evidence/cleanup-verified.log"
+  },
+  "started_at_utc": "2026-09-04T21:11:46Z",
+  "finished_at_utc": "2026-09-04T21:32:46Z",
+  "capture_metadata": [
+    {
+      "label": "align-fresh-workspaces",
+      "command": "bash",
+      "started_at": "2026-09-04T21:23:29Z",
+      "finished_at": "2026-09-04T21:23:34Z",
+      "exit_code": "0",
+      "output_sha256": "201728772115fc29815b8a1f3bb027db43c55b83b3a8d96f31d4217886d497f5"
+    },
+    {
+      "label": "baseline-distance",
+      "command": "snapshot_publish_latency_portable",
+      "started_at": "2026-09-04T21:17:50Z",
+      "finished_at": "2026-09-04T21:19:36Z",
+      "exit_code": "0",
+      "output_sha256": "330645baf6ef570ed6995ba0a5ea2f9879fd789eb2f2cec5c773caae045ce0b1"
+    },
+    {
+      "label": "before-recovery-a",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:25:56Z",
+      "finished_at": "2026-09-04T21:26:00Z",
+      "exit_code": "0",
+      "output_sha256": "3b8696ea40c1da838ed71e95e9643e8b47e2e7d44a8011cf534a689d0d2a35ea"
+    },
+    {
+      "label": "before-recovery-b",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:25:56Z",
+      "finished_at": "2026-09-04T21:26:01Z",
+      "exit_code": "0",
+      "output_sha256": "667c8cb2ac5e0b2b39aabb9ae4abe1c8b2c64037990892a429f21fd27264074a"
+    },
+    {
+      "label": "before-recovery-server",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:25:56Z",
+      "finished_at": "2026-09-04T21:25:59Z",
+      "exit_code": "0",
+      "output_sha256": "0e395dbd014e28674e13ab52abf6d62c07f2bda666c47f28e6e1c8c62aafdc79"
+    },
+    {
+      "label": "cleanup-verified",
+      "command": "bash",
+      "started_at": "2026-09-04T21:32:44Z",
+      "finished_at": "2026-09-04T21:32:46Z",
+      "exit_code": "0",
+      "output_sha256": "48fcad47985b697974d32d15f49a4d56cd85670c335631c105ac0a4bf54b507e"
+    },
+    {
+      "label": "cold-a",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:27:49Z",
+      "finished_at": "2026-09-04T21:27:52Z",
+      "exit_code": "0",
+      "output_sha256": "f9b968bdf2651311951e7b2e3baeb60dae046e69b72f92c3c6636519406cb6e4"
+    },
+    {
+      "label": "cold-b",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:27:49Z",
+      "finished_at": "2026-09-04T21:27:53Z",
+      "exit_code": "0",
+      "output_sha256": "da04633eee8736d72910cb1370892692066d84165fc92106c75dbc0271aef75e"
+    },
+    {
+      "label": "cold-restart",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:27:31Z",
+      "finished_at": "2026-09-04T21:27:34Z",
+      "exit_code": "0",
+      "output_sha256": "982fb10466f9557e9740d19b74fd447a0f466806e19371ff236db5c491c3e7da"
+    },
+    {
+      "label": "cold-server",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:27:49Z",
+      "finished_at": "2026-09-04T21:27:51Z",
+      "exit_code": "0",
+      "output_sha256": "ae066430dc529abb12d6ecf5c4650ae8ea13380f53a00461e37afa98ebba1b0e"
+    },
+    {
+      "label": "concurrent-a-input",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:24:22Z",
+      "finished_at": "2026-09-04T21:24:24Z",
+      "exit_code": "0",
+      "output_sha256": "a956c6bc41b90a5d5a141197e35318296247f7943bc1151bf396d953f7dc565b"
+    },
+    {
+      "label": "concurrent-b-input",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:24:23Z",
+      "finished_at": "2026-09-04T21:24:26Z",
+      "exit_code": "0",
+      "output_sha256": "4cad252ebc4705e1ec08381e32b54077ef9b54fff05c5d649766e99a7776aaeb"
+    },
+    {
+      "label": "daemon-ready",
+      "command": "bash",
+      "started_at": "2026-09-04T21:22:08Z",
+      "finished_at": "2026-09-04T21:22:13Z",
+      "exit_code": "0",
+      "output_sha256": "d65dd4efe995b863a9606984c99399957fd9a7d6feeabb51a4860a13a3be90a1"
+    },
+    {
+      "label": "delete-vms",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:32:02Z",
+      "finished_at": "2026-09-04T21:32:07Z",
+      "exit_code": "0",
+      "output_sha256": "fe31494749703af06822d470b027037bcd1f8d4427f629892b1eef4d9c1d4e24"
+    },
+    {
+      "label": "describe-bookmark",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:25:35Z",
+      "finished_at": "2026-09-04T21:25:38Z",
+      "exit_code": "0",
+      "output_sha256": "aeedb3ff1fe1cad90972b22cf2f4fb82dcc814ca1bfd6a856f577e768c913471"
+    },
+    {
+      "label": "direct-rtt",
+      "command": "ping",
+      "started_at": "2026-09-04T21:29:25Z",
+      "finished_at": "2026-09-04T21:29:29Z",
+      "exit_code": "0",
+      "output_sha256": "4a2f77516ebe4ff5cc1cb7cef94b1b0090340abfa8623f7a29563fed86da08e5"
+    },
+    {
+      "label": "final-distance",
+      "command": "snapshot_publish_latency",
+      "started_at": "2026-09-04T21:20:25Z",
+      "finished_at": "2026-09-04T21:21:25Z",
+      "exit_code": "0",
+      "output_sha256": "b20469d1ac70e692ebf1e91475bafe2abf72cff23f23c1968617b0949fcd51e0"
+    },
+    {
+      "label": "first-pair-acks",
+      "command": "bash",
+      "started_at": "2026-09-04T21:24:37Z",
+      "finished_at": "2026-09-04T21:24:41Z",
+      "exit_code": "0",
+      "output_sha256": "2dc91556a203ce147aed21a9a2a6936dc9a231c4cd5aaf39d078e77c015dfadc"
+    },
+    {
+      "label": "heads-before",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:25:58Z",
+      "finished_at": "2026-09-04T21:26:00Z",
+      "exit_code": "1",
+      "output_sha256": "35a877f6df60f912b0c1e3108dbdc7685dd422c452224a14e4ddd96342579c19"
+    },
+    {
+      "label": "heads-cold",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:27:48Z",
+      "finished_at": "2026-09-04T21:27:50Z",
+      "exit_code": "0",
+      "output_sha256": "1f77ed4a6f1cb2d1849ee5f5d1959f1badf9bc3d2126c4211fc72d046f840727"
+    },
+    {
+      "label": "heads-stable",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:26:23Z",
+      "finished_at": "2026-09-04T21:26:25Z",
+      "exit_code": "0",
+      "output_sha256": "1f77ed4a6f1cb2d1849ee5f5d1959f1badf9bc3d2126c4211fc72d046f840727"
+    },
+    {
+      "label": "heads-warm",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:27:10Z",
+      "finished_at": "2026-09-04T21:27:12Z",
+      "exit_code": "0",
+      "output_sha256": "1f77ed4a6f1cb2d1849ee5f5d1959f1badf9bc3d2126c4211fc72d046f840727"
+    },
+    {
+      "label": "installed-hashes",
+      "command": "bash",
+      "started_at": "2026-09-04T21:18:06Z",
+      "finished_at": "2026-09-04T21:18:13Z",
+      "exit_code": "0",
+      "output_sha256": "77c14a934784586207b08cc616dc16c54e16c3c29509d8e5f86cc418a56d3060"
+    },
+    {
+      "label": "network-samples",
+      "command": "bash",
+      "started_at": "2026-09-04T21:21:24Z",
+      "finished_at": "2026-09-04T21:21:25Z",
+      "exit_code": "0",
+      "output_sha256": "bd5d032a98e371923b5a6b991431b052702003c2531b45cc12c38cfc8e259185"
+    },
+    {
+      "label": "observe-a",
+      "command": "bash",
+      "started_at": "2026-09-04T21:24:21Z",
+      "finished_at": "2026-09-04T21:24:27Z",
+      "exit_code": "0",
+      "output_sha256": "2825975e0a248f2a11f88d686972f0dd94d0c33d869018b3f81a411cb01abcb5"
+    },
+    {
+      "label": "pause-daemons",
+      "command": "bash",
+      "started_at": "2026-09-04T21:25:09Z",
+      "finished_at": "2026-09-04T21:25:13Z",
+      "exit_code": "0",
+      "output_sha256": "f6fe363b93ff55a8a4318dd73fd3b1edab52cf85eb8cdbc71a82deea28f74b49"
+    },
+    {
+      "label": "post-cold-input",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:28:14Z",
+      "finished_at": "2026-09-04T21:28:16Z",
+      "exit_code": "0",
+      "output_sha256": "351f05bb8b0ed6e8c128ba47e3a0cd8f63784c6976c7b2c0651443e123a66061"
+    },
+    {
+      "label": "post-cold-observe",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:28:40Z",
+      "finished_at": "2026-09-04T21:28:44Z",
+      "exit_code": "0",
+      "output_sha256": "f1d9c9d899e9783ac5b6f448ff51a1ce2398b4c223541da7082b20549bf6f62c"
+    },
+    {
+      "label": "post-cold-restart",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:28:52Z",
+      "finished_at": "2026-09-04T21:28:59Z",
+      "exit_code": "0",
+      "output_sha256": "049d134a5ff38e89d661149c1c182b707d8b8063462223c5fffff6a5366fa3d4"
+    },
+    {
+      "label": "post-cold-restarted-observe",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:29:09Z",
+      "finished_at": "2026-09-04T21:29:11Z",
+      "exit_code": "0",
+      "output_sha256": "f1d9c9d899e9783ac5b6f448ff51a1ce2398b4c223541da7082b20549bf6f62c"
+    },
+    {
+      "label": "preflight",
+      "command": "preflight.sh",
+      "started_at": "2026-09-04T21:16:58Z",
+      "finished_at": "2026-09-04T21:17:04Z",
+      "exit_code": "0",
+      "output_sha256": "6d392fefa56cce63a47e61ce01cdf9d2e03cb94689178f477502021ed35ba141"
+    },
+    {
+      "label": "publish-a-ack",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:22:27Z",
+      "finished_at": "2026-09-04T21:22:49Z",
+      "exit_code": "0",
+      "output_sha256": "f845917f9f7983afc6061bd8a759c2a2c136ab68dbc854f073857c97d748a799"
+    },
+    {
+      "label": "publish-a-aligned",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:23:53Z",
+      "finished_at": "2026-09-04T21:23:55Z",
+      "exit_code": "0",
+      "output_sha256": "266f394e57fde4ccf3e5e527fcbafd4d33908ece3aa127302e82d7b71ef67185"
+    },
+    {
+      "label": "publish-a-input",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:22:17Z",
+      "finished_at": "2026-09-04T21:22:20Z",
+      "exit_code": "0",
+      "output_sha256": "d3b7e0a27678e3afa410c2fbb84cef94daaf242f0455831aeb2827998e49429c"
+    },
+    {
+      "label": "simultaneous-a-input",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:24:47Z",
+      "finished_at": "2026-09-04T21:24:49Z",
+      "exit_code": "0",
+      "output_sha256": "d575c2a4095d86dd4bd02558943405d7d9f4fdfe54bd82d6921e05130d1b0301"
+    },
+    {
+      "label": "simultaneous-acks",
+      "command": "bash",
+      "started_at": "2026-09-04T21:24:58Z",
+      "finished_at": "2026-09-04T21:25:03Z",
+      "exit_code": "0",
+      "output_sha256": "92f561b516518fbae3c120f6c178529cbc2da7bffdffe124555a45de209a59ca"
+    },
+    {
+      "label": "simultaneous-b-input",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:24:47Z",
+      "finished_at": "2026-09-04T21:24:49Z",
+      "exit_code": "0",
+      "output_sha256": "2ba53729781aee0306d4392784aba534d6f26ead3c5939fea425dc2d28fd940d"
+    },
+    {
+      "label": "stop-a",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:31:04Z",
+      "finished_at": "2026-09-04T21:31:07Z",
+      "exit_code": "0",
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "stop-b",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:31:04Z",
+      "finished_at": "2026-09-04T21:31:07Z",
+      "exit_code": "0",
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "stop-server",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:31:05Z",
+      "finished_at": "2026-09-04T21:31:18Z",
+      "exit_code": "0",
+      "output_sha256": "4f329cfb86975ed30dc7be7bf2f4e40eb04956e1d62002eeb0167e583247fe44"
+    },
+    {
+      "label": "tls-latency",
+      "command": "curl",
+      "started_at": "2026-09-04T21:17:51Z",
+      "finished_at": "2026-09-04T21:17:51Z",
+      "exit_code": "0",
+      "output_sha256": "e9180e1e92d0d1558564be2d85fc81f9e7673bf0705e1d4d3391218b1492bdd7"
+    },
+    {
+      "label": "warm-a",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:27:11Z",
+      "finished_at": "2026-09-04T21:27:15Z",
+      "exit_code": "0",
+      "output_sha256": "4ef9542a6d8baf544e4c02119ce02555629b9d7f72ee0671bdbb8d7196b51c59"
+    },
+    {
+      "label": "warm-b",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:27:11Z",
+      "finished_at": "2026-09-04T21:27:15Z",
+      "exit_code": "0",
+      "output_sha256": "f3b4fd8ef84835b058e3906290da4eb8a23b53311874235e2f8c7d72ee5fec3f"
+    },
+    {
+      "label": "warm-restart",
+      "command": "ssh",
+      "started_at": "2026-09-04T21:26:52Z",
+      "finished_at": "2026-09-04T21:26:55Z",
+      "exit_code": "0",
+      "output_sha256": "e864f4f90a79347f4b19b8c7bd9912c711eee342161e2f803688b8e88be82049"
+    }
+  ],
+  "log_sha256": {
+    "baseline": "bb6cec4a04482dba0cbc15e96fa647c81f272a0bb7f75c028b3ea3c3a53da8f3",
+    "final_benchmark": "cb62a12a4367df3fff0c7a3c7cba27f34aefea6f65c1152265d4540b03eafefc",
+    "collaboration": "07d269e2be049a0831124c187c114f58360640924f0f2c92a4a90125b14f1362",
+    "cold_recovery": "b320a37b5a7940a919f82113af6fd1721f43f60876afabaa0fa1d3d4f785aaee"
+  }
+}

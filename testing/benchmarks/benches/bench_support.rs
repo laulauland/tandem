@@ -143,17 +143,15 @@ pub const BENCH_RECORD_ENV: &str = "TANDEM_BENCH_RECORD";
 /// every time, and `jj diff` would carry it. Recording a number is a separate,
 /// deliberate act, and it should read as one.
 pub fn write_json_artifact<T: Serialize>(relative_path: &str, value: &T) -> Result<PathBuf> {
-    let root = workspace_root();
     let recording = std::env::var(BENCH_RECORD_ENV)
         .is_ok_and(|value| !matches!(value.trim(), "" | "0" | "false"));
-    let path = if recording {
-        root.join(relative_path)
-    } else {
-        let name = Path::new(relative_path)
-            .file_name()
-            .ok_or_else(|| anyhow!("the artifact path {relative_path} names no file"))?;
-        root.join("target").join("benchmarks").join(name)
-    };
+    let output_dir = std::env::var_os("TANDEM_BENCH_OUTPUT_DIR").map(PathBuf::from);
+    let path = artifact_path(
+        relative_path,
+        recording,
+        output_dir.as_deref(),
+        workspace_root,
+    )?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("create artifact dir {}", parent.display()))?;
@@ -161,6 +159,29 @@ pub fn write_json_artifact<T: Serialize>(relative_path: &str, value: &T) -> Resu
     fs::write(&path, serde_json::to_vec_pretty(value)?)
         .with_context(|| format!("write artifact {}", path.display()))?;
     Ok(path)
+}
+
+fn artifact_path(
+    relative_path: &str,
+    recording: bool,
+    output_dir: Option<&Path>,
+    checkout: impl FnOnce() -> PathBuf,
+) -> Result<PathBuf> {
+    let name = Path::new(relative_path)
+        .file_name()
+        .ok_or_else(|| anyhow!("the artifact path {relative_path} names no file"))?;
+    if let Some(dir) = output_dir {
+        if !dir.is_absolute() {
+            return Err(anyhow!("TANDEM_BENCH_OUTPUT_DIR must be an absolute path"));
+        }
+        return Ok(dir.join(name));
+    }
+    let root = checkout();
+    Ok(if recording {
+        root.join(relative_path)
+    } else {
+        root.join("target").join("benchmarks").join(name)
+    })
 }
 
 pub struct BenchHarness {
@@ -574,10 +595,10 @@ pub fn tandem_bin_path() -> &'static PathBuf {
 }
 
 fn resolve_tandem_bin_path() -> PathBuf {
-    if let Ok(path) = std::env::var("TANDEM_BENCH_BIN") {
+    if let Some(path) = std::env::var_os("TANDEM_BENCH_BIN") {
         // Cargo runs benches in the package directory. Interpret overrides
         // relative to the checkout, as the documented root-level command does.
-        let p = workspace_root().join(path);
+        let p = resolve_binary_override(Path::new(&path), workspace_root);
         assert!(p.is_file(), "TANDEM_BENCH_BIN must name an existing binary");
         return p.canonicalize().expect("resolve TANDEM_BENCH_BIN");
     }
@@ -608,9 +629,76 @@ fn resolve_tandem_bin_path() -> PathBuf {
         .expect("Cargo did not report the tandem executable")
 }
 
+fn resolve_binary_override(path: &Path, checkout: impl FnOnce() -> PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        checkout().join(path)
+    }
+}
+
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
         .expect("benchmark package is in the Tandem workspace")
+}
+
+#[cfg(test)]
+mod tests {
+    // Cargo sets cfg(test) for harness=false benches but removes #[test]
+    // functions there; the integration test wrapper uses these imports.
+    #[allow(unused_imports)]
+    use super::*;
+
+    #[test]
+    fn absolute_overrides_work_without_the_compiled_in_checkout() {
+        let temp = tempfile::tempdir().unwrap();
+        let binary = temp.path().join("tandem");
+        assert_eq!(
+            resolve_binary_override(&binary, || panic!("checkout unavailable")),
+            binary
+        );
+        for recording in [false, true] {
+            assert_eq!(
+                artifact_path(
+                    "docs/benchmarks/sample.json",
+                    recording,
+                    Some(temp.path()),
+                    || panic!("checkout unavailable")
+                )
+                .unwrap(),
+                temp.path().join("sample.json")
+            );
+        }
+    }
+
+    #[test]
+    fn default_paths_keep_the_checkout_relative_behavior() {
+        let root = PathBuf::from("checkout");
+        assert_eq!(
+            resolve_binary_override(Path::new("target/release/tandem"), || root.clone()),
+            root.join("target/release/tandem")
+        );
+        assert_eq!(
+            artifact_path("docs/benchmarks/sample.json", false, None, || root.clone()).unwrap(),
+            root.join("target/benchmarks/sample.json")
+        );
+        assert_eq!(
+            artifact_path("docs/benchmarks/sample.json", true, None, || root.clone()).unwrap(),
+            root.join("docs/benchmarks/sample.json")
+        );
+    }
+
+    #[test]
+    fn a_relative_output_override_is_rejected_without_a_checkout_lookup() {
+        let error = artifact_path(
+            "docs/benchmarks/sample.json",
+            false,
+            Some(Path::new("relative")),
+            || panic!("checkout unavailable"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("absolute"));
+    }
 }

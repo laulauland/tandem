@@ -40,9 +40,11 @@ ENVIRONMENT:
                             is not provided
     TANDEM_ADMIN_TOKEN      The token `tandem serve` and `tandem up` accept as
                             the administrator's. It is what mints workspace
-                            tokens. Generated if unset — `tandem up` prints it,
-                            `tandem serve` logs it
-    TANDEM_TOKEN            The token `tandem init` and `tandem watch` present.
+                            tokens. Required for `tandem serve`. If unset,
+                            `tandem up` generates and prints it; treat that
+                            terminal output as secret
+    TANDEM_TOKEN            The token `tandem init`, `tandem clone`, and
+                            `tandem watch` present.
                             Either the admin token or one already scoped to the
                             workspace
     TANDEM_LISTEN           Listen address for `tandem up` (host:port).
@@ -61,11 +63,11 @@ ENVIRONMENT:
     TANDEM_DISABLE_CACHE    Set to 1/true to read everything from the server
 
 SETUP:
-    # Start a server
+    # Set TANDEM_ADMIN_TOKEN through a protected environment, then start a server
     tandem serve --listen 0.0.0.0:13013 --repo /path/to/repo
 
-    # Create (or re-attach) a workspace backed by the server
-    tandem clone server:13013 my-workspace --workspace agent-a --token <admin token>
+    # Set TANDEM_TOKEN through a protected environment, then create a workspace
+    tandem clone server:13013 my-workspace --workspace agent-a
 
     # Let file changes publish themselves
     cd my-workspace

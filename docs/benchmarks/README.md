@@ -53,7 +53,40 @@ batch, with exact binary content read back through the server. Its files are
 at the repository root; the benchmark's src directory adds a tree write.
 The timer excludes cloning, debounce, writer acquisition, and the subsequent
 staleness refresh. These are single local runs, not real-distance or S3
-qualification. exe.dev measurements remain pending SSH-agent authentication.
+qualification. The separate exe.dev run below supplies real-network evidence.
+
+### exe.dev qualification (2026-09-04)
+
+The [remote results and raw samples](publish-distance.json) compare matching
+baseline and final binaries over the same provider HTTPS route to Dallas,
+with an isolated SeaweedFS 4.42 S3 bucket on server loopback. Each variant ran
+3 warmups and 40 measured eight-file snapshots, with no injected delay.
+The [qualification manifest](publish-qualification.json) records binary hashes
+and the baseline's identical, harness-only portability changes.
+
+| Metric | Baseline | Final |
+|---|---:|---:|
+| p50 | 2288.43 ms | 1225.09 ms |
+| p95 | 2295.42 ms | 1233.35 ms |
+| Requests per measured snapshot | 15 | 8 |
+
+p50 fell 46.47%; p95 fell 46.27%. This is one paired run, not a broad latency
+distribution. The controller's network egress reported Finland/HEL; its
+physical location was not verified. ICMP to the resolved provider endpoint
+averaged 33.65 ms and can terminate at ingress, not the Dallas VM.
+
+Collaboration used two separate client VMs and one server VM, all
+provider-verified in Dallas. Five random 64-KiB payloads matched on both
+clients and the server with client caching disabled. Heads and workspace
+pointers survived an unclean warm restart (zero entries replayed) and a fresh
+materialization (90 entries replayed in 186 ms). A new publish after cold
+recovery survived another restart. SeaweedFS stayed running: this proves
+S3-backed materialization recovery, not loss of the entire host or bucket.
+
+The initial concurrent clones were stale and required an explicit
+`workspace update-stale` after preserving the test payload outside the
+workspace. The subsequent byte and recovery checks passed; the clone setup
+issue remains a separate finding, not a fix delivered by this work.
 
 ### Running it
 
@@ -62,6 +95,20 @@ The harness builds the named CLI package and discovers its release executable
 from Cargo output. Set `TANDEM_BENCH_BIN` to an explicit existing binary only
 when intentionally measuring that artifact (relative paths are checkout-root
 relative); no stale debug fallback is used.
+
+For a copied standalone benchmark, set both `TANDEM_BENCH_BIN` and
+`TANDEM_BENCH_OUTPUT_DIR` to absolute paths. The latter receives the report's
+filename and takes precedence over `TANDEM_BENCH_RECORD`; neither override
+requires the original source checkout to exist. Supply the remote bearer
+through `TANDEM_BENCH_TOKEN`; the harness passes it to the clone subprocess
+through its environment.
+
+The snapshot benchmark embeds the workspace daemon and client code. Comparing
+revisions therefore requires separately built benchmark executables and
+matching CLI/server binaries from each revision. Changing `TANDEM_BENCH_BIN`
+alone does not change the embedded client being timed. Apply the same
+harness-only portability changes to both builds and record their source
+revisions, harness changes, and executable hashes alongside measurements.
 
 ```bash
 # The filesystem bucket backend. Nothing external.

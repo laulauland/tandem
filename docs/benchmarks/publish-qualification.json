@@ -1,0 +1,74 @@
+{
+  "recorded_at_utc": "2026-09-04T21:32:46Z",
+  "status": "behavior_and_cleanup_passed_with_setup_caveats",
+  "provider": "exe.dev",
+  "provider_resource_ids": [
+    "tq-f8db2110-server",
+    "tq-f8db2110-a",
+    "tq-f8db2110-b"
+  ],
+  "remote_bucket_prefix": [
+    "s3://tq-f8db2110/baseline/",
+    "s3://tq-f8db2110/final/"
+  ],
+  "remote_checks": {
+    "physical_placement": "three VMs provider-verified Dallas; controller physical location unverified, FI/HEL egress only",
+    "observed_rtt": "provider endpoint ICMP mean33.645ms; ingress RTT, not direct VM RTT",
+    "paired_snapshot_timings": "passed; p50 2288.43→1225.09ms;40samples each; no injected delay",
+    "two_client_concurrent_bytes": "passed after explicit stale-workspace setup correction; five payloads verified by both clients and native server",
+    "warm_recovery": "passed;0entries; unchanged heads and workspace pointers",
+    "cold_recovery": "passed;90entries/186ms; unchanged heads and workspace pointers; new publish survives anotherrestart",
+    "cleanup": "verified; all three exact VMs absent, existing VMs remain"
+  },
+  "local_checks": {
+    "workspace_tests": "passed",
+    "benchmark_path_tests": "3 passed",
+    "cli_auth_help_regression": "failed before fix; passed afterward",
+    "baseline_without_compiled_in_checkout": "passed; checkout renamed before running copied benchmark from /tmp",
+    "matching_portable_baseline_and_final_runs": "passed; filesystem/loopback and 50 ms injected delay only",
+    "temporary_baseline_workspace_cleanup": "forgotten; checkout removed; source available from baseline revision plus harness delta"
+  },
+  "artifacts": {
+    "baseline": {
+      "source_commit": "21318c90c9f1",
+      "cli_sha256": "1765e7e21965baf36c3d203362d547f3ef6dfa6e527f3f85ddea9e732ae50add",
+      "portable_benchmark_sha256": "35f044ee6ceabb7bd309f76bb4557522df061055f3a92ba2bc2ff704d8cdb5f6",
+      "harness_only_build_commit": "89cebdb0216894133d61ec444ed6e49c24924333",
+      "harness_delta_sha256": "c6f361c7037c49230fca6ed7328c062c9a45119e62bc1adf593c027bff064e9b"
+    },
+    "final": {
+      "source_change_id": "kwxoowmyntznpukuyuwxmzkppxqnrppu",
+      "source_commit_before_evidence": "16317f45337728fdef334c539c60e16cc29d4e75",
+      "cli_sha256": "40ff611f22acf011e2b6e231d71185e205619dd216b047f4379e25945d709e71",
+      "benchmark_sha256": "14063c8e3c3a7a0d6bafad2bd26110b76823d8bf97fad5e909ab8c8deb0662a5"
+    },
+    "architecture": "x86_64",
+    "harness_delta_files": [
+      "testing/benchmarks/benches/bench_support.rs",
+      "testing/benchmarks/benches/snapshot_publish_latency.rs"
+    ],
+    "retained_local_directories": [
+      "target/publish-baseline",
+      "target/publish-stage3",
+      "target/publish-final",
+      "target/publish-qualification"
+    ],
+    "timing_evidence": "publish-distance.json contains the paired real-network raw samples; publish-batching.json retains separate local/injected-delay evidence."
+  },
+  "resume": "Remote run completed with documented setup caveats. Next investigate initial concurrent-clone staleness; controller physical location and independently hosted S3 remain unverified.",
+  "prior_blocker": "exe.dev accepts the available SSH key, but SSH-agent signing fails or stalls. Bounded ssh exe.dev help attempts time out before provisioning.",
+  "remote_evidence": "publish-distance.json",
+  "cleanup": {
+    "status": "verified",
+    "deleted_vm_ids": [
+      "tq-f8db2110-server",
+      "tq-f8db2110-a",
+      "tq-f8db2110-b"
+    ],
+    "remaining_test_vms": [],
+    "existing_vms_still_present": true,
+    "bucket_disposition": "Ephemeral S3 bucket and both prefixes removed with server VM; no external bucket exists",
+    "secret_disposition": "Standalone admin/scoped token files removed before VM deletion; local admin-token removed; workspace credentials removed with client VMs",
+    "verification": "evidence/cleanup-verified.log"
+  }
+}

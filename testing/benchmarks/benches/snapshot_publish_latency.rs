@@ -218,17 +218,9 @@ fn main() -> Result<()> {
     fs::create_dir_all(&workspace).context("create the workspace directory")?;
     let cloned = run_tandem(
         &workspace,
-        &[
-            "clone",
-            &addr,
-            ".",
-            "--workspace",
-            WORKSPACE,
-            "--token",
-            &admin_token,
-        ],
+        &["clone", &addr, ".", "--workspace", WORKSPACE],
         &home,
-        &[],
+        &[("TANDEM_TOKEN".to_string(), admin_token)],
     )?;
     ensure_ok(&cloned, "clone the bench workspace")?;
 

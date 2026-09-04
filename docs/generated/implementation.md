@@ -127,11 +127,12 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/cli/tests/integration.rs`
 - `crates/protocol/tests/wire.rs`
 - `crates/wal/tests/wal.rs`
+- `testing/benchmarks/tests/portability.rs`
 - `testing/simulation/tests/dst.rs`
 - `testing/simulation/tests/properties/roundtrip.rs`
 - `testing/simulation/tests/properties.rs`
 
-The Cargo test targets are `crates/cli/tests/integration.rs`, `crates/protocol/tests/wire.rs`, `crates/wal/tests/wal.rs`, `testing/simulation/tests/dst.rs`, `testing/simulation/tests/properties.rs`;
+The Cargo test targets are `crates/cli/tests/integration.rs`, `crates/protocol/tests/wire.rs`, `crates/wal/tests/wal.rs`, `testing/benchmarks/tests/portability.rs`, `testing/simulation/tests/dst.rs`, `testing/simulation/tests/properties.rs`;
 unit tests remain beside their source modules.
 
 ## Benchmark targets
