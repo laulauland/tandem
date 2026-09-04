@@ -77,6 +77,8 @@ pub struct FaultPoints {
     fail_derived_head_wal: AtomicBool,
     /// WAL entry writes still to be answered with a synthetic bucket failure.
     wal_write_failures: AtomicU64,
+    /// Index writes rejected before committing, after the WAL has been stored.
+    index_write_failures: AtomicU64,
     /// Head reconciles still to be answered by leaving the heads unmerged.
     reconcile_failures: AtomicU64,
     /// Content for the object a second client "writes" during a retried publish.
@@ -84,6 +86,20 @@ pub struct FaultPoints {
 }
 
 impl FaultPoints {
+    /// Reject the next index writes while leaving the server running, allowing
+    /// another workspace to publish after the failed caller abandons its work.
+    pub fn fail_index_writes(&self, count: u64) {
+        self.index_write_failures.store(count, Ordering::Relaxed);
+    }
+
+    pub(super) fn take_index_write_failure(&self) -> bool {
+        self.index_write_failures
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                count.checked_sub(1)
+            })
+            .is_ok()
+    }
+
     /// A fault set that does nothing — what the binary always runs with.
     pub fn inert() -> Arc<Self> {
         Arc::new(Self::default())

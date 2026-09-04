@@ -1,16 +1,18 @@
 //! Deterministic simulation: generated schedules against every invariant.
 //!
-//! Five tests, one job. `pinned_seeds` runs the schedules that have failed
+//! `pinned_seeds` runs the schedules that have failed
 //! before, so a fixed bug stays fixed. `fresh_seeds` runs schedules nobody has
-//! seen, so new bugs have somewhere to come from. The other three are fixed
+//! seen, so new bugs have somewhere to come from. Fixed
 //! schedules that walk a named window point by point — the durability order,
 //! and the two windows in which the server is holding objects no entry has
 //! carried — because the generator reaches those by chance and "by chance" is
 //! not a coverage claim.
 //!
-//! Every schedule, generated or fixed, ends the same way: one publish to drain
+//! Generated schedules end with one publish to drain
 //! whatever is staged, then the server's disk is thrown away and everything is
 //! read back out of the bucket alone. See `schedule::close`.
+//! Abandoned-publish regressions instead cold-restart immediately, without a
+//! draining publish that could repair the missing durability being tested.
 //!
 //! When any of them fails it prints the seed, and that seed is the whole
 //! reproducer: add it to the pinned list and the failure is a regression test.
@@ -37,6 +39,58 @@ const LANES: usize = 6;
 /// them would exercise them only sometimes — and the deterministic cases below
 /// pin the invariants, not the schedules that reach them.
 const PINNED_SEEDS: [u64; 14] = [1, 2, 3, 5, 6, 8, 9, 13, 21, 34, 55, 89, 144, 233];
+
+/// An unindexed WAL is not replay ancestry. Another workspace must not depend
+/// on its failed publisher ever retrying before its own bytes become durable.
+#[test]
+fn an_abandoned_publish_does_not_strand_another_workspaces_uploads() -> anyhow::Result<()> {
+    abandoned_publish(false)
+}
+
+#[test]
+fn an_index_write_failure_does_not_strand_another_workspaces_uploads() -> anyhow::Result<()> {
+    abandoned_publish(true)
+}
+
+fn abandoned_publish(index_write_failure: bool) -> anyhow::Result<()> {
+    use support::agent::Agent;
+    use support::cluster::Cluster;
+
+    let mut cluster = Cluster::start()?;
+    let abandoned = Agent::join(&cluster, "abandoned")?;
+    let survivor = Agent::join(&cluster, "survivor")?;
+    let contents = b"survives an abandoned WAL and an immediate cold restart\n".to_vec();
+    let (surviving_op, _, commit) = survivor.prepare_files(
+        &[("survives.txt".to_string(), contents.clone())],
+        "surviving work",
+    )?;
+    let (abandoned_op, _, _) = abandoned.prepare_files(&[], "abandoned work")?;
+
+    if index_write_failure {
+        cluster.faults.fail_index_writes(1);
+        let err = abandoned
+            .publish_once(&cluster, &abandoned_op)
+            .expect_err("index write must fail");
+        assert!(
+            err.to_string().contains("injected bucket failure"),
+            "{err:#}"
+        );
+    } else {
+        cluster.faults.set_index_cas_conflicts(1);
+        assert!(!abandoned.publish_once(&cluster, &abandoned_op)?);
+    }
+    abandoned_op.leave_unpublished();
+    assert!(survivor.publish_once(&cluster, &surviving_op)?);
+    surviving_op.leave_unpublished();
+
+    // No final draining publish or reupload: those would hide this failure.
+    cluster.cold_restart()?;
+    assert_eq!(
+        survivor.snapshot()?.read_file(&commit, "survives.txt")?,
+        contents
+    );
+    Ok(())
+}
 
 #[test]
 fn pinned_seeds() {

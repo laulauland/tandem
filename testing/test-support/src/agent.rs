@@ -19,7 +19,9 @@ use jj_lib::ref_name::WorkspaceNameBuf;
 use jj_lib::repo::{ReadonlyRepo, Repo as _, RepoLoader};
 use jj_lib::repo_path::RepoPathBuf;
 use jj_lib::settings::UserSettings;
+use jj_lib::transaction::UnpublishedOperation;
 use jj_tandem_client::tandem_factories_with_defaults;
+use jj_tandem_client::TandemClient;
 use jj_tandem_workspace::init_tandem_workspace;
 use pollster::FutureExt as _;
 
@@ -107,6 +109,21 @@ impl Agent {
         files: &[(String, Vec<u8>)],
         description: &str,
     ) -> Result<CommitId> {
+        let (operation, written, commit_id) = self.prepare_files(files, description)?;
+        operation
+            .publish()
+            .with_context(|| format!("{}: publish the operation", self.name))?;
+        self.written.extend(written);
+        Ok(commit_id)
+    }
+
+    /// Upload a transaction without publishing its heads, allowing a schedule
+    /// to interleave another workspace's publish after the uploads.
+    pub fn prepare_files(
+        &self,
+        files: &[(String, Vec<u8>)],
+        description: &str,
+    ) -> Result<(UnpublishedOperation, Vec<WrittenFile>, CommitId)> {
         let repo = self.head()?;
         let store = repo.store().clone();
         let parent = self.working_commit(&repo)?;
@@ -147,17 +164,38 @@ impl Agent {
             .edit(self.workspace_name.clone(), &commit)
             .with_context(|| format!("{}: move the working copy", self.name))?;
         tx.repo_mut().rebase_descendants()?;
-        tx.commit(format!("{} commits {description}", self.name))
-            .with_context(|| format!("{}: publish the operation", self.name))?;
+        let operation = tx
+            .write(format!("{} commits {description}", self.name))
+            .with_context(|| format!("{}: write the operation", self.name))?;
 
-        for (path, bytes) in staged {
-            self.written.push(WrittenFile {
+        let written = staged
+            .into_iter()
+            .map(|(path, bytes)| WrittenFile {
                 commit: commit_id.clone(),
                 path,
                 bytes,
-            });
-        }
-        Ok(commit_id)
+            })
+            .collect();
+        Ok((operation, written, commit_id))
+    }
+
+    /// One publish attempt, without the op-heads adapter's automatic CAS retry.
+    pub fn publish_once(
+        &self,
+        cluster: &Cluster,
+        operation: &UnpublishedOperation,
+    ) -> Result<bool> {
+        let client = TandemClient::connect(&cluster.addr, &cluster.admin_token)?;
+        let version = client.get_heads_state()?.version;
+        let operation = operation.operation();
+        let parents: Vec<_> = operation
+            .parent_ids()
+            .iter()
+            .map(|id| id.as_bytes().to_vec())
+            .collect();
+        Ok(client
+            .update_op_heads(&parents, operation.id().as_bytes(), version, &self.name)?
+            .ok)
     }
 
     /// Rewrite the working commit's description. The interesting part is the

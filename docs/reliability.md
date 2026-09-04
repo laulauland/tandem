@@ -64,11 +64,20 @@ required relationship is reachability before acknowledgement, not one-to-one
 ownership.
 
 The staging buffer deduplicates IDs, warns as it grows, and eventually applies
-backpressure rather than risking an unbounded server process. When a WAL write
-fails, drained objects are restored ahead of newer uploads. When a publish is
-retried after its immutable entry already exists, newly staged objects remain
-for the next publish instead of being discarded into an entry that cannot be
-overwritten.
+backpressure rather than risking an unbounded server process. Drained objects
+remain charged against its limit until the index commits. A WAL entry alone
+does not release them: after an index conflict or write failure, that entry
+may remain outside every indexed head's ancestry. Every pre-commit exit restores
+the drained objects ahead of newer uploads, so another workspace can publish
+without depending on the failed caller's retry. Identical uploads consume no
+extra capacity while the original bytes are pending or held by a publish.
+
+When a publish is retried after its immutable entry already exists, staged
+objects remain for the next fresh publish instead of being discarded into an
+entry that cannot be overwritten. A successful index commit releases only the
+batch written by that attempt; distinct uploads received during it remain
+staged. Duplicate retries of records in the committed batch need no further
+publication.
 
 ## CAS and concurrent writers
 

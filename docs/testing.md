@@ -41,6 +41,11 @@ CAS attempts, and objects drained by a failed WAL write. Every schedule ends by
 draining staged content, deleting the server materialization, replaying from
 the bucket alone, and running the oracle again.
 
+The abandoned-publish regressions deliberately skip the final drain: another
+workspace uploads first, a publisher loses index CAS or encounters an index
+write failure and never retries, then the first workspace publishes and
+immediately cold-restarts. Its exact bytes must survive without reupload.
+
 Integration coverage remains where reality adds evidence: authentication and
 scope at HTTP/CLI boundaries, clone and daemon lifecycle, cache and baked-image
 behavior, process contention, control sockets, Git shipping, API cache/CAS

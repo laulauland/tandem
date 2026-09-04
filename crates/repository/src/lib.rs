@@ -923,11 +923,9 @@ impl Repository {
         // 1. The WAL entry: this operation, its view, and every blob written
         //    since the last publish.
         self.faults.crash(CrashWindow::BeforeWalWrite)?;
-        if let Err(err) = self.write_publish_wal_entry(&new_hex) {
-            // Nothing was acknowledged and nothing was applied locally, so the
-            // client's transaction retry is free to start over.
-            return Err(err.context("write WAL entry before acknowledging head update"));
-        }
+        let pending_publish = self
+            .write_publish_wal_entry(&new_hex)
+            .context("write WAL entry before acknowledging head update")?;
 
         // 2. The index object, naming the head set this update produces. The
         //    set is computed before the local apply so the bucket commits
@@ -938,6 +936,10 @@ impl Repository {
             || !self.publish_index(next_version, &prospective_heads, &next_workspace_heads)?
         {
             return self.index_conflict_result(metadata);
+        }
+
+        if let Some(publish) = pending_publish {
+            publish.mark_index_committed()?;
         }
 
         self.faults.crash(CrashWindow::AfterIndexWrite)?;

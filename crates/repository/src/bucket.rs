@@ -168,6 +168,9 @@ const PENDING_BLOBS_MAX_BYTES: usize = 1024 * 1024 * 1024;
 impl PendingBlobs {
     /// Accept a newly written object. Fails once the buffer is over its cap.
     pub(super) fn stage(&mut self, record: wal::WalRecord) -> Result<()> {
+        if self.staged.contains(&record.id) {
+            return Ok(());
+        }
         if self.bytes + record.data.len() > PENDING_BLOBS_MAX_BYTES {
             bail!(
                 "the server is holding {} bytes of objects that no publish has made durable yet \
@@ -196,21 +199,64 @@ impl PendingBlobs {
     }
 
     fn take(&mut self) -> Vec<wal::WalRecord> {
-        self.staged.clear();
-        self.bytes = 0;
+        // The publish owns the records, but their IDs and bytes stay charged
+        // until its index commits. Uploads may arrive while the bucket writes.
         std::mem::take(&mut self.records)
     }
 
     /// Put objects back at the front, so a publish that could not carry them
     /// leaves them ahead of anything written since.
     ///
-    /// The cap does not apply: these objects were accepted already, and the
-    /// client has been told nothing about them yet. Dropping them here would
-    /// lose content a later head can reach.
-    fn restage(&mut self, records: Vec<wal::WalRecord>) {
+    /// IDs and bytes remained charged while the publish held the records, so
+    /// restoring them neither consumes capacity nor runs deduplication again.
+    fn restage(&mut self, mut records: Vec<wal::WalRecord>) {
         let tail = self.take();
-        for record in records.into_iter().chain(tail) {
-            self.accept(record);
+        records.extend(tail);
+        self.records = records;
+    }
+
+    fn committed(&mut self, records: &[wal::WalRecord]) {
+        for record in records {
+            if object_kind_for_record(record.kind).is_some() && self.staged.remove(&record.id) {
+                self.bytes -= record.data.len();
+            }
+        }
+    }
+}
+
+/// Owns the drained records until the index makes their WAL replayable.
+/// Every earlier return restores them, including CAS loss and failed reads.
+pub(super) struct PendingPublish<'a> {
+    pending: &'a std::sync::Mutex<PendingBlobs>,
+    entry: wal::WalEntry,
+    committed: bool,
+}
+
+impl PendingPublish<'_> {
+    pub(super) fn mark_index_committed(mut self) -> Result<()> {
+        self.pending
+            .lock()
+            .map_err(|e| anyhow!("pending blobs lock: {e}"))?
+            .committed(&self.entry.records);
+        self.committed = true;
+        Ok(())
+    }
+}
+
+impl Drop for PendingPublish<'_> {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        let records = std::mem::take(&mut self.entry.records)
+            .into_iter()
+            .filter(|record| object_kind_for_record(record.kind).is_some())
+            .collect();
+        match self.pending.lock() {
+            Ok(mut pending) => pending.restage(records),
+            Err(err) => {
+                tracing::error!(error = %err, "cannot restore objects after an uncommitted publish")
+            }
         }
     }
 }
@@ -225,24 +271,6 @@ impl Repository {
             .lock()
             .map_err(|e| anyhow!("pending blobs lock: {e}"))?
             .take())
-    }
-
-    /// Put staged objects back on the queue after a WAL write that did not
-    /// carry them, ahead of anything written since, so the next publish does.
-    fn restage_blobs(&self, records: Vec<wal::WalRecord>) {
-        let blobs: Vec<wal::WalRecord> = records
-            .into_iter()
-            .filter(|record| object_kind_for_record(record.kind).is_some())
-            .collect();
-        if blobs.is_empty() {
-            return;
-        }
-        match self.pending_blobs.lock() {
-            Ok(mut pending) => pending.restage(blobs),
-            Err(err) => {
-                tracing::error!(error = %err, "cannot restage objects after a failed WAL write")
-            }
-        }
     }
 
     fn wal_entry_already_written(&self, op_hex: &str) -> Result<bool> {
@@ -348,11 +376,14 @@ impl Repository {
 
     /// Write the WAL entry for a publish: the operation, its view, and every
     /// object staged since the last publish.
-    pub(super) fn write_publish_wal_entry(&self, op_hex: &str) -> Result<()> {
+    pub(super) fn write_publish_wal_entry(
+        &self,
+        op_hex: &str,
+    ) -> Result<Option<PendingPublish<'_>>> {
         if is_root_operation_hex(op_hex) {
             // jj's root operation is synthetic: no stored operation, no view,
             // nothing to make durable. Staged objects stay staged.
-            return Ok(());
+            return Ok(None);
         }
 
         // A retried publish — the index CAS conflicted, the client came back
@@ -367,7 +398,7 @@ impl Repository {
                 op_id = %op_hex,
                 "publish retried; keeping staged objects for the next publish"
             );
-            return Ok(());
+            return Ok(None);
         }
 
         // Any parent the bucket does not hold yet — a merge this server minted
@@ -378,8 +409,20 @@ impl Repository {
                 .with_context(|| format!("make parent of {op_hex} durable"))?;
         }
 
-        let blobs = self.drain_pending_blobs()?;
-        if !self.put_operation_wal_entry(op_hex, blobs)? {
+        let op_id = from_hex(op_hex)?;
+        let mut publish = PendingPublish {
+            pending: &self.pending_blobs,
+            entry: wal::WalEntry {
+                op_id,
+                parents: Vec::new(),
+                records: self.drain_pending_blobs()?,
+            },
+            committed: false,
+        };
+        let (tail, parents) = self.operation_records(op_hex)?;
+        publish.entry.records.extend(tail);
+        publish.entry.parents = parents;
+        if !self.put_wal_entry(op_hex, &publish.entry)? {
             // Another writer, or an earlier life of this process, wrote this
             // entry. Its record list is not the one just built, and the entry
             // is immutable — so the drained objects went back on the staging
@@ -389,51 +432,20 @@ impl Repository {
                 op_id = %op_hex,
                 "WAL entry existed already; restaging this publish's objects"
             );
+            return Ok(None);
         }
-        Ok(())
+        Ok(Some(publish))
     }
 
-    /// Build and store one operation's WAL entry: the leading records the
-    /// caller supplies, then the operation's view, then the operation. That
-    /// order is the replay order, and it is the whole shape of a WAL entry —
-    /// staged blobs ahead of the operation that makes them reachable.
-    ///
-    /// Returns whether this call stored the entry. Anything that stops the
-    /// entry from being stored — a read that fails, a bucket that refuses, an
-    /// entry already there — puts the leading records back on the staging
-    /// queue, so no object the caller drained is left durable nowhere.
-    fn put_operation_wal_entry(
-        &self,
-        op_hex: &str,
-        leading_records: Vec<wal::WalRecord>,
-    ) -> Result<bool> {
-        let (tail, parents) = match self.operation_records(op_hex) {
-            Ok(read) => read,
-            Err(err) => {
-                self.restage_blobs(leading_records);
-                return Err(err);
-            }
-        };
-
-        let mut records = leading_records;
-        records.extend(tail);
+    /// Ancestor entries contain their view and operation, without staged blobs.
+    fn put_operation_wal_entry(&self, op_hex: &str) -> Result<bool> {
+        let (records, parents) = self.operation_records(op_hex)?;
         let entry = wal::WalEntry {
             op_id: from_hex(op_hex)?,
             parents,
             records,
         };
-
-        match self.put_wal_entry(op_hex, &entry) {
-            Ok(true) => Ok(true),
-            Ok(false) => {
-                self.restage_blobs(entry.records);
-                Ok(false)
-            }
-            Err(err) => {
-                self.restage_blobs(entry.records);
-                Err(err)
-            }
-        }
+        self.put_wal_entry(op_hex, &entry)
     }
 
     /// Make sure an operation has a WAL entry, writing one if this process has
@@ -479,7 +491,7 @@ impl Repository {
                     // No leading records: an ancestor's entry carries only the
                     // operation and its view. The blobs belong to the publish
                     // that drains them, not to this walk.
-                    self.put_operation_wal_entry(&hex, Vec::new())?;
+                    self.put_operation_wal_entry(&hex)?;
                 }
             }
         }
@@ -510,6 +522,10 @@ impl Repository {
             workspace_heads: workspace_heads.clone(),
         };
         let encoded = index.encode()?;
+
+        if self.faults.take_index_write_failure() {
+            bail!("injected bucket failure while writing the index object");
+        }
 
         if !self.bucket_conditional_put {
             // No conditional put: this server's mutex is the only arbiter.
@@ -1027,6 +1043,7 @@ impl Repository {
     /// repo materialized from that bucket is missing the one object every
     /// later view still points at.
     fn seed_bucket_from_local(&self, local: &HeadsMetadata) -> Result<()> {
+        let mut pending_publishes = Vec::new();
         // Only a repo this process just created gets its objects seeded. An
         // existing repo pointed at an empty bucket is a different job —
         // backfilling a whole history — and doing it here would read the
@@ -1042,14 +1059,22 @@ impl Repository {
                          from this bucket may be missing them"
                     );
                 }
-                self.write_publish_wal_entry(&head)
-                    .with_context(|| format!("seed the bucket with op head {head}"))?;
+                if let Some(publish) = self
+                    .write_publish_wal_entry(&head)
+                    .with_context(|| format!("seed the bucket with op head {head}"))?
+                {
+                    pending_publishes.push(publish);
+                }
             }
         }
 
         if !self.republish_local_heads(local)? {
             tracing::warn!("could not seed the bucket index; another writer got there first");
             self.reload_index()?;
+        } else {
+            for publish in pending_publishes {
+                publish.mark_index_committed()?;
+            }
         }
         Ok(())
     }
@@ -1174,6 +1199,10 @@ mod tests {
                 .stage(blob(tag, chunk))
                 .expect("staging under the cap must be accepted");
         }
+        let in_flight = pending.take();
+        pending
+            .stage(blob(0, chunk))
+            .expect("an identical retry needs no capacity, even during a publish");
         let err = pending
             .stage(blob(9, chunk))
             .expect_err("staging past the cap must be refused");
@@ -1181,11 +1210,17 @@ mod tests {
             err.to_string().contains("no publish has made durable"),
             "the refusal should say why: {err}"
         );
+        pending.restage(in_flight);
         assert_eq!(
             pending.records.len(),
             4,
             "a refused write must not be buffered"
         );
+        assert_eq!(pending.bytes, PENDING_BLOBS_MAX_BYTES);
+        let committed = pending.take();
+        pending.committed(&committed);
+        assert_eq!(pending.bytes, 0, "only an index commit releases capacity");
+        assert!(pending.staged.is_empty());
     }
 
     fn entry(tag: u8, len: usize) -> wal::WalEntry {
@@ -1194,6 +1229,21 @@ mod tests {
             parents: Vec::new(),
             records: vec![blob(tag, len)],
         }
+    }
+
+    #[test]
+    fn committing_a_batch_keeps_uploads_that_arrived_during_its_publish() {
+        let mut pending = PendingBlobs::default();
+        pending.stage(blob(1, 3)).unwrap();
+        let published = pending.take();
+        pending.stage(blob(1, 3)).unwrap();
+        pending.stage(blob(2, 5)).unwrap();
+        assert_eq!(pending.bytes, 8);
+
+        pending.committed(&published);
+        assert_eq!(pending.bytes, 5);
+        assert_eq!(pending.records, vec![blob(2, 5)]);
+        assert_eq!(pending.staged, HashSet::from([vec![2]]));
     }
 
     /// A cold boot walks the whole history, and a WAL entry carries content.
