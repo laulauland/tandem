@@ -2,6 +2,7 @@
 
 mod auth;
 pub mod control;
+mod hosted;
 mod http;
 mod logging;
 mod process;
@@ -37,12 +38,29 @@ impl Server {
         ))
     }
 
+    pub(crate) fn new_with_faults(
+        repo: PathBuf,
+        bucket: Option<&str>,
+        admin_token: &str,
+        faults: Arc<jj_tandem_repository::FaultPoints>,
+    ) -> Result<Self> {
+        let settings = user_settings()?;
+        Ok(Self::from_repository(
+            jj_tandem_repository::Repository::new_with_faults(&settings, repo, bucket, faults)?,
+            admin_token,
+        ))
+    }
+
     pub fn from_repository(repository: Repository, admin_token: &str) -> Self {
         Self {
             repository: Arc::new(repository),
             tokens: auth::TokenStore::new(admin_token),
             writer_roles: writer::WriterRoles::new(),
         }
+    }
+
+    pub(crate) fn durably_initialize(&self) -> Result<()> {
+        self.repository.durably_initialize()
     }
 
     fn authority_for(&self, presented: &str) -> Option<auth::Authority> {
@@ -181,6 +199,7 @@ pub struct ServeOptions {
     pub daemon: bool,
     pub log_file: Option<String>,
     pub bucket: Option<String>,
+    pub hosted: bool,
     pub admin_token: Option<String>,
 }
 
@@ -195,11 +214,27 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
         Some(token) if !token.trim().is_empty() => token,
         _ => anyhow::bail!("serve requires TANDEM_ADMIN_TOKEN; configure a protected service secret or use `tandem up` for local startup"),
     };
-    let server = Arc::new(Server::new(
-        PathBuf::from(&opts.repo_path),
-        opts.bucket.as_deref(),
-        &admin_token,
-    )?);
+    let hosted = opts
+        .hosted
+        .then(|| {
+            opts.bucket
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("--hosted requires --bucket"))
+        })
+        .transpose()?
+        .map(|bucket| {
+            hosted::HostedServer::new(PathBuf::from(&opts.repo_path), bucket, &admin_token)
+        })
+        .transpose()?;
+    let server = if hosted.is_none() {
+        Some(Arc::new(Server::new(
+            PathBuf::from(&opts.repo_path),
+            opts.bucket.as_deref(),
+            &admin_token,
+        )?))
+    } else {
+        None
+    };
     let listener = tokio::net::TcpListener::bind(&opts.listen_addr)
         .await
         .with_context(|| format!("failed to bind {}", opts.listen_addr))?;
@@ -215,7 +250,18 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
             listen: local_addr.to_string(),
             shutdown_tx: shutdown_tx.clone(),
             log_tx,
-            bucket: server.repository.bucket_status().into(),
+            bucket: match &server {
+                Some(server) => server.repository.bucket_status().into(),
+                None => control::BucketStatus {
+                    backend: "hosted".to_string(),
+                    location: opts.bucket.clone().unwrap_or_default(),
+                    conditional_put: true,
+                    materialized: false,
+                    replayed_heads: 0,
+                    replayed_entries: 0,
+                    replay_ms: 0,
+                },
+            },
         });
         tokio::spawn(async move {
             if let Err(error) = control::run_control_socket(sock_path.clone(), state).await {
@@ -247,7 +293,14 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
     });
     let (drain_tx, drain_rx) = tokio::sync::oneshot::channel();
     let serve = tokio::spawn(std::future::IntoFuture::into_future(
-        axum::serve(listener, http::router(server)).with_graceful_shutdown(async move {
+        axum::serve(
+            listener,
+            match hosted {
+                Some(hosted) => hosted::router(Arc::new(hosted)),
+                None => http::router(server.expect("single repository server")),
+            },
+        )
+        .with_graceful_shutdown(async move {
             let _ = drain_rx.await;
         }),
     ));

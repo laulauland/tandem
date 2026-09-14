@@ -197,6 +197,37 @@ pub fn spawn_server_with_args_and_env(
     spawn_server_with_args_env_and_log(repo, addr, extra_args, env, home, None)
 }
 
+/// Spawn a server with stderr available as a line stream.
+///
+/// A few process tests need to wait for a server's own startup event rather
+/// than probing in a sleep loop. The stream is drained on a background thread
+/// by `Lines`, so the child cannot block on a full stderr pipe.
+pub fn spawn_server_with_args_and_env_with_lines(
+    repo: &Path,
+    addr: &str,
+    extra_args: &[&str],
+    env: &[(&str, &str)],
+    home: &Path,
+) -> (Child, lines::Lines) {
+    let mut cmd = Command::new(tandem_bin());
+    cmd.args(["serve", "--listen", addr, "--repo", repo.to_str().unwrap()]);
+    let has_explicit_log_level = extra_args.iter().copied().any(|arg| arg == "--log-level");
+    if !has_explicit_log_level {
+        cmd.args(["--log-level", "warn"]);
+    }
+    for arg in extra_args {
+        cmd.arg(arg);
+    }
+    isolate_env(&mut cmd, home);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    cmd.stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut child = cmd.spawn().expect("spawn tandem serve");
+    let stderr = child.stderr.take().expect("server stderr");
+    (child, lines::Lines::from(stderr))
+}
+
 /// Same, but with the server's log written to a file the test can read.
 ///
 /// Used by tests that assert on what the server did rather than only on what

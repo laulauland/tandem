@@ -34,6 +34,8 @@ mod fixture_readiness;
 mod git_round_trip;
 #[path = "integration/handshake.rs"]
 mod handshake;
+#[path = "integration/hosted_recovery.rs"]
+mod hosted_recovery;
 #[path = "integration/http_api.rs"]
 mod http_api;
 #[path = "integration/log_streaming.rs"]

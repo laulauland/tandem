@@ -163,10 +163,10 @@ there is no separate infrastructure-only or benchmark-only stage.
 7. **Replace the VM while agents retain access and content.** Fence the old host,
    restore protected secrets/configuration and R2 state on a fresh VM, reconnect
    existing agents, and publish new bytes. Exercise key rotation and rollback.
-8. **Rehearse the production move with existing data.** Validate real agent
-   environments and the supported load envelope, inventory/import any existing
-   ownership and history, and rehearse a safe traffic switch and rollback before
-   requesting production cutover approval.
+8. **Deploy the fresh service on tandem.land.** Validate real agent environments
+   and the supported load envelope, deploy a fresh native host with R2, switch
+   DNS/proxy routing, and validate the live production journey. This is greenfield:
+   no legacy ownership, credentials, repositories or service behavior need migration.
 
 Stage 1's demo must work from an empty host cache without manually editing bucket
 records or invoking internal Rust APIs. A fresh client must read the exact
@@ -188,8 +188,9 @@ continuity, and a successful new publish must survive total VM cache loss.
 A fault or large uploader in one repository must not prevent another repository
 from making progress within the declared workload envelope.
 
-Prepare a reversible traffic switch after qualification. Before replacing the
-existing service, inventory its durable data and ownership records and demonstrate
-export/import if preservation is needed; never silently reset namespaces or
-repositories. Production cutover is a separately approved action with the complete
-recovery evidence and rollback procedure ready for review.
+The user authorized implementation, production validation on exe.dev, and wiring
+`tandem.land` to the new VM on 2026-09-14. They explicitly clarified that this is
+all greenfield: no legacy preservation, export/import or migration is needed.
+After qualification, deploy the fresh service and switch DNS/proxy routing within
+that authorization. Retain recoverability of new acknowledged data and a safe
+operational rollback for the new service; do not add legacy compatibility paths.

@@ -2,4 +2,5 @@
 
 pub mod hex;
 pub mod http;
+pub mod names;
 pub mod wire;

@@ -18,8 +18,8 @@ DEPENDENCIES = {
     "jj-tandem-client": {"jj-tandem-protocol", "jj-tandem-jj"},
     "jj-tandem-workspace": {"jj-tandem-client", "jj-tandem-protocol", "jj-tandem-jj"},
     "jj-tandem-repository": {"jj-tandem-protocol", "jj-tandem-wal", "jj-tandem-storage", "jj-tandem-jj"},
-    "jj-tandem-server": {"jj-tandem-protocol", "jj-tandem-repository"},
-    "jj-tandem": {"jj-tandem-client", "jj-tandem-workspace", "jj-tandem-server"},
+    "jj-tandem-server": {"jj-tandem-protocol", "jj-tandem-repository", "jj-tandem-storage"},
+    "jj-tandem": {"jj-tandem-client", "jj-tandem-protocol", "jj-tandem-workspace", "jj-tandem-server"},
 }
 
 

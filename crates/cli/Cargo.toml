@@ -14,15 +14,21 @@ categories = ["development-tools", "command-line-utilities"]
 name = "tandem"
 path = "src/main.rs"
 
+[[bin]]
+name = "td"
+path = "src/td.rs"
+
 [dependencies]
 clap.workspace = true
 jj-cli.workspace = true
 jj-lib.workspace = true
 jj-tandem-client.workspace = true
+jj-tandem-protocol.workspace = true
 jj-tandem-server.workspace = true
 jj-tandem-workspace.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 pollster.workspace = true

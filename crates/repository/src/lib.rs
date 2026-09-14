@@ -232,6 +232,26 @@ fn decode_view_with_id(data: &[u8]) -> Result<(Vec<u8>, jj_lib::op_store::View)>
 }
 
 impl Repository {
+    /// Make a newly provisioned repository recoverable before its catalog
+    /// entry may become ready. Existing durable repositories are unchanged.
+    pub fn durably_initialize(&self) -> Result<()> {
+        let heads = self.get_heads_sync()?;
+        if heads.version != 0 {
+            return Ok(());
+        }
+        let head = heads
+            .heads
+            .first()
+            .context("new repository has no operation head")?;
+        let head_bytes = from_hex(head).context("decode initial operation head")?;
+        let result =
+            self.update_op_heads_sync(Vec::new(), head_bytes, 0, None, &PublishAuthority::Admin)?;
+        if !result.ok {
+            bail!("initial repository publication lost a bucket race");
+        }
+        Ok(())
+    }
+
     /// A server over `repo`, under whatever faults the environment names —
     /// which, outside a test, is none.
     pub fn new(

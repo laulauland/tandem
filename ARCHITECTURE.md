@@ -13,15 +13,18 @@ store. It keeps a real working copy on local disk. A workspace daemon observes
 filesystem changes and publishes snapshots; editors, agents, and build tools do
 not need a Tandem integration.
 
-The server hosts one repository and one trust domain. It coordinates operation
-heads, authenticates callers, persists publishes, emits wake-ups, and owns Git
-interop. It is not a workflow engine, merge-policy service, UI, or multi-tenant
-isolation boundary.
+The native host supports named repositories. Its hosting layer authenticates
+namespace owners and provisions repository engines; each engine coordinates
+operation heads, persists publishes, emits wake-ups, and owns Git interop.
+Clients retain control of their working files. Hosted recovery is implemented;
+resource isolation and independent progress across repositories remain under
+qualification in the [hosting plan](docs/hosting-on-exe.md).
 
 ## State and authority
 
 | State | Authority | Other copies |
 | --- | --- | --- |
+| Namespace ownership and repository catalog | Bucket hosting records | Host memory is disposable |
 | Published history | Bucket WAL plus head index | Server repo is a rebuildable materialization |
 | Live operation heads | Server's jj op-heads store | Bucket index is the durable commit point |
 | Workspace files | That workspace's local disk and active writer | Published snapshots are recoverable history |
@@ -64,6 +67,13 @@ events are wake-ups: the daemon marks local state stale but never moves files
 under an active editor.
 
 ### Server
+
+The hosting layer conditionally claims namespaces in the bucket and records
+repository provisioning before opening an engine. It marks a repository ready
+only after its initial history is durable. Namespace ownership is bound to a
+signed owner credential. The protected host signing secret derives repository
+credentials and must survive replacement independently of the cache disk.
+The manager retains one engine per repository identity.
 
 The server embeds jj-lib over a normal colocated jj/Git repository. It exposes
 an authenticated HTTP API for immutable objects, operations, views, mutable
@@ -120,9 +130,10 @@ authority is enforced as a diff between server-vouched views: a workspace may
 advance its own pointer and namespaced bookmarks without gaining control of
 other workspaces or integration bookmarks.
 
-This is authorization inside a single trust domain, not hostile tenant
-isolation. Transport encryption is external, so untrusted paths require a VPN,
-tunnel, or TLS reverse proxy.
+The hosting layer checks owner authority before granting repository-wide
+access. Workspace credentials are scoped by the selected engine. Resource
+limits and hostile-tenant isolation require further qualification. Transport
+encryption is external, so untrusted paths require a VPN, tunnel, or TLS proxy.
 
 ## Git boundary
 
@@ -139,8 +150,7 @@ push directly.
   on-demand and read-only over explicitly ready work.
 - A cache-management command. Clone and workspace catch-up warm the cache;
   image baking preserves it without another product surface.
-- Built-in TLS and multi-tenant isolation. They require security boundaries
-  beyond the current one-repository deployment model.
+- Built-in TLS. The deployment proxy owns transport encryption.
 - WAL compaction and garbage collection. Reachability, retention, and safe
   deletion need an explicit design before immutable history can be removed.
 

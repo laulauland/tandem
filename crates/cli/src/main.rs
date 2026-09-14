@@ -20,6 +20,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{CommandFactory, Parser, Subcommand};
 
+mod address;
+use address::CloneTarget;
+
 // ─── Help text ────────────────────────────────────────────────────────────────
 
 const AFTER_HELP: &str = "\
@@ -168,6 +171,9 @@ enum Commands {
         /// omitted.
         #[arg(long, env = "TANDEM_ADMIN_TOKEN")]
         admin_token: Option<String>,
+        /// Serve named repositories from the bucket
+        #[arg(long, env = "TANDEM_HOSTED")]
+        hosted: bool,
     },
 
     /// Initialize a tandem-backed workspace
@@ -306,7 +312,7 @@ enum ServerCommands {
 
 // ─── Dispatch ─────────────────────────────────────────────────────────────────
 
-fn main() -> ExitCode {
+pub fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
 
     // Route tandem-specific commands through clap.
@@ -339,6 +345,7 @@ fn main() -> ExitCode {
             log_file,
             bucket,
             admin_token,
+            hosted,
         }) => run_serve(
             &listen,
             &repo,
@@ -349,6 +356,7 @@ fn main() -> ExitCode {
             log_file.as_deref(),
             bucket.as_deref(),
             admin_token.as_deref(),
+            hosted,
         ),
         Some(Commands::Init {
             server,
@@ -436,6 +444,7 @@ fn run_serve(
     log_file: Option<&str>,
     bucket: Option<&str>,
     admin_token: Option<&str>,
+    hosted: bool,
 ) -> ExitCode {
     // In daemon mode, stdout/stderr are already redirected to the log file
     // by `run_up` before spawning this process. Nothing extra needed here.
@@ -458,6 +467,7 @@ fn run_serve(
         log_file: log_file.map(|s| s.to_string()),
         bucket: bucket.map(|s| s.to_string()),
         admin_token: admin_token.map(|s| s.to_string()),
+        hosted,
     };
 
     if let Err(err) = rt.block_on(server::run_serve(opts)) {
@@ -669,6 +679,56 @@ fn run_clone(
     workspace_name: &str,
     workspace_path_str: &str,
 ) -> ExitCode {
+    let target = match CloneTarget::parse(server_addr) {
+        Ok(target) => target,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if target.name.is_some() {
+        let client = reqwest::blocking::Client::new();
+        let info = client
+            .get(format!("{}/api/info", target.base_url))
+            .bearer_auth(token)
+            .send();
+        match info {
+            Ok(response) if response.status().is_success() => {}
+            Ok(response) if response.status() == reqwest::StatusCode::NOT_FOUND => {
+                match client
+                    .put(&target.base_url)
+                    .bearer_auth(token)
+                    .body(Vec::new())
+                    .send()
+                {
+                    Ok(created) if created.status().is_success() => {}
+                    Ok(created) => {
+                        eprintln!(
+                            "error: repository creation answered HTTP {}",
+                            created.status()
+                        );
+                        return ExitCode::FAILURE;
+                    }
+                    Err(error) => {
+                        eprintln!("error: cannot create {}: {error}", target.base_url);
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            Ok(response) => {
+                eprintln!(
+                    "error: {} answered HTTP {}",
+                    target.base_url,
+                    response.status()
+                );
+                return ExitCode::FAILURE;
+            }
+            Err(error) => {
+                eprintln!("error: cannot reach {}: {error}", target.base_url);
+                return ExitCode::FAILURE;
+            }
+        }
+    }
     let settings = match load_user_settings_from_environment() {
         Ok(s) => s,
         Err(e) => {
@@ -679,7 +739,7 @@ fn run_clone(
 
     match clone_tandem_workspace(
         &settings,
-        server_addr,
+        &target.base_url,
         token,
         workspace_name,
         Path::new(workspace_path_str),

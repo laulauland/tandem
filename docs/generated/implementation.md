@@ -7,13 +7,13 @@
 
 | Package | Manifest | Publishable | Internal non-dev dependencies |
 | --- | --- | --- | --- |
-| `jj-tandem` | `crates/cli/Cargo.toml` | yes | jj-tandem-client, jj-tandem-server, jj-tandem-workspace |
+| `jj-tandem` | `crates/cli/Cargo.toml` | yes | jj-tandem-client, jj-tandem-protocol, jj-tandem-server, jj-tandem-workspace |
 | `jj-tandem-benchmarks` | `testing/benchmarks/Cargo.toml` | no | — |
 | `jj-tandem-client` | `crates/client/Cargo.toml` | yes | jj-tandem-jj, jj-tandem-protocol |
 | `jj-tandem-jj` | `crates/jj-interop/Cargo.toml` | yes | — |
 | `jj-tandem-protocol` | `crates/protocol/Cargo.toml` | yes | — |
 | `jj-tandem-repository` | `crates/repository/Cargo.toml` | yes | jj-tandem-jj, jj-tandem-protocol, jj-tandem-storage, jj-tandem-wal |
-| `jj-tandem-server` | `crates/server/Cargo.toml` | yes | jj-tandem-protocol, jj-tandem-repository |
+| `jj-tandem-server` | `crates/server/Cargo.toml` | yes | jj-tandem-protocol, jj-tandem-repository, jj-tandem-storage |
 | `jj-tandem-simulation` | `testing/simulation/Cargo.toml` | no | — |
 | `jj-tandem-storage` | `crates/storage/Cargo.toml` | yes | — |
 | `jj-tandem-test-support` | `testing/test-support/Cargo.toml` | no | jj-tandem-client, jj-tandem-protocol, jj-tandem-repository, jj-tandem-server, jj-tandem-wal, jj-tandem-workspace |
@@ -53,7 +53,9 @@ All other accepted commands are dispatched to embedded jj.
 
 ## Source modules
 
+- `crates/cli/src/address.rs`
 - `crates/cli/src/main.rs`
+- `crates/cli/src/td.rs`
 - `crates/client/src/backend.rs`
 - `crates/client/src/cache.rs`
 - `crates/client/src/env.rs`
@@ -70,6 +72,7 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/protocol/src/hex.rs`
 - `crates/protocol/src/http.rs`
 - `crates/protocol/src/lib.rs`
+- `crates/protocol/src/names.rs`
 - `crates/protocol/src/wire.rs`
 - `crates/repository/src/authority.rs`
 - `crates/repository/src/bucket.rs`
@@ -79,6 +82,7 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/repository/src/scope.rs`
 - `crates/server/src/auth.rs`
 - `crates/server/src/control.rs`
+- `crates/server/src/hosted.rs`
 - `crates/server/src/http.rs`
 - `crates/server/src/lib.rs`
 - `crates/server/src/logging.rs`
@@ -118,6 +122,7 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/cli/tests/integration/fixture_readiness.rs`
 - `crates/cli/tests/integration/git_round_trip.rs`
 - `crates/cli/tests/integration/handshake.rs`
+- `crates/cli/tests/integration/hosted_recovery.rs`
 - `crates/cli/tests/integration/http_api.rs`
 - `crates/cli/tests/integration/log_streaming.rs`
 - `crates/cli/tests/integration/up_down.rs`

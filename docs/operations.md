@@ -6,22 +6,31 @@ This document owns operator procedures. Use `tandem --help` for current flags,
 
 ## Production shape
 
-Run one Tandem server per repository on a persistent VM or container host. The
-server directory is a colocated jj/Git materialization used for Git interop;
-the bucket is the durable record of published work.
+Run one active native host under a service manager. Hosted mode stores namespace
+ownership, the repository catalog, and published history in the bucket. Each
+repository has a disposable colocated jj/Git cache beneath the host cache root.
+The current delivery and qualification status is recorded in the
+[hosting plan](hosting-on-exe.md); production deployment is a later stage.
+
+Keep the host signing secret and bucket credentials in protected configuration
+outside the VM as well as in its service environment. Losing the signing secret
+loses access through existing owner and workspace credentials. Bucket recovery
+alone does not replace that secret. Never run a replacement alongside an active
+host: stop or fence the old process first.
 
 Before admitting clients:
 
 1. Create and access-test a dedicated S3-compatible bucket or prefix. Do not
    apply object-expiration rules.
-2. Initialize or restore the server repository and configure its Git remote and
-   credentials locally.
+2. Select an empty disposable cache directory. Hosted creation provisions
+   repositories and durably initializes their history. Configure Git remotes
+   separately when upstream interoperation is needed.
 3. Supply a stable admin token through protected environment or service-secret
    storage. Do not put it in shell history, process arguments, images, or logs.
 4. Bind to a private interface, use a VPN/tunnel, or terminate TLS at a reverse
    proxy. Tandem does not encrypt HTTP itself.
 5. Run `tandem serve` under a service manager for supervised production use;
-   `tandem up` is suitable for a user-managed background process.
+   Use the generated serve help to select hosted mode.
 6. Verify status, inspect startup replay metrics, then perform a byte-level
    publish/read smoke test before distributing workspace credentials.
 
@@ -30,6 +39,13 @@ but placing it inside the server repo means one disk failure loses both the
 materialization and its supposed backup.
 
 ## Workspace access
+
+Hosted owner bootstrap requires the protected host admin credential. Save the
+returned owner credential through a protected file or environment; never capture
+the response in logs. A named clone claims its namespace and creates the
+repository when needed. Retrying creation preserves the same ownership. Owner
+credentials authorize repository access within their namespaces; clone exchanges
+that authority for the agent workspace credential.
 
 Give each active agent a unique workspace identity. `tandem clone` accepts the
 admin token and exchanges it for a scoped token, or accepts an already-scoped
@@ -64,8 +80,7 @@ its terminal output is sensitive and must not be captured as log evidence.
 All production packages share `[workspace.package].version`; every production
 path dependency also names that version in `[workspace.dependencies]`. Keep
 these in lockstep while Tandem remains pre-1.0. Do not bump internal packages
-independently. The CLI package remains `jj-tandem` and the binary remains
-`tandem`; install a source checkout with `cargo install --path crates/cli`.
+independently. The CLI package remains `jj-tandem` and provides the `td` executable alongside `tandem`; install a source checkout with `cargo install --path crates/cli`.
 
 The release skill derives a dependency-first publication order from Cargo
 metadata, checks it against architecture boundaries, and excludes non-published
