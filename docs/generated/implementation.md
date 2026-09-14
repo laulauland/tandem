@@ -149,5 +149,6 @@ unit tests remain beside their source modules.
 ## Benchmark targets
 
 - `jj-tandem-benchmarks`: `snapshot_publish_latency`
+- `jj-tandem-benchmarks`: `stage6_mixed_load`
 - `jj-tandem-benchmarks`: `tcp_commit_path`
 - `jj-tandem-benchmarks`: `tcp_inflight_throughput`

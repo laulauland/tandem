@@ -1,0 +1,2672 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-09-15T00:56:21.197037+00:00",
+  "workload": "stage6-workload.md",
+  "scope": "The frozen ten-repository, four-writer mix only; idle SSE connections do not imply active-writer capacity.",
+  "placement": {
+    "real_server": "exe.dev Dallas, 2 CPU, 8 GiB RAM",
+    "real_client": "controller physical location unverified",
+    "durable_storage": "Cloudflare R2, WEUR location hint",
+    "injected": "controller filesystem host, 50 ms added per request"
+  },
+  "runs": {
+    "baseline-real": {
+      "label": "stage6-baseline-real-fixed",
+      "manifest": "/home/laurynas/.local/state/tandem-native/benchmarks/stage6-baseline-real-fixed/manifest.json",
+      "raw_report": "/home/laurynas/.local/state/tandem-native/benchmarks/stage6-baseline-real-fixed/reports/stage6-mixed-load.json",
+      "raw_report_sha256": "8561c9210af38ea1238c97e62115d1a49514347c485e328750b4bc96314be4a1",
+      "benchmark_build": {
+        "revision": "6e9b77d9e7377f5d7382095c2816ef241d904f00",
+        "binary": "/home/laurynas/.local/state/tandem-native/benchmarks/stage6-baseline-fixed-build/stage6_mixed_load",
+        "sha256": "0eb11b2d11ead1804785f8b7f86988d5c15b413ba005ad2e2ee93a8cd933789f",
+        "builder_image": "sha256:e70e2eec3d495fd5c8e0be74adda86507dfac7f51a724fbf9813ff59b2b247c7",
+        "log": "/home/laurynas/.local/state/tandem-native/stage6-baseline-fixed-build-build-6e9b77d9e737.log",
+        "source": "/tmp/tandem-stage6-baseline-source",
+        "benchmark": "stage6_mixed_load"
+      },
+      "client_sha256": "66df7cec7b3a3a5c2eae3f9548e04fadc3b52633feeea1635fecad20881ff6df",
+      "server_sha256": "66df7cec7b3a3a5c2eae3f9548e04fadc3b52633feeea1635fecad20881ff6df",
+      "independent_server_peak_rss_kib": 238932,
+      "idle": [
+        {
+          "connections": 1,
+          "established": 1,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 1,
+              "watcher subscribed": 1
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 1,
+          "server_rss_before_kib": 33264,
+          "server_rss_delta_kib": 0,
+          "server_rss_during_kib": 33264
+        },
+        {
+          "connections": 10,
+          "established": 10,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 10,
+              "watcher subscribed": 10
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 1,
+          "server_rss_before_kib": 33136,
+          "server_rss_delta_kib": 216,
+          "server_rss_during_kib": 33352
+        },
+        {
+          "connections": 100,
+          "established": 100,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 100,
+              "watcher subscribed": 100
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 1,
+          "server_rss_before_kib": 33352,
+          "server_rss_delta_kib": 2372,
+          "server_rss_during_kib": 35724
+        },
+        {
+          "connections": 1,
+          "established": 1,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 1,
+              "watcher subscribed": 1
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 10,
+          "server_rss_before_kib": 35724,
+          "server_rss_delta_kib": -128,
+          "server_rss_during_kib": 35596
+        },
+        {
+          "connections": 10,
+          "established": 10,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 10,
+              "watcher subscribed": 10
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 10,
+          "server_rss_before_kib": 35596,
+          "server_rss_delta_kib": 24,
+          "server_rss_during_kib": 35620
+        },
+        {
+          "connections": 100,
+          "established": 100,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 100,
+              "watcher subscribed": 100
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 10,
+          "server_rss_before_kib": 35620,
+          "server_rss_delta_kib": 860,
+          "server_rss_during_kib": 36480
+        }
+      ],
+      "active": [
+        {
+          "aggregate_edit_to_durable": {
+            "p50_ms": 4553.814842,
+            "p95_ms": 5164.866788000014,
+            "p99_ms": 5279.649444000002,
+            "sample_count": 120
+          },
+          "aggregate_full_edit_to_durable": {
+            "p50_ms": 4546.165899999993,
+            "p95_ms": 5131.350633000024,
+            "p99_ms": 5479.930576999999,
+            "sample_count": 281
+          },
+          "aggregate_full_snapshot_to_ack": {
+            "p50_ms": 2534.5707939999998,
+            "p95_ms": 2960.94125,
+            "p99_ms": 3186.424889,
+            "sample_count": 281
+          },
+          "aggregate_snapshot_to_ack": {
+            "p50_ms": 2544.498626,
+            "p95_ms": 3013.627713,
+            "p99_ms": 3186.424889,
+            "sample_count": 120
+          },
+          "coordination_budgets_passed": true,
+          "coordination_metric_coverage": "Trace interval includes warmups and the full active window, excludes restart and oracle reads.",
+          "duration_ms": 240000,
+          "failures": [],
+          "input_interval_ms": 200,
+          "measurement_end_ms": 249341.987165,
+          "measurement_started_epoch_ms": 1789427769387,
+          "passed": true,
+          "profile": "burst",
+          "required_metrics_present": false,
+          "restarted_before_oracle": true,
+          "server_peak_rss_kib": 233628,
+          "server_rss_after_kib": 78728,
+          "server_rss_before_kib": 38164,
+          "smoke_override": null,
+          "unavailable_baseline_metrics": [
+            "repository lock wait/hold",
+            "admission queue depth/wait",
+            "total bucket traffic"
+          ],
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "queue_depth": {
+              "p50_requests": 0.0,
+              "p95_requests": 0.0,
+              "p99_requests": 0.0,
+              "sample_count": 315
+            },
+            "successful_publishes": 315,
+            "wal_scoped_bytes": 839483300,
+            "wal_scoped_calls": 630
+          },
+          "writers": [
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 4563.474278999998,
+                "p95_ms": 5063.861235000004,
+                "p99_ms": 5164.866788000014,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 1203,
+              "full_edit_to_durable": {
+                "p50_ms": 4608.561356999999,
+                "p95_ms": 5131.350633000024,
+                "p99_ms": 5164.866788000014,
+                "sample_count": 93
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 2572.3157570000003,
+                "p95_ms": 2873.273957,
+                "p99_ms": 3155.448673,
+                "sample_count": 93
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 2563.797748,
+                "p95_ms": 2785.1449439999997,
+                "p99_ms": 3055.092797,
+                "sample_count": 40
+              },
+              "writer": 0,
+              "attempt_count": 94,
+              "attempt_status_counts": {
+                "Unchanged": 1,
+                "published": 93
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 4613.514268999999,
+                "p95_ms": 5228.178271000004,
+                "p99_ms": 5279.649444000002,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 1203,
+              "full_edit_to_durable": {
+                "p50_ms": 4518.473104000004,
+                "p95_ms": 5127.8368279999995,
+                "p99_ms": 5279.649444000002,
+                "sample_count": 94
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 2517.006718,
+                "p95_ms": 2939.9511939999998,
+                "p99_ms": 3186.424889,
+                "sample_count": 94
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 2563.8276109999997,
+                "p95_ms": 3013.627713,
+                "p99_ms": 3186.424889,
+                "sample_count": 40
+              },
+              "writer": 1,
+              "attempt_count": 95,
+              "attempt_status_counts": {
+                "Unchanged": 1,
+                "published": 94
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 4469.829144000003,
+                "p95_ms": 5137.944286000005,
+                "p99_ms": 5479.930576999999,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 1203,
+              "full_edit_to_durable": {
+                "p50_ms": 4479.677020000003,
+                "p95_ms": 5180.19309200003,
+                "p99_ms": 5764.060719000001,
+                "sample_count": 94
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 2499.071398,
+                "p95_ms": 3061.737639,
+                "p99_ms": 3696.017299,
+                "sample_count": 94
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 2495.283031,
+                "p95_ms": 3061.737639,
+                "p99_ms": 3187.556291,
+                "sample_count": 40
+              },
+              "writer": 2,
+              "attempt_count": 95,
+              "attempt_status_counts": {
+                "Unchanged": 1,
+                "published": 94
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": null,
+              "content_verification_scope": "Exact final generation; intermediate acknowledged operations checked for reachability only",
+              "edit_to_durable": null,
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 25,
+              "full_edit_to_durable": null,
+              "full_snapshot_to_ack": null,
+              "large": true,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": null,
+              "writer": 3,
+              "observed_upload_snapshot_to_ack": {
+                "p50_ms": 9902.526087,
+                "p95_ms": 10407.839778,
+                "p99_ms": 11975.533966,
+                "sample_count": 25,
+                "scope": "All successful large uploads; observational, not subject to small-publisher latency limits."
+              },
+              "attempt_count": 25,
+              "attempt_status_counts": {
+                "published": 25
+              }
+            }
+          ]
+        },
+        {
+          "aggregate_edit_to_durable": {
+            "p50_ms": 2581.3335210000223,
+            "p95_ms": 2916.357661,
+            "p99_ms": 3234.165866999989,
+            "sample_count": 120
+          },
+          "aggregate_full_edit_to_durable": {
+            "p50_ms": 2581.3335210000223,
+            "p95_ms": 2916.357661,
+            "p99_ms": 3234.165866999989,
+            "sample_count": 120
+          },
+          "aggregate_full_snapshot_to_ack": {
+            "p50_ms": 2581.1441670000004,
+            "p95_ms": 2916.1550429999998,
+            "p99_ms": 3233.949713,
+            "sample_count": 120
+          },
+          "aggregate_snapshot_to_ack": {
+            "p50_ms": 2581.1441670000004,
+            "p95_ms": 2916.1550429999998,
+            "p99_ms": 3233.949713,
+            "sample_count": 120
+          },
+          "coordination_budgets_passed": true,
+          "coordination_metric_coverage": "Trace interval includes warmups and the full active window, excludes restart and oracle reads.",
+          "duration_ms": 200000,
+          "failures": [],
+          "input_interval_ms": 5000,
+          "measurement_end_ms": 209649.257372,
+          "measurement_started_epoch_ms": 1789428295052,
+          "passed": true,
+          "profile": "steady",
+          "required_metrics_present": false,
+          "restarted_before_oracle": true,
+          "server_peak_rss_kib": 238932,
+          "server_rss_after_kib": 108056,
+          "server_rss_before_kib": 36712,
+          "smoke_override": null,
+          "unavailable_baseline_metrics": [
+            "repository lock wait/hold",
+            "admission queue depth/wait",
+            "total bucket traffic"
+          ],
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "queue_depth": {
+              "p50_requests": 0.0,
+              "p95_requests": 0.0,
+              "p99_requests": 0.0,
+              "sample_count": 146
+            },
+            "successful_publishes": 146,
+            "wal_scoped_bytes": 570708152,
+            "wal_scoped_calls": 292
+          },
+          "writers": [
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 2597.187399999999,
+                "p95_ms": 2788.491716999997,
+                "p99_ms": 3234.165866999989,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 43,
+              "full_edit_to_durable": {
+                "p50_ms": 2597.187399999999,
+                "p95_ms": 2788.491716999997,
+                "p99_ms": 3234.165866999989,
+                "sample_count": 40
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 2596.977848,
+                "p95_ms": 2788.258642,
+                "p99_ms": 3233.949713,
+                "sample_count": 40
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 2596.977848,
+                "p95_ms": 2788.258642,
+                "p99_ms": 3233.949713,
+                "sample_count": 40
+              },
+              "writer": 0,
+              "attempt_count": 40,
+              "attempt_status_counts": {
+                "published": 40
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 2596.8974790000066,
+                "p95_ms": 2825.8590780000013,
+                "p99_ms": 2916.357661,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 43,
+              "full_edit_to_durable": {
+                "p50_ms": 2596.8974790000066,
+                "p95_ms": 2825.8590780000013,
+                "p99_ms": 2916.357661,
+                "sample_count": 40
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 2596.67361,
+                "p95_ms": 2825.658554,
+                "p99_ms": 2916.1550429999998,
+                "sample_count": 40
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 2596.67361,
+                "p95_ms": 2825.658554,
+                "p99_ms": 2916.1550429999998,
+                "sample_count": 40
+              },
+              "writer": 1,
+              "attempt_count": 40,
+              "attempt_status_counts": {
+                "published": 40
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 2559.715145000002,
+                "p95_ms": 3138.667748,
+                "p99_ms": 3359.774487999999,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 43,
+              "full_edit_to_durable": {
+                "p50_ms": 2559.715145000002,
+                "p95_ms": 3138.667748,
+                "p99_ms": 3359.774487999999,
+                "sample_count": 40
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 2559.529087,
+                "p95_ms": 3138.3989859999997,
+                "p99_ms": 3359.5477539999997,
+                "sample_count": 40
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 2559.529087,
+                "p95_ms": 3138.3989859999997,
+                "p99_ms": 3359.5477539999997,
+                "sample_count": 40
+              },
+              "writer": 2,
+              "attempt_count": 40,
+              "attempt_status_counts": {
+                "published": 40
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": null,
+              "content_verification_scope": "Exact final generation; intermediate acknowledged operations checked for reachability only",
+              "edit_to_durable": null,
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 17,
+              "full_edit_to_durable": null,
+              "full_snapshot_to_ack": null,
+              "large": true,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": null,
+              "writer": 3,
+              "observed_upload_snapshot_to_ack": {
+                "p50_ms": 10081.232007,
+                "p95_ms": 23465.748167,
+                "p99_ms": 23465.748167,
+                "sample_count": 17,
+                "scope": "All successful large uploads; observational, not subject to small-publisher latency limits."
+              },
+              "attempt_count": 17,
+              "attempt_status_counts": {
+                "published": 17
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "baseline-injected": {
+      "label": "stage6-baseline-injected",
+      "manifest": "/home/laurynas/.local/state/tandem-native/benchmarks/stage6-baseline-injected/manifest.json",
+      "raw_report": "/home/laurynas/.local/state/tandem-native/benchmarks/stage6-baseline-injected/reports/stage6-mixed-load.json",
+      "raw_report_sha256": "2c083c79d34373d7589e7048dd5a6dc4be96ccee1ea24694ad78488e87ba9828",
+      "benchmark_build": {
+        "revision": "6e9b77d9e7377f5d7382095c2816ef241d904f00",
+        "binary": "/home/laurynas/.local/state/tandem-native/benchmarks/stage6-baseline-fixed-build/stage6_mixed_load",
+        "sha256": "0eb11b2d11ead1804785f8b7f86988d5c15b413ba005ad2e2ee93a8cd933789f",
+        "builder_image": "sha256:e70e2eec3d495fd5c8e0be74adda86507dfac7f51a724fbf9813ff59b2b247c7",
+        "log": "/home/laurynas/.local/state/tandem-native/stage6-baseline-fixed-build-build-6e9b77d9e737.log",
+        "source": "/tmp/tandem-stage6-baseline-source",
+        "benchmark": "stage6_mixed_load"
+      },
+      "client_sha256": "66df7cec7b3a3a5c2eae3f9548e04fadc3b52633feeea1635fecad20881ff6df",
+      "server_sha256": "66df7cec7b3a3a5c2eae3f9548e04fadc3b52633feeea1635fecad20881ff6df",
+      "independent_server_peak_rss_kib": null,
+      "idle": [
+        {
+          "connections": 1,
+          "established": 1,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 1,
+              "watcher subscribed": 1
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 1,
+          "server_rss_before_kib": 24844,
+          "server_rss_delta_kib": 12,
+          "server_rss_during_kib": 24856
+        },
+        {
+          "connections": 10,
+          "established": 10,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 10,
+              "watcher subscribed": 10
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 1,
+          "server_rss_before_kib": 24856,
+          "server_rss_delta_kib": 220,
+          "server_rss_during_kib": 25076
+        },
+        {
+          "connections": 100,
+          "established": 100,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 100,
+              "watcher subscribed": 100
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 1,
+          "server_rss_before_kib": 25088,
+          "server_rss_delta_kib": 2440,
+          "server_rss_during_kib": 27528
+        },
+        {
+          "connections": 1,
+          "established": 1,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 1,
+              "watcher subscribed": 1
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 10,
+          "server_rss_before_kib": 27528,
+          "server_rss_delta_kib": 12,
+          "server_rss_during_kib": 27540
+        },
+        {
+          "connections": 10,
+          "established": 10,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 10,
+              "watcher subscribed": 10
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 10,
+          "server_rss_before_kib": 27540,
+          "server_rss_delta_kib": 24,
+          "server_rss_during_kib": 27564
+        },
+        {
+          "connections": 100,
+          "established": 100,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 100,
+              "watcher subscribed": 100
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 10,
+          "server_rss_before_kib": 27564,
+          "server_rss_delta_kib": 1492,
+          "server_rss_during_kib": 29056
+        }
+      ],
+      "active": [
+        {
+          "aggregate_edit_to_durable": {
+            "p50_ms": 1330.721950000001,
+            "p95_ms": 1388.9658809999964,
+            "p99_ms": 1445.985437000003,
+            "sample_count": 120
+          },
+          "aggregate_full_edit_to_durable": {
+            "p50_ms": 1338.247049000005,
+            "p95_ms": 1388.9658809999964,
+            "p99_ms": 1510.4115600000223,
+            "sample_count": 723
+          },
+          "aggregate_full_snapshot_to_ack": {
+            "p50_ms": 530.422455,
+            "p95_ms": 580.914807,
+            "p99_ms": 700.061739,
+            "sample_count": 723
+          },
+          "aggregate_snapshot_to_ack": {
+            "p50_ms": 529.505271,
+            "p95_ms": 586.370912,
+            "p99_ms": 643.592968,
+            "sample_count": 120
+          },
+          "coordination_budgets_passed": true,
+          "coordination_metric_coverage": "Trace interval includes warmups and the full active window, excludes restart and oracle reads.",
+          "duration_ms": 240000,
+          "failures": [],
+          "input_interval_ms": 200,
+          "measurement_end_ms": 241224.887484,
+          "measurement_started_epoch_ms": 1789428581693,
+          "passed": true,
+          "profile": "burst",
+          "required_metrics_present": false,
+          "restarted_before_oracle": true,
+          "server_peak_rss_kib": 201360,
+          "server_rss_after_kib": 38660,
+          "server_rss_before_kib": 30580,
+          "smoke_override": null,
+          "unavailable_baseline_metrics": [
+            "repository lock wait/hold",
+            "admission queue depth/wait",
+            "total bucket traffic"
+          ],
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "queue_depth": {
+              "p50_requests": 0.0,
+              "p95_requests": 0.0,
+              "p99_requests": 0.0,
+              "sample_count": 967
+            },
+            "successful_publishes": 967,
+            "wal_scoped_bytes": 7887016040,
+            "wal_scoped_calls": 1934
+          },
+          "writers": [
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 1327.1811619999999,
+                "p95_ms": 1381.6084619999965,
+                "p99_ms": 1445.985437000003,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 1203,
+              "full_edit_to_durable": {
+                "p50_ms": 1338.731553999969,
+                "p95_ms": 1385.612901000015,
+                "p99_ms": 1505.3172949999862,
+                "sample_count": 241
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 531.4850829999999,
+                "p95_ms": 578.969281,
+                "p99_ms": 689.4902440000001,
+                "sample_count": 241
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 526.1565350000001,
+                "p95_ms": 578.969281,
+                "p99_ms": 643.592968,
+                "sample_count": 40
+              },
+              "writer": 0,
+              "attempt_count": 241,
+              "attempt_status_counts": {
+                "published": 241
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 1332.597608,
+                "p95_ms": 1388.9658809999964,
+                "p99_ms": 1446.0013769999932,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 1203,
+              "full_edit_to_durable": {
+                "p50_ms": 1338.2787510000344,
+                "p95_ms": 1389.5984860000171,
+                "p99_ms": 1505.338695000013,
+                "sample_count": 241
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 530.831153,
+                "p95_ms": 582.426549,
+                "p99_ms": 689.4670309999999,
+                "sample_count": 241
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 530.869111,
+                "p95_ms": 586.370912,
+                "p99_ms": 643.64247,
+                "sample_count": 40
+              },
+              "writer": 1,
+              "attempt_count": 241,
+              "attempt_status_counts": {
+                "published": 241
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 1330.721950000001,
+                "p95_ms": 1381.6041540000006,
+                "p99_ms": 1417.3887560000003,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 1203,
+              "full_edit_to_durable": {
+                "p50_ms": 1337.7568710000196,
+                "p95_ms": 1386.9506090000068,
+                "p99_ms": 1515.899148000026,
+                "sample_count": 241
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 528.666298,
+                "p95_ms": 578.9387449999999,
+                "p99_ms": 702.014906,
+                "sample_count": 241
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 529.49953,
+                "p95_ms": 578.9387449999999,
+                "p99_ms": 615.883206,
+                "sample_count": 40
+              },
+              "writer": 2,
+              "attempt_count": 241,
+              "attempt_status_counts": {
+                "published": 241
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": null,
+              "content_verification_scope": "Exact final generation; intermediate acknowledged operations checked for reachability only",
+              "edit_to_durable": null,
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 235,
+              "full_edit_to_durable": null,
+              "full_snapshot_to_ack": null,
+              "large": true,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": null,
+              "writer": 3,
+              "observed_upload_snapshot_to_ack": {
+                "p50_ms": 988.895706,
+                "p95_ms": 1070.2056579999999,
+                "p99_ms": 1241.0715169999999,
+                "sample_count": 235,
+                "scope": "All successful large uploads; observational, not subject to small-publisher latency limits."
+              },
+              "attempt_count": 235,
+              "attempt_status_counts": {
+                "published": 235
+              }
+            }
+          ]
+        },
+        {
+          "aggregate_edit_to_durable": {
+            "p50_ms": 544.450079000002,
+            "p95_ms": 575.3021370000206,
+            "p99_ms": 586.529286999983,
+            "sample_count": 120
+          },
+          "aggregate_full_edit_to_durable": {
+            "p50_ms": 544.450079000002,
+            "p95_ms": 575.3021370000206,
+            "p99_ms": 586.529286999983,
+            "sample_count": 120
+          },
+          "aggregate_full_snapshot_to_ack": {
+            "p50_ms": 531.602287,
+            "p95_ms": 558.918478,
+            "p99_ms": 578.4223939999999,
+            "sample_count": 120
+          },
+          "aggregate_snapshot_to_ack": {
+            "p50_ms": 531.602287,
+            "p95_ms": 558.918478,
+            "p99_ms": 578.4223939999999,
+            "sample_count": 120
+          },
+          "coordination_budgets_passed": true,
+          "coordination_metric_coverage": "Trace interval includes warmups and the full active window, excludes restart and oracle reads.",
+          "duration_ms": 200000,
+          "failures": [],
+          "input_interval_ms": 5000,
+          "measurement_end_ms": 196341.633255,
+          "measurement_started_epoch_ms": 1789428981989,
+          "passed": true,
+          "profile": "steady",
+          "required_metrics_present": false,
+          "restarted_before_oracle": true,
+          "server_peak_rss_kib": 198060,
+          "server_rss_after_kib": 34084,
+          "server_rss_before_kib": 25840,
+          "smoke_override": null,
+          "unavailable_baseline_metrics": [
+            "repository lock wait/hold",
+            "admission queue depth/wait",
+            "total bucket traffic"
+          ],
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "queue_depth": {
+              "p50_requests": 0.0,
+              "p95_requests": 0.0,
+              "p99_requests": 0.0,
+              "sample_count": 327
+            },
+            "successful_publishes": 327,
+            "wal_scoped_bytes": 6644235528,
+            "wal_scoped_calls": 654
+          },
+          "writers": [
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 540.7775719999918,
+                "p95_ms": 572.6402600000001,
+                "p99_ms": 586.529286999983,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 43,
+              "full_edit_to_durable": {
+                "p50_ms": 540.7775719999918,
+                "p95_ms": 572.6402600000001,
+                "p99_ms": 586.529286999983,
+                "sample_count": 40
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 530.292128,
+                "p95_ms": 558.918478,
+                "p99_ms": 574.774391,
+                "sample_count": 40
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 530.292128,
+                "p95_ms": 558.918478,
+                "p99_ms": 574.774391,
+                "sample_count": 40
+              },
+              "writer": 0,
+              "attempt_count": 40,
+              "attempt_status_counts": {
+                "published": 40
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 542.8502989999997,
+                "p95_ms": 575.1733939999976,
+                "p99_ms": 599.1906869999948,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 43,
+              "full_edit_to_durable": {
+                "p50_ms": 542.8502989999997,
+                "p95_ms": 575.1733939999976,
+                "p99_ms": 599.1906869999948,
+                "sample_count": 40
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 527.9556680000001,
+                "p95_ms": 557.472203,
+                "p99_ms": 598.70586,
+                "sample_count": 40
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 527.9556680000001,
+                "p95_ms": 557.472203,
+                "p99_ms": 598.70586,
+                "sample_count": 40
+              },
+              "writer": 1,
+              "attempt_count": 40,
+              "attempt_status_counts": {
+                "published": 40
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 545.6470429999754,
+                "p95_ms": 575.3132170000172,
+                "p99_ms": 578.9836130000185,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 43,
+              "full_edit_to_durable": {
+                "p50_ms": 545.6470429999754,
+                "p95_ms": 575.3132170000172,
+                "p99_ms": 578.9836130000185,
+                "sample_count": 40
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 534.642913,
+                "p95_ms": 554.496413,
+                "p99_ms": 578.4223939999999,
+                "sample_count": 40
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 534.642913,
+                "p95_ms": 554.496413,
+                "p99_ms": 578.4223939999999,
+                "sample_count": 40
+              },
+              "writer": 2,
+              "attempt_count": 40,
+              "attempt_status_counts": {
+                "published": 40
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": null,
+              "content_verification_scope": "Exact final generation; intermediate acknowledged operations checked for reachability only",
+              "edit_to_durable": null,
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 198,
+              "full_edit_to_durable": null,
+              "full_snapshot_to_ack": null,
+              "large": true,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": null,
+              "writer": 3,
+              "observed_upload_snapshot_to_ack": {
+                "p50_ms": 972.6096640000001,
+                "p95_ms": 1022.941721,
+                "p99_ms": 1124.885918,
+                "sample_count": 198,
+                "scope": "All successful large uploads; observational, not subject to small-publisher latency limits."
+              },
+              "attempt_count": 198,
+              "attempt_status_counts": {
+                "published": 198
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "candidate-real": {
+      "label": "stage6-candidate2-real",
+      "manifest": "/home/laurynas/.local/state/tandem-native/benchmarks/stage6-candidate2-real/manifest.json",
+      "raw_report": "/home/laurynas/.local/state/tandem-native/benchmarks/stage6-candidate2-real/reports/stage6-mixed-load.json",
+      "raw_report_sha256": "c96d772afe438371cb9703e86ba6567eb5abfa0059ee27803855639f141ef2e0",
+      "benchmark_build": {
+        "revision": "f0068fdcd96ffc646fc6dbbf2f3bd0cfbe87c55b",
+        "binary": "/home/laurynas/.local/state/tandem-native/benchmarks/stage6-candidate2-build/stage6_mixed_load",
+        "sha256": "929536d9f665c8299428832d6b834f6abbf3cea95adaeea5be3eb8732a88bc23",
+        "builder_image": "sha256:e70e2eec3d495fd5c8e0be74adda86507dfac7f51a724fbf9813ff59b2b247c7",
+        "log": "/home/laurynas/.local/state/tandem-native/stage6-candidate2-build-build-f0068fdcd96f.log",
+        "source": "/home/laurynas/code/laulauland/tandem",
+        "benchmark": "stage6_mixed_load"
+      },
+      "client_sha256": "aa9478cc5cb4506c50e357bc6d1f187f4b5be900e8934543e6e52545d1ce4a7d",
+      "server_sha256": "aa9478cc5cb4506c50e357bc6d1f187f4b5be900e8934543e6e52545d1ce4a7d",
+      "independent_server_peak_rss_kib": 202908,
+      "idle": [
+        {
+          "connections": 1,
+          "established": 1,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 1,
+              "watcher subscribed": 1
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 1,
+          "server_rss_before_kib": 32760,
+          "server_rss_delta_kib": 16,
+          "server_rss_during_kib": 32776
+        },
+        {
+          "connections": 10,
+          "established": 10,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 10,
+              "watcher subscribed": 10
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 1,
+          "server_rss_before_kib": 32776,
+          "server_rss_delta_kib": 232,
+          "server_rss_during_kib": 33008
+        },
+        {
+          "connections": 100,
+          "established": 100,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 100,
+              "watcher subscribed": 100
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 1,
+          "server_rss_before_kib": 33008,
+          "server_rss_delta_kib": 2468,
+          "server_rss_during_kib": 35476
+        },
+        {
+          "connections": 1,
+          "established": 1,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 1,
+              "watcher subscribed": 1
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 10,
+          "server_rss_before_kib": 35476,
+          "server_rss_delta_kib": -128,
+          "server_rss_during_kib": 35348
+        },
+        {
+          "connections": 10,
+          "established": 10,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 10,
+              "watcher subscribed": 10
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 10,
+          "server_rss_before_kib": 35348,
+          "server_rss_delta_kib": 36,
+          "server_rss_during_kib": 35384
+        },
+        {
+          "connections": 100,
+          "established": 100,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 100,
+              "watcher subscribed": 100
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 10,
+          "server_rss_before_kib": 35384,
+          "server_rss_delta_kib": 792,
+          "server_rss_during_kib": 36176
+        }
+      ],
+      "active": [
+        {
+          "aggregate_edit_to_durable": {
+            "p50_ms": 5002.425644999996,
+            "p95_ms": 5852.177091999991,
+            "p99_ms": 6437.788057,
+            "sample_count": 120
+          },
+          "aggregate_full_edit_to_durable": {
+            "p50_ms": 5002.425644999996,
+            "p95_ms": 5741.140788999997,
+            "p99_ms": 6255.319390999997,
+            "sample_count": 252
+          },
+          "aggregate_full_snapshot_to_ack": {
+            "p50_ms": 2814.597689,
+            "p95_ms": 3395.939444,
+            "p99_ms": 3752.3406370000002,
+            "sample_count": 252
+          },
+          "aggregate_snapshot_to_ack": {
+            "p50_ms": 2842.174332,
+            "p95_ms": 3481.592795,
+            "p99_ms": 3879.166258,
+            "sample_count": 120
+          },
+          "coordination_budgets_passed": true,
+          "coordination_metric_coverage": "Trace interval includes warmups and the full active window, excludes restart and oracle reads.",
+          "duration_ms": 240000,
+          "failures": [],
+          "input_interval_ms": 200,
+          "measurement_end_ms": 246822.94635900002,
+          "measurement_started_epoch_ms": 1789432149860,
+          "passed": true,
+          "profile": "burst",
+          "required_metrics_present": true,
+          "restarted_before_oracle": true,
+          "server_peak_rss_kib": 194848,
+          "server_rss_after_kib": 91840,
+          "server_rss_before_kib": 38144,
+          "smoke_override": null,
+          "unavailable_baseline_metrics": [],
+          "observations": {
+            "admission_wait": {
+              "p50_ms": 0.0,
+              "p95_ms": 0.0,
+              "p99_ms": 0.0,
+              "sample_count": 286
+            },
+            "bucket_attempted_write_payload_bytes": 839522786,
+            "bucket_calls": 858,
+            "bucket_mutating_calls": 572,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "lock_hold": {
+              "p50_ms": 0.0,
+              "p95_ms": 1705.0,
+              "p99_ms": 3685.0,
+              "sample_count": 582
+            },
+            "lock_wait": {
+              "p50_ms": 0.0,
+              "p95_ms": 0.0,
+              "p99_ms": 0.0,
+              "sample_count": 582
+            },
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "queue_depth": {
+              "p50_requests": 0.0,
+              "p95_requests": 0.0,
+              "p99_requests": 0.0,
+              "sample_count": 286
+            },
+            "successful_publishes": 286,
+            "wal_scoped_bytes": 839423560,
+            "wal_scoped_calls": 572
+          },
+          "writers": [
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 4947.381347000002,
+                "p95_ms": 5518.200014000002,
+                "p99_ms": 5770.020585999991,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 1203,
+              "full_edit_to_durable": {
+                "p50_ms": 4947.381347000002,
+                "p95_ms": 5518.200014000002,
+                "p99_ms": 6255.319390999997,
+                "sample_count": 85
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 2749.861341,
+                "p95_ms": 3375.086756,
+                "p99_ms": 3481.592795,
+                "sample_count": 85
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 2791.6688289999997,
+                "p95_ms": 3137.876613,
+                "p99_ms": 3481.592795,
+                "sample_count": 40
+              },
+              "writer": 0,
+              "attempt_count": 86,
+              "attempt_status_counts": {
+                "Unchanged": 1,
+                "published": 85
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 5059.371784000003,
+                "p95_ms": 6005.154773,
+                "p99_ms": 6472.193171000003,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 1203,
+              "full_edit_to_durable": {
+                "p50_ms": 5132.96652799999,
+                "p95_ms": 5825.439451999991,
+                "p99_ms": 6472.193171000003,
+                "sample_count": 82
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 2919.871031,
+                "p95_ms": 3411.574413,
+                "p99_ms": 4172.933451,
+                "sample_count": 82
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 2900.470999,
+                "p95_ms": 3733.304489,
+                "p99_ms": 4172.933451,
+                "sample_count": 40
+              },
+              "writer": 1,
+              "attempt_count": 83,
+              "attempt_status_counts": {
+                "Unchanged": 1,
+                "published": 82
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 4971.484498000005,
+                "p95_ms": 5852.177091999991,
+                "p99_ms": 6437.788057,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 1203,
+              "full_edit_to_durable": {
+                "p50_ms": 4944.175740000006,
+                "p95_ms": 5741.140788999997,
+                "p99_ms": 6437.788057,
+                "sample_count": 85
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 2759.8087339999997,
+                "p95_ms": 3385.174531,
+                "p99_ms": 3879.166258,
+                "sample_count": 85
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 2782.647457,
+                "p95_ms": 3513.3234820000002,
+                "p99_ms": 3879.166258,
+                "sample_count": 40
+              },
+              "writer": 2,
+              "attempt_count": 85,
+              "attempt_status_counts": {
+                "published": 85
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": null,
+              "content_verification_scope": "Exact final generation; intermediate acknowledged operations checked for reachability only",
+              "edit_to_durable": null,
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 25,
+              "full_edit_to_durable": null,
+              "full_snapshot_to_ack": null,
+              "large": true,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": null,
+              "writer": 3,
+              "observed_upload_snapshot_to_ack": {
+                "p50_ms": 9729.50612,
+                "p95_ms": 10492.513388000001,
+                "p99_ms": 10658.180183,
+                "sample_count": 25,
+                "scope": "All successful large uploads; observational, not subject to small-publisher latency limits."
+              },
+              "attempt_count": 25,
+              "attempt_status_counts": {
+                "published": 25
+              }
+            }
+          ]
+        },
+        {
+          "aggregate_edit_to_durable": {
+            "p50_ms": 2797.0326080000013,
+            "p95_ms": 3945.3947510000144,
+            "p99_ms": 4329.466984000028,
+            "sample_count": 120
+          },
+          "aggregate_full_edit_to_durable": {
+            "p50_ms": 2797.0326080000013,
+            "p95_ms": 3945.3947510000144,
+            "p99_ms": 4329.466984000028,
+            "sample_count": 120
+          },
+          "aggregate_full_snapshot_to_ack": {
+            "p50_ms": 2796.740883,
+            "p95_ms": 3945.109738,
+            "p99_ms": 4329.226996,
+            "sample_count": 120
+          },
+          "aggregate_snapshot_to_ack": {
+            "p50_ms": 2796.740883,
+            "p95_ms": 3945.109738,
+            "p99_ms": 4329.226996,
+            "sample_count": 120
+          },
+          "coordination_budgets_passed": true,
+          "coordination_metric_coverage": "Trace interval includes warmups and the full active window, excludes restart and oracle reads.",
+          "duration_ms": 200000,
+          "failures": [],
+          "input_interval_ms": 5000,
+          "measurement_end_ms": 205939.20763299998,
+          "measurement_started_epoch_ms": 1789432643138,
+          "passed": true,
+          "profile": "steady",
+          "required_metrics_present": true,
+          "restarted_before_oracle": true,
+          "server_peak_rss_kib": 202908,
+          "server_rss_after_kib": 98200,
+          "server_rss_before_kib": 37024,
+          "smoke_override": null,
+          "unavailable_baseline_metrics": [],
+          "observations": {
+            "admission_wait": {
+              "p50_ms": 0.0,
+              "p95_ms": 0.0,
+              "p99_ms": 0.0,
+              "sample_count": 149
+            },
+            "bucket_attempted_write_payload_bytes": 671426147,
+            "bucket_calls": 447,
+            "bucket_mutating_calls": 298,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "lock_hold": {
+              "p50_ms": 0.0,
+              "p95_ms": 3470.0,
+              "p99_ms": 4274.0,
+              "sample_count": 306
+            },
+            "lock_wait": {
+              "p50_ms": 0.0,
+              "p95_ms": 0.0,
+              "p99_ms": 0.0,
+              "sample_count": 306
+            },
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "queue_depth": {
+              "p50_requests": 0.0,
+              "p95_requests": 0.0,
+              "p99_requests": 0.0,
+              "sample_count": 149
+            },
+            "successful_publishes": 149,
+            "wal_scoped_bytes": 671374460,
+            "wal_scoped_calls": 298
+          },
+          "writers": [
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 2827.7912059999944,
+                "p95_ms": 3981.587560999993,
+                "p99_ms": 4805.343939999992,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 43,
+              "full_edit_to_durable": {
+                "p50_ms": 2827.7912059999944,
+                "p95_ms": 3981.587560999993,
+                "p99_ms": 4805.343939999992,
+                "sample_count": 40
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 2827.500864,
+                "p95_ms": 3981.2509330000003,
+                "p99_ms": 4805.112377,
+                "sample_count": 40
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 2827.500864,
+                "p95_ms": 3981.2509330000003,
+                "p99_ms": 4805.112377,
+                "sample_count": 40
+              },
+              "writer": 0,
+              "attempt_count": 40,
+              "attempt_status_counts": {
+                "published": 40
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 2759.9675519999873,
+                "p95_ms": 3715.8418519999977,
+                "p99_ms": 4329.466984000028,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 43,
+              "full_edit_to_durable": {
+                "p50_ms": 2759.9675519999873,
+                "p95_ms": 3715.8418519999977,
+                "p99_ms": 4329.466984000028,
+                "sample_count": 40
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 2759.606787,
+                "p95_ms": 3715.535218,
+                "p99_ms": 4329.226996,
+                "sample_count": 40
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 2759.606787,
+                "p95_ms": 3715.535218,
+                "p99_ms": 4329.226996,
+                "sample_count": 40
+              },
+              "writer": 1,
+              "attempt_count": 40,
+              "attempt_status_counts": {
+                "published": 40
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 2785.81078,
+                "p95_ms": 3910.624982,
+                "p99_ms": 4063.1364189999877,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 43,
+              "full_edit_to_durable": {
+                "p50_ms": 2785.81078,
+                "p95_ms": 3910.624982,
+                "p99_ms": 4063.1364189999877,
+                "sample_count": 40
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 2785.5248760000004,
+                "p95_ms": 3910.228842,
+                "p99_ms": 4062.886892,
+                "sample_count": 40
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 2785.5248760000004,
+                "p95_ms": 3910.228842,
+                "p99_ms": 4062.886892,
+                "sample_count": 40
+              },
+              "writer": 2,
+              "attempt_count": 40,
+              "attempt_status_counts": {
+                "published": 40
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": null,
+              "content_verification_scope": "Exact final generation; intermediate acknowledged operations checked for reachability only",
+              "edit_to_durable": null,
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 20,
+              "full_edit_to_durable": null,
+              "full_snapshot_to_ack": null,
+              "large": true,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": null,
+              "writer": 3,
+              "observed_upload_snapshot_to_ack": {
+                "p50_ms": 9995.745144,
+                "p95_ms": 11313.044154,
+                "p99_ms": 11793.122806,
+                "sample_count": 20,
+                "scope": "All successful large uploads; observational, not subject to small-publisher latency limits."
+              },
+              "attempt_count": 20,
+              "attempt_status_counts": {
+                "published": 20
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "candidate-injected": {
+      "label": "stage6-candidate2-injected",
+      "manifest": "/home/laurynas/.local/state/tandem-native/benchmarks/stage6-candidate2-injected/manifest.json",
+      "raw_report": "/home/laurynas/.local/state/tandem-native/benchmarks/stage6-candidate2-injected/reports/stage6-mixed-load.json",
+      "raw_report_sha256": "b725793f816521040a7824d2433c920de758d2f6940dc9cd622b1cae31c6a446",
+      "benchmark_build": {
+        "revision": "f0068fdcd96ffc646fc6dbbf2f3bd0cfbe87c55b",
+        "binary": "/home/laurynas/.local/state/tandem-native/benchmarks/stage6-candidate2-build/stage6_mixed_load",
+        "sha256": "929536d9f665c8299428832d6b834f6abbf3cea95adaeea5be3eb8732a88bc23",
+        "builder_image": "sha256:e70e2eec3d495fd5c8e0be74adda86507dfac7f51a724fbf9813ff59b2b247c7",
+        "log": "/home/laurynas/.local/state/tandem-native/stage6-candidate2-build-build-f0068fdcd96f.log",
+        "source": "/home/laurynas/code/laulauland/tandem",
+        "benchmark": "stage6_mixed_load"
+      },
+      "client_sha256": "aa9478cc5cb4506c50e357bc6d1f187f4b5be900e8934543e6e52545d1ce4a7d",
+      "server_sha256": "aa9478cc5cb4506c50e357bc6d1f187f4b5be900e8934543e6e52545d1ce4a7d",
+      "independent_server_peak_rss_kib": null,
+      "idle": [
+        {
+          "connections": 1,
+          "established": 1,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 1,
+              "watcher subscribed": 1
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 1,
+          "server_rss_before_kib": 25324,
+          "server_rss_delta_kib": 12,
+          "server_rss_during_kib": 25336
+        },
+        {
+          "connections": 10,
+          "established": 10,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 10,
+              "watcher subscribed": 10
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 1,
+          "server_rss_before_kib": 25336,
+          "server_rss_delta_kib": 204,
+          "server_rss_during_kib": 25540
+        },
+        {
+          "connections": 100,
+          "established": 100,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 100,
+              "watcher subscribed": 100
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 1,
+          "server_rss_before_kib": 25540,
+          "server_rss_delta_kib": 2736,
+          "server_rss_during_kib": 28276
+        },
+        {
+          "connections": 1,
+          "established": 1,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 1,
+              "watcher subscribed": 1
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 10,
+          "server_rss_before_kib": 28276,
+          "server_rss_delta_kib": 0,
+          "server_rss_during_kib": 28276
+        },
+        {
+          "connections": 10,
+          "established": 10,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 10,
+              "watcher subscribed": 10
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 10,
+          "server_rss_before_kib": 28276,
+          "server_rss_delta_kib": 24,
+          "server_rss_during_kib": 28300
+        },
+        {
+          "connections": 100,
+          "established": 100,
+          "failures": [],
+          "hold_ms": 2000,
+          "observations": {
+            "admission_wait": null,
+            "bucket_attempted_write_payload_bytes": 0,
+            "bucket_calls": 0,
+            "bucket_mutating_calls": 0,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "event_counts": {
+              "hosted request": 100,
+              "watcher subscribed": 100
+            },
+            "lock_hold": null,
+            "lock_wait": null,
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "observed_operation_attempts": {},
+            "queue_depth": null,
+            "successful_publishes": 0,
+            "wal_scoped_bytes": 0,
+            "wal_scoped_calls": 0
+          },
+          "passed": true,
+          "repositories": 10,
+          "server_rss_before_kib": 28300,
+          "server_rss_delta_kib": 1328,
+          "server_rss_during_kib": 29628
+        }
+      ],
+      "active": [
+        {
+          "aggregate_edit_to_durable": {
+            "p50_ms": 1160.549856000005,
+            "p95_ms": 1193.8519330000017,
+            "p99_ms": 1360.8536630000017,
+            "sample_count": 120
+          },
+          "aggregate_full_edit_to_durable": {
+            "p50_ms": 1167.3375179999857,
+            "p95_ms": 1192.7308730000223,
+            "p99_ms": 1364.0044500000004,
+            "sample_count": 723
+          },
+          "aggregate_full_snapshot_to_ack": {
+            "p50_ms": 559.336947,
+            "p95_ms": 576.475498,
+            "p99_ms": 603.059605,
+            "sample_count": 723
+          },
+          "aggregate_snapshot_to_ack": {
+            "p50_ms": 558.322725,
+            "p95_ms": 572.938367,
+            "p99_ms": 587.219968,
+            "sample_count": 120
+          },
+          "coordination_budgets_passed": true,
+          "coordination_metric_coverage": "Trace interval includes warmups and the full active window, excludes restart and oracle reads.",
+          "duration_ms": 240000,
+          "failures": [],
+          "input_interval_ms": 200,
+          "measurement_end_ms": 241084.147174,
+          "measurement_started_epoch_ms": 1789432964198,
+          "passed": true,
+          "profile": "burst",
+          "required_metrics_present": true,
+          "restarted_before_oracle": true,
+          "server_peak_rss_kib": 174564,
+          "server_rss_after_kib": 38764,
+          "server_rss_before_kib": 31832,
+          "smoke_override": null,
+          "unavailable_baseline_metrics": [],
+          "observations": {
+            "admission_wait": {
+              "p50_ms": 0.0,
+              "p95_ms": 0.0,
+              "p99_ms": 0.0,
+              "sample_count": 970
+            },
+            "bucket_attempted_write_payload_bytes": 7988019456,
+            "bucket_calls": 2910,
+            "bucket_mutating_calls": 1940,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "lock_hold": {
+              "p50_ms": 0.0,
+              "p95_ms": 11.0,
+              "p99_ms": 15.0,
+              "sample_count": 1948
+            },
+            "lock_wait": {
+              "p50_ms": 0.0,
+              "p95_ms": 0.0,
+              "p99_ms": 0.0,
+              "sample_count": 1948
+            },
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "queue_depth": {
+              "p50_requests": 0.0,
+              "p95_requests": 0.0,
+              "p99_requests": 0.0,
+              "sample_count": 970
+            },
+            "successful_publishes": 970,
+            "wal_scoped_bytes": 7987682288,
+            "wal_scoped_calls": 1940
+          },
+          "writers": [
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 1161.5771189999996,
+                "p95_ms": 1189.219597000003,
+                "p99_ms": 1365.420089,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 1203,
+              "full_edit_to_durable": {
+                "p50_ms": 1167.409246000003,
+                "p95_ms": 1192.6775049999997,
+                "p99_ms": 1359.2752929999988,
+                "sample_count": 241
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 559.8475659999999,
+                "p95_ms": 576.475498,
+                "p99_ms": 605.6611079999999,
+                "sample_count": 241
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 560.498622,
+                "p95_ms": 574.210926,
+                "p99_ms": 587.219968,
+                "sample_count": 40
+              },
+              "writer": 0,
+              "attempt_count": 241,
+              "attempt_status_counts": {
+                "published": 241
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 1159.4812739999998,
+                "p95_ms": 1175.9757940000054,
+                "p99_ms": 1360.8536630000017,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 1203,
+              "full_edit_to_durable": {
+                "p50_ms": 1167.5090090000012,
+                "p95_ms": 1192.4709680000087,
+                "p99_ms": 1364.0117850000024,
+                "sample_count": 241
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 559.208247,
+                "p95_ms": 573.796857,
+                "p99_ms": 600.872158,
+                "sample_count": 241
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 557.947413,
+                "p95_ms": 568.331689,
+                "p99_ms": 573.138082,
+                "sample_count": 40
+              },
+              "writer": 1,
+              "attempt_count": 241,
+              "attempt_status_counts": {
+                "published": 241
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 1160.151883000006,
+                "p95_ms": 1193.8519330000017,
+                "p99_ms": 1360.8171470000002,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 1203,
+              "full_edit_to_durable": {
+                "p50_ms": 1166.820549000011,
+                "p95_ms": 1193.8519330000017,
+                "p99_ms": 1364.0044500000004,
+                "sample_count": 241
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 559.061874,
+                "p95_ms": 577.779784,
+                "p99_ms": 591.822319,
+                "sample_count": 241
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 557.9048829999999,
+                "p95_ms": 572.938367,
+                "p99_ms": 591.822319,
+                "sample_count": 40
+              },
+              "writer": 2,
+              "attempt_count": 241,
+              "attempt_status_counts": {
+                "published": 241
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": null,
+              "content_verification_scope": "Exact final generation; intermediate acknowledged operations checked for reachability only",
+              "edit_to_durable": null,
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 238,
+              "full_edit_to_durable": null,
+              "full_snapshot_to_ack": null,
+              "large": true,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": null,
+              "writer": 3,
+              "observed_upload_snapshot_to_ack": {
+                "p50_ms": 984.865557,
+                "p95_ms": 1039.6593480000001,
+                "p99_ms": 1070.681433,
+                "sample_count": 238,
+                "scope": "All successful large uploads; observational, not subject to small-publisher latency limits."
+              },
+              "attempt_count": 238,
+              "attempt_status_counts": {
+                "published": 238
+              }
+            }
+          ]
+        },
+        {
+          "aggregate_edit_to_durable": {
+            "p50_ms": 579.5003460000007,
+            "p95_ms": 609.3888019999722,
+            "p99_ms": 630.8373739999661,
+            "sample_count": 120
+          },
+          "aggregate_full_edit_to_durable": {
+            "p50_ms": 579.5003460000007,
+            "p95_ms": 609.3888019999722,
+            "p99_ms": 630.8373739999661,
+            "sample_count": 120
+          },
+          "aggregate_full_snapshot_to_ack": {
+            "p50_ms": 568.352556,
+            "p95_ms": 593.4694910000001,
+            "p99_ms": 607.612652,
+            "sample_count": 120
+          },
+          "aggregate_snapshot_to_ack": {
+            "p50_ms": 568.352556,
+            "p95_ms": 593.4694910000001,
+            "p99_ms": 607.612652,
+            "sample_count": 120
+          },
+          "coordination_budgets_passed": true,
+          "coordination_metric_coverage": "Trace interval includes warmups and the full active window, excludes restart and oracle reads.",
+          "duration_ms": 200000,
+          "failures": [],
+          "input_interval_ms": 5000,
+          "measurement_end_ms": 195645.18396899998,
+          "measurement_started_epoch_ms": 1789433364093,
+          "passed": true,
+          "profile": "steady",
+          "required_metrics_present": true,
+          "restarted_before_oracle": true,
+          "server_peak_rss_kib": 164240,
+          "server_rss_after_kib": 44236,
+          "server_rss_before_kib": 27564,
+          "smoke_override": null,
+          "unavailable_baseline_metrics": [],
+          "observations": {
+            "admission_wait": {
+              "p50_ms": 0.0,
+              "p95_ms": 0.0,
+              "p99_ms": 0.0,
+              "sample_count": 314
+            },
+            "bucket_attempted_write_payload_bytes": 6208124153,
+            "bucket_calls": 942,
+            "bucket_mutating_calls": 628,
+            "bucket_read_payload_bytes": 0,
+            "coverage": "bucket_calls/read/write count emitted ObjectStore boundary operations and payload bytes, not transport headers or backend-internal retries. wal_scoped fields cover WAL only. Zero absent fields do not establish instrumentation availability.",
+            "lock_hold": {
+              "p50_ms": 0.0,
+              "p95_ms": 15.0,
+              "p99_ms": 17.0,
+              "sample_count": 636
+            },
+            "lock_wait": {
+              "p50_ms": 0.0,
+              "p95_ms": 0.0,
+              "p99_ms": 0.0,
+              "sample_count": 636
+            },
+            "maximum_observed_cas_retries": 0,
+            "maximum_queue_depth": 0,
+            "queue_depth": {
+              "p50_requests": 0.0,
+              "p95_requests": 0.0,
+              "p99_requests": 0.0,
+              "sample_count": 314
+            },
+            "successful_publishes": 314,
+            "wal_scoped_bytes": 6208015120,
+            "wal_scoped_calls": 628
+          },
+          "writers": [
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 579.5003460000007,
+                "p95_ms": 604.6587129999971,
+                "p99_ms": 630.8373739999661,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 43,
+              "full_edit_to_durable": {
+                "p50_ms": 579.5003460000007,
+                "p95_ms": 604.6587129999971,
+                "p99_ms": 630.8373739999661,
+                "sample_count": 40
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 570.306879,
+                "p95_ms": 593.4694910000001,
+                "p99_ms": 607.612652,
+                "sample_count": 40
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 570.306879,
+                "p95_ms": 593.4694910000001,
+                "p99_ms": 607.612652,
+                "sample_count": 40
+              },
+              "writer": 0,
+              "attempt_count": 40,
+              "attempt_status_counts": {
+                "published": 40
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 579.5044639999978,
+                "p95_ms": 611.1431910000101,
+                "p99_ms": 635.5486479999963,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 43,
+              "full_edit_to_durable": {
+                "p50_ms": 579.5044639999978,
+                "p95_ms": 611.1431910000101,
+                "p99_ms": 635.5486479999963,
+                "sample_count": 40
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 567.672755,
+                "p95_ms": 600.535489,
+                "p99_ms": 612.554658,
+                "sample_count": 40
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 567.672755,
+                "p95_ms": 600.535489,
+                "p99_ms": 612.554658,
+                "sample_count": 40
+              },
+              "writer": 1,
+              "attempt_count": 40,
+              "attempt_status_counts": {
+                "published": 40
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": true,
+              "content_verification_scope": "Exact bytes and per-file generations for every captured operation, plus exact final generation",
+              "edit_to_durable": {
+                "p50_ms": 578.462908999998,
+                "p95_ms": 605.9146209999999,
+                "p99_ms": 609.3888019999722,
+                "sample_count": 40
+              },
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 43,
+              "full_edit_to_durable": {
+                "p50_ms": 578.462908999998,
+                "p95_ms": 605.9146209999999,
+                "p99_ms": 609.3888019999722,
+                "sample_count": 40
+              },
+              "full_snapshot_to_ack": {
+                "p50_ms": 567.9866030000001,
+                "p95_ms": 586.840344,
+                "p99_ms": 605.1848170000001,
+                "sample_count": 40
+              },
+              "large": false,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": {
+                "p50_ms": 567.9866030000001,
+                "p95_ms": 586.840344,
+                "p99_ms": 605.1848170000001,
+                "sample_count": 40
+              },
+              "writer": 2,
+              "attempt_count": 40,
+              "attempt_status_counts": {
+                "published": 40
+              }
+            },
+            {
+              "all_acknowledged_operations_reachable": true,
+              "captured_bytes_valid": null,
+              "content_verification_scope": "Exact final generation; intermediate acknowledged operations checked for reachability only",
+              "edit_to_durable": null,
+              "enough_samples": true,
+              "exact_final_bytes": true,
+              "final_generation": 185,
+              "full_edit_to_durable": null,
+              "full_snapshot_to_ack": null,
+              "large": true,
+              "latency_budget_passed": true,
+              "passed": true,
+              "snapshot_to_ack": null,
+              "writer": 3,
+              "observed_upload_snapshot_to_ack": {
+                "p50_ms": 1036.151509,
+                "p95_ms": 1084.22452,
+                "p99_ms": 1101.593525,
+                "sample_count": 185,
+                "scope": "All successful large uploads; observational, not subject to small-publisher latency limits."
+              },
+              "attempt_count": 185,
+              "attempt_status_counts": {
+                "published": 185
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "harness_writer_ttl_seconds": 3600,
+  "lease_correctness_evidence": "Separate deterministic renewal, ownership-loss and saturated-admission regressions; these long-TTL performance runs do not establish expiry behavior.",
+  "comparisons": {
+    "real": {
+      "burst": {
+        "snapshot_p95_percent_change": 15.52829767198256,
+        "full_snapshot_p95_percent_change": 14.691213275508265
+      },
+      "steady": {
+        "snapshot_p95_percent_change": 35.284636098822155,
+        "full_snapshot_p95_percent_change": 35.284636098822155
+      }
+    },
+    "injected": {
+      "burst": {
+        "snapshot_p95_percent_change": -2.2907932036028478,
+        "full_snapshot_p95_percent_change": -0.7641927777544133
+      },
+      "steady": {
+        "snapshot_p95_percent_change": 6.181762521725043,
+        "full_snapshot_p95_percent_change": 6.181762521725043
+      }
+    }
+  },
+  "comparison_convention": "Positive percentages mean increased latency. Both baselines already meet the frozen budgets; admission bounds, lease correctness, and instrumentation are separate benefits from speed."
+}

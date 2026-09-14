@@ -181,6 +181,23 @@ impl std::fmt::Debug for TandemClient {
     }
 }
 
+impl TandemClient {
+    /// A separate HTTP session over the already validated target and bearer.
+    /// Background lease renewal must not repeat the handshake, because a
+    /// transient second handshake cannot be allowed to silently disable it.
+    pub fn independent_session(&self) -> Self {
+        Self {
+            http: self.http.clone(),
+            target: self.target.clone(),
+            token: self.token.clone(),
+            repo_info: self.repo_info.clone(),
+            injected_rtt: self.injected_rtt,
+            cache: self.cache.clone(),
+            requests_sent: AtomicU64::new(0),
+        }
+    }
+}
+
 /// A client with the timeouts tandem wants and no ambient proxy: the server
 /// is usually on a LAN address or localhost, where a system-wide proxy would
 /// only get in the way.
@@ -609,24 +626,9 @@ impl TandemClient {
         expected_id: &[u8],
         expected_view_id: &[u8],
     ) -> Result<()> {
-        let (response, view_id) = if wire::operation_upload_fits(view.len(), operation.len()) {
-            let body = wire::encode_operation_upload(view, operation);
-            let response = self.post_octets("/api/ops:upload", &body, "put operation with view")?;
-            let view_id = header_id(&response, wire::HEADER_VIEW_ID)?;
-            (response, view_id)
-        } else {
-            // Each object can fit when their pair does not. The caller retains
-            // its pending view until both responses have been verified, so a
-            // partial success retries the same content-addressed objects.
-            let response = self.post_octets("/api/views", view, "put view")?;
-            let view_id = header_id(&response, wire::HEADER_VIEW_ID)?;
-            anyhow::ensure!(
-                view_id == expected_view_id,
-                "view upload returned an unexpected ID"
-            );
-            let response = self.post_octets("/api/ops", operation, "put operation")?;
-            (response, view_id)
-        };
+        let body = wire::encode_operation_upload(view, operation);
+        let response = self.post_octets("/api/ops:upload", &body, "put operation with view")?;
+        let view_id = header_id(&response, wire::HEADER_VIEW_ID)?;
         let id = header_id(&response, wire::HEADER_OPERATION_ID)?;
         anyhow::ensure!(
             id == expected_id,

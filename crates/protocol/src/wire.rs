@@ -461,14 +461,6 @@ mod operation_upload_tests {
 /// HTTP bodies stay bounded on both sides of the transport.
 pub const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024 * 1024;
 
-/// Include framing and reject arithmetic overflow before allocating a pair.
-pub fn operation_upload_fits(view_bytes: usize, operation_bytes: usize) -> bool {
-    view_bytes
-        .checked_add(operation_bytes)
-        .and_then(|bytes| bytes.checked_add(4))
-        .is_some_and(|bytes| bytes <= MAX_REQUEST_BODY_BYTES)
-}
-
 /// A view length followed by the unchanged view and operation protobufs.
 pub fn encode_operation_upload(view: &[u8], operation: &[u8]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(4 + view.len() + operation.len());
@@ -491,16 +483,4 @@ pub fn decode_operation_upload(bytes: &[u8]) -> Result<(&[u8], &[u8]), &'static 
         return Err("truncated view or missing operation");
     }
     Ok(payload.split_at(length))
-}
-
-#[cfg(test)]
-mod operation_upload_limit_tests {
-    #[test]
-    fn paired_upload_accounts_for_framing_at_the_body_limit() {
-        use super::{operation_upload_fits, MAX_REQUEST_BODY_BYTES};
-        assert!(operation_upload_fits(1, MAX_REQUEST_BODY_BYTES - 5));
-        assert!(!operation_upload_fits(1, MAX_REQUEST_BODY_BYTES - 4));
-        assert!(!operation_upload_fits(usize::MAX, 1));
-        assert!(!operation_upload_fits(1, usize::MAX));
-    }
 }

@@ -89,12 +89,41 @@ pub struct WalEntry {
 }
 
 impl WalEntry {
+    /// Exact encoded size, checked before allocating the output buffer.
+    pub fn encoded_len(&self) -> Result<usize> {
+        fn framed(total: &mut usize, bytes: &[u8]) -> Result<()> {
+            u32::try_from(bytes.len()).context("byte field is too large for WAL framing")?;
+            let framed_len = 4usize
+                .checked_add(bytes.len())
+                .context("WAL encoded size overflow")?;
+            *total = total
+                .checked_add(framed_len)
+                .context("WAL encoded size overflow")?;
+            Ok(())
+        }
+        u32::try_from(self.parents.len()).context("too many WAL parents")?;
+        u32::try_from(self.records.len()).context("too many WAL records")?;
+        let mut total = MAGIC.len();
+        framed(&mut total, &self.op_id)?;
+        total = total.checked_add(4).context("WAL encoded size overflow")?;
+        for parent in &self.parents {
+            framed(&mut total, parent)?;
+        }
+        total = total.checked_add(4).context("WAL encoded size overflow")?;
+        for record in &self.records {
+            total = total.checked_add(1).context("WAL encoded size overflow")?;
+            framed(&mut total, &record.id)?;
+            framed(&mut total, &record.data)?;
+        }
+        Ok(total)
+    }
+
     /// Fails rather than truncating when a count or a payload does not fit the
     /// 32-bit framing. A silently truncated length would write an entry that
     /// decodes into different bytes than it was given — corruption that only
     /// shows up on replay.
     pub fn encode(&self) -> Result<Vec<u8>> {
-        let mut out = Vec::new();
+        let mut out = Vec::with_capacity(self.encoded_len()?);
         out.extend_from_slice(MAGIC);
         push_bytes(&mut out, &self.op_id)?;
         push_u32(&mut out, self.parents.len())?;
@@ -242,5 +271,19 @@ mod tests {
         let mut lengths = Vec::new();
         assert!(push_u32(&mut lengths, u32::MAX as usize + 1).is_err());
         assert!(push_u32(&mut lengths, u32::MAX as usize).is_ok());
+    }
+
+    #[test]
+    fn encoded_size_is_known_before_the_output_is_allocated() {
+        let entry = WalEntry {
+            op_id: vec![1; 64],
+            parents: vec![vec![2; 64]],
+            records: vec![WalRecord {
+                kind: RecordKind::File,
+                id: vec![3; 20],
+                data: vec![0, 255, 10],
+            }],
+        };
+        assert_eq!(entry.encoded_len().unwrap(), entry.encode().unwrap().len());
     }
 }

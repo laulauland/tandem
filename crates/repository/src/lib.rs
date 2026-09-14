@@ -37,6 +37,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
+pub use self::bucket::StagingBudget;
 use self::bucket::{record_kind_for_object, DurableOps, PendingBlobs};
 use jj_tandem_jj::proto_convert;
 use jj_tandem_protocol::hex::{from_hex, to_hex};
@@ -84,6 +85,22 @@ pub struct Repository {
     lock: Mutex<()>,
     /// Wake-ups for every `/api/events` subscriber.
     heads_events: broadcast::Sender<u64>,
+}
+
+struct RepositoryLockGuard<'a> {
+    _guard: std::sync::MutexGuard<'a, ()>,
+    acquired: std::time::Instant,
+    operation: &'static str,
+}
+
+impl Drop for RepositoryLockGuard<'_> {
+    fn drop(&mut self) {
+        tracing::debug!(
+            lock_hold_ms = self.acquired.elapsed().as_millis() as u64,
+            lock_operation = self.operation,
+            "repository lock released"
+        );
+    }
 }
 
 /// Backend identity needed by hosts to construct compatibility handshakes.
@@ -231,7 +248,57 @@ fn decode_view_with_id(data: &[u8]) -> Result<(Vec<u8>, jj_lib::op_store::View)>
     Ok((jj_lib::content_hash::blake2b_hash(&view).to_vec(), view))
 }
 
+// Metadata is duplicated into the publish WAL (the operation and view as
+// records, and operation parents in the entry header). Keep these limits in
+// step with bucket::WAL_METADATA_RESERVE_BYTES so every accepted staged object
+// set remains publishable.
+const MAX_VIEW_BYTES: usize = 2 * 1024 * 1024;
+const MAX_OPERATION_BYTES: usize = 2 * 1024 * 1024;
+const MAX_OPERATION_PARENTS: usize = 1024;
+const MAX_OPERATION_PARENT_BYTES: usize = 2 * 1024 * 1024;
+
+fn validate_operation_publish_size(
+    data: &[u8],
+    operation: &jj_lib::op_store::Operation,
+) -> Result<()> {
+    anyhow::ensure!(
+        data.len() <= MAX_OPERATION_BYTES,
+        "operation needs {} bytes (limit {MAX_OPERATION_BYTES}); reduce operation metadata",
+        data.len()
+    );
+    let parents = &operation.parents;
+    anyhow::ensure!(
+        parents.len() <= MAX_OPERATION_PARENTS,
+        "operation has {} parents (limit {MAX_OPERATION_PARENTS})",
+        parents.len()
+    );
+    let parent_bytes = parents.iter().try_fold(0usize, |total, id| {
+        total
+            .checked_add(id.as_bytes().len())
+            .context("operation parent bytes overflow")
+    })?;
+    anyhow::ensure!(
+        parent_bytes <= MAX_OPERATION_PARENT_BYTES,
+        "operation parent ids need {parent_bytes} bytes (limit {MAX_OPERATION_PARENT_BYTES})"
+    );
+    Ok(())
+}
+
 impl Repository {
+    fn acquire_lock(&self, operation: &'static str) -> Result<RepositoryLockGuard<'_>> {
+        let started = std::time::Instant::now();
+        let guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
+        tracing::debug!(
+            lock_wait_ms = started.elapsed().as_millis() as u64,
+            lock_operation = operation,
+            "repository lock acquired"
+        );
+        Ok(RepositoryLockGuard {
+            _guard: guard,
+            acquired: std::time::Instant::now(),
+            operation,
+        })
+    }
     /// Make a newly provisioned repository recoverable before its catalog
     /// entry may become ready. Existing durable repositories are unchanged.
     pub fn durably_initialize(&self) -> Result<()> {
@@ -268,6 +335,22 @@ impl Repository {
         repo: PathBuf,
         bucket_spec: Option<&str>,
         faults: Arc<FaultPoints>,
+    ) -> Result<Self> {
+        Self::new_with_faults_and_budget(
+            settings,
+            repo,
+            bucket_spec,
+            faults,
+            Arc::new(StagingBudget::default()),
+        )
+    }
+
+    pub fn new_with_faults_and_budget(
+        settings: &jj_lib::settings::UserSettings,
+        repo: PathBuf,
+        bucket_spec: Option<&str>,
+        faults: Arc<FaultPoints>,
+        staging_budget: Arc<StagingBudget>,
     ) -> Result<Self> {
         fs::create_dir_all(&repo)?;
 
@@ -348,7 +431,7 @@ impl Repository {
             bucket,
             bucket_conditional_put,
             index_etag: Mutex::new(None),
-            pending_blobs: Mutex::new(PendingBlobs::default()),
+            pending_blobs: Mutex::new(PendingBlobs::new(staging_budget)),
             durable_ops: Mutex::new(DurableOps::default()),
             bootstrapped,
             bootstrap_op_heads: Vec::new(),
@@ -718,6 +801,7 @@ impl Repository {
 
     /// Write an object and stage it for the next WAL entry.
     pub fn put_object_sync(&self, kind: &str, data: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+        self.faults.hold_object_write_if_armed();
         let (id, normalized) = self.write_object_sync(kind, data)?;
         if let Some(record_kind) = record_kind_for_object(kind) {
             self.pending_blobs
@@ -793,7 +877,8 @@ impl Repository {
     }
 
     pub fn put_operation_sync(&self, data: &[u8]) -> Result<Vec<u8>> {
-        let (id, _) = decode_operation_with_id(data)?;
+        let (id, operation) = decode_operation_with_id(data)?;
+        validate_operation_publish_size(data, &operation)?;
         let hex = to_hex(&id);
 
         let dir = self.op_store_path.join("operations");
@@ -808,8 +893,14 @@ impl Repository {
         view: &[u8],
         operation: &[u8],
     ) -> Result<(Vec<u8>, Vec<u8>)> {
+        anyhow::ensure!(
+            view.len() <= MAX_VIEW_BYTES,
+            "view needs {} bytes (limit {MAX_VIEW_BYTES}); reduce view metadata",
+            view.len()
+        );
         let (view_id, _) = decode_view_with_id(view)?;
         let (_, operation_contents) = decode_operation_with_id(operation)?;
+        validate_operation_publish_size(operation, &operation_contents)?;
         anyhow::ensure!(
             operation_contents.view_id.as_bytes() == view_id,
             "operation references another view"
@@ -826,6 +917,11 @@ impl Repository {
     }
 
     pub fn put_view_sync(&self, data: &[u8]) -> Result<Vec<u8>> {
+        anyhow::ensure!(
+            data.len() <= MAX_VIEW_BYTES,
+            "view needs {} bytes (limit {MAX_VIEW_BYTES}); reduce view metadata",
+            data.len()
+        );
         let (id, _) = decode_view_with_id(data)?;
         let hex = to_hex(&id);
 
@@ -874,7 +970,7 @@ impl Repository {
     /// publishes the merge back through `update_op_heads`, where the head set
     /// is reconciled on the write path, in the bucket, before the ack.
     pub fn get_heads_sync(&self) -> Result<HeadsState> {
-        let _guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
+        let _guard = self.acquire_lock("get_heads")?;
         let metadata = self.read_heads_metadata()?;
         let heads = self.read_jj_op_heads()?;
 
@@ -898,7 +994,7 @@ impl Repository {
         authority: &PublishAuthority,
     ) -> Result<UpdateResult> {
         self.faults.refuse_if_halted()?;
-        let _guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
+        let _guard = self.acquire_lock("update_heads")?;
         let metadata = self.read_heads_metadata()?;
 
         if metadata.version != expected_version {
@@ -1258,6 +1354,42 @@ fn write_bytes_if_missing(path: &Path, bytes: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn operation_with_parents(parents: Vec<OperationId>) -> jj_lib::op_store::Operation {
+        let now = jj_lib::backend::Timestamp::now();
+        jj_lib::op_store::Operation {
+            view_id: jj_lib::op_store::ViewId::new(vec![0; 64]),
+            parents,
+            metadata: jj_lib::op_store::OperationMetadata {
+                time: jj_lib::op_store::TimestampRange {
+                    start: now,
+                    end: now,
+                },
+                description: String::new(),
+                hostname: String::new(),
+                username: String::new(),
+                is_snapshot: false,
+                tags: Default::default(),
+            },
+            commit_predecessors: None,
+        }
+    }
+
+    #[test]
+    fn publish_metadata_bounds_cover_operation_and_duplicated_parents() {
+        let operation =
+            operation_with_parents(vec![OperationId::new(vec![7; 64]); MAX_OPERATION_PARENTS]);
+        assert!(validate_operation_publish_size(&vec![0; MAX_OPERATION_BYTES], &operation).is_ok());
+
+        let too_many = operation_with_parents(vec![
+            OperationId::new(vec![7; 64]);
+            MAX_OPERATION_PARENTS + 1
+        ]);
+        assert!(validate_operation_publish_size(&[], &too_many).is_err());
+        assert!(
+            validate_operation_publish_size(&vec![0; MAX_OPERATION_BYTES + 1], &operation).is_err()
+        );
+    }
 
     /// A head id that will not parse is dropped, not sent as an empty id.
     #[test]

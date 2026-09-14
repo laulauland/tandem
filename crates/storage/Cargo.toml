@@ -17,6 +17,7 @@ dunce.workspace = true
 libc.workspace = true
 object_store = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
+tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

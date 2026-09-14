@@ -17,7 +17,15 @@ harness = false
 name = "snapshot_publish_latency"
 harness = false
 
+[[bench]]
+name = "stage6_mixed_load"
+harness = false
+
 [dev-dependencies]
+jj-lib.workspace = true
+jj-tandem-client.workspace = true
+pollster.workspace = true
+tokio.workspace = true
 anyhow.workspace = true
 jj-tandem-server.workspace = true
 jj-tandem-workspace.workspace = true

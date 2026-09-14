@@ -11,7 +11,7 @@
 //! is what lets a seeded schedule pick a fault per step and replay it exactly.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
 /// How many head reconciles a spawned server should degrade. See
 /// [`FaultPoints::fail_reconciles`].
@@ -83,9 +83,88 @@ pub struct FaultPoints {
     reconcile_failures: AtomicU64,
     /// Content for the object a second client "writes" during a retried publish.
     object_on_index_conflict: Mutex<Option<Vec<u8>>>,
+    wal_gate: (Mutex<WalGate>, Condvar),
+    object_gate: (Mutex<WalGate>, Condvar),
+}
+
+#[derive(Default)]
+struct WalGate {
+    armed: bool,
+    entered: bool,
+    released: bool,
 }
 
 impl FaultPoints {
+    /// Hold exactly the next WAL write until [`Self::release_wal_write`].
+    pub fn hold_next_wal_write(&self) {
+        let mut gate = self.wal_gate.0.lock().unwrap();
+        *gate = WalGate {
+            armed: true,
+            entered: false,
+            released: false,
+        };
+    }
+
+    pub fn wait_for_held_wal_write(&self) {
+        let mut gate = self.wal_gate.0.lock().unwrap();
+        while !gate.entered {
+            gate = self.wal_gate.1.wait(gate).unwrap();
+        }
+    }
+
+    pub fn release_wal_write(&self) {
+        let mut gate = self.wal_gate.0.lock().unwrap();
+        gate.released = true;
+        self.wal_gate.1.notify_all();
+    }
+
+    pub(super) fn hold_wal_write_if_armed(&self) {
+        let mut gate = self.wal_gate.0.lock().unwrap();
+        if !gate.armed {
+            return;
+        }
+        gate.armed = false;
+        gate.entered = true;
+        self.wal_gate.1.notify_all();
+        while !gate.released {
+            gate = self.wal_gate.1.wait(gate).unwrap();
+        }
+    }
+
+    pub fn hold_next_object_write(&self) {
+        let mut gate = self.object_gate.0.lock().unwrap();
+        *gate = WalGate {
+            armed: true,
+            entered: false,
+            released: false,
+        };
+    }
+
+    pub fn wait_for_held_object_write(&self) {
+        let mut gate = self.object_gate.0.lock().unwrap();
+        while !gate.entered {
+            gate = self.object_gate.1.wait(gate).unwrap();
+        }
+    }
+
+    pub fn release_object_write(&self) {
+        let mut gate = self.object_gate.0.lock().unwrap();
+        gate.released = true;
+        self.object_gate.1.notify_all();
+    }
+
+    pub(super) fn hold_object_write_if_armed(&self) {
+        let mut gate = self.object_gate.0.lock().unwrap();
+        if !gate.armed {
+            return;
+        }
+        gate.armed = false;
+        gate.entered = true;
+        self.object_gate.1.notify_all();
+        while !gate.released {
+            gate = self.object_gate.1.wait(gate).unwrap();
+        }
+    }
     /// Reject the next index writes while leaving the server running, allowing
     /// another workspace to publish after the failed caller abandons its work.
     pub fn fail_index_writes(&self, count: u64) {
@@ -255,5 +334,32 @@ impl FaultPoints {
             anyhow::bail!("the server has stopped");
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wal_gate_holds_only_one_operation_and_does_not_block_another_repository() {
+        let faults = Arc::new(FaultPoints::default());
+        faults.hold_next_wal_write();
+        let blocked_faults = faults.clone();
+        let blocked = std::thread::spawn(move || blocked_faults.hold_wal_write_if_armed());
+        faults.wait_for_held_wal_write();
+
+        let other_faults = faults.clone();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let other = std::thread::spawn(move || {
+            other_faults.hold_wal_write_if_armed();
+            done_tx.send(()).unwrap();
+        });
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("an unrelated repository must pass the consumed gate");
+        faults.release_wal_write();
+        blocked.join().unwrap();
+        other.join().unwrap();
     }
 }

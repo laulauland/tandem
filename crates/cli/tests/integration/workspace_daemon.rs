@@ -16,6 +16,7 @@ use crate::common::field;
 use crate::common::lines::Lines;
 use crate::common::ServerFixture;
 
+use notify::Watcher as _;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -54,9 +55,20 @@ impl DaemonProcess {
     }
 
     pub fn start_with_debounce(root: &Path, home: &Path, debounce_ms: &str) -> Self {
+        Self::start_with_options(root, home, debounce_ms, "30")
+    }
+
+    fn start_with_options(root: &Path, home: &Path, debounce_ms: &str, writer_ttl: &str) -> Self {
         let mut cmd = Command::new(common::tandem_bin());
         cmd.current_dir(root)
-            .args(["daemon", ".", "--debounce-ms", debounce_ms])
+            .args([
+                "daemon",
+                ".",
+                "--debounce-ms",
+                debounce_ms,
+                "--writer-ttl-seconds",
+                writer_ttl,
+            ])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         common::isolate_env(&mut cmd, home);
@@ -111,6 +123,294 @@ impl DaemonProcess {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+#[test]
+fn renewal_runs_during_a_debounce_window_longer_than_the_writer_ttl() {
+    let fx = ServerFixture::start();
+    let (root, _) = clone_workspace(&fx, "renewal", "agent-a");
+    let mut daemon = DaemonProcess::start_with_options(&root, &fx.home, "3000", "1");
+    std::fs::write(
+        root.join("over-ttl.txt"),
+        b"renew while events are pending\n",
+    )
+    .unwrap();
+    daemon.wait_for_publish();
+    let before_status = daemon.status();
+    let before_window = before_status["updatedAtUnixMs"].as_u64().unwrap();
+    let published_before = before_status["publishedOps"].as_u64().unwrap();
+    let (status_tx, status_rx) = std::sync::mpsc::channel();
+    let mut status_watcher = notify::recommended_watcher(move |event| {
+        let _ = status_tx.send(event);
+    })
+    .unwrap();
+    status_watcher
+        .watch(&root, notify::RecursiveMode::Recursive)
+        .unwrap();
+    std::fs::write(
+        root.join("over-ttl.txt"),
+        b"renew again while the debounce window is active\n",
+    )
+    .unwrap();
+
+    let deadline = std::time::Instant::now() + LINE_TIMEOUT;
+    loop {
+        status_rx
+            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            .expect("the daemon did not persist a renewal during debounce")
+            .expect("watch daemon status updates");
+        let renewed_at = daemon.status()["updatedAtUnixMs"].as_u64().unwrap();
+        if renewed_at >= before_window + 1_100 {
+            break;
+        }
+    }
+
+    let response = common::http_client()
+        .post(format!("http://{}/api/workspaces/agent-a/writer", fx.addr))
+        .bearer_auth(fx.token())
+        .json(&serde_json::json!({"holder": "competing-daemon", "ttlSeconds": 1}))
+        .send()
+        .unwrap();
+    assert_eq!(
+        daemon.status()["publishedOps"].as_u64(),
+        Some(published_before),
+        "the competing claim must happen while the second publish is pending"
+    );
+    assert_eq!(
+        response.status().as_u16(),
+        409,
+        "the role expired during sustained debounce"
+    );
+    daemon.wait_for_publish();
+}
+
+#[test]
+fn snapshot_revalidates_an_expired_writer_role_before_publishing() {
+    let fx = ServerFixture::start();
+    let (root, _) = clone_workspace(&fx, "expired-role", "agent-a");
+    let settings =
+        jj_lib::settings::UserSettings::from_config(jj_lib::config::StackedConfig::with_defaults())
+            .unwrap();
+    let mut options = jj_tandem_workspace::DaemonOptions::new(&root);
+    options.writer_ttl = Duration::ZERO;
+    let mut daemon = jj_tandem_workspace::Daemon::open(&settings, &options).unwrap();
+
+    let response = common::http_client()
+        .post(format!("http://{}/api/workspaces/agent-a/writer", fx.addr))
+        .bearer_auth(fx.token())
+        .json(&serde_json::json!({"holder": "replacement-daemon", "ttlSeconds": 30}))
+        .send()
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    let version_before = server_heads(&fx).0;
+    std::fs::write(
+        root.join("must-not-publish.txt"),
+        b"replacement owns the role\n",
+    )
+    .unwrap();
+    assert!(matches!(
+        daemon.snapshot_once().unwrap(),
+        jj_tandem_workspace::SnapshotOutcome::NotTheWriter { .. }
+    ));
+    assert_eq!(server_heads(&fx).0, version_before);
+}
+
+#[test]
+fn a_daemon_renews_while_its_snapshot_is_blocked_in_the_wal() {
+    let temporary = tempfile::tempdir().unwrap();
+    let home = common::isolated_home(temporary.path());
+    let faults = jj_tandem_repository::FaultPoints::inert();
+    let bucket = temporary.path().join("bucket");
+    let server = jj_tandem_server::Server::new_with_faults_for_test(
+        temporary.path().join("server-cache"),
+        Some(bucket.to_str().unwrap()),
+        "renewal-secret",
+        faults.clone(),
+    )
+    .unwrap();
+    server.durably_initialize().unwrap();
+    let (claims_tx, claims_rx) = std::sync::mpsc::channel();
+    let reject_renewals = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let reject_in_middleware = reject_renewals.clone();
+    let gate_commit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let gate_commit_in_middleware = gate_commit.clone();
+    let (commit_entered_tx, commit_entered_rx) = std::sync::mpsc::channel();
+    let commit_release = std::sync::Arc::new(tokio::sync::Notify::new());
+    let commit_release_in_middleware = commit_release.clone();
+    let app =
+        jj_tandem_server::router(std::sync::Arc::new(server)).layer(axum::middleware::from_fn(
+            move |request: axum::extract::Request, next: axum::middleware::Next| {
+                let claims_tx = claims_tx.clone();
+                let reject_in_middleware = reject_in_middleware.clone();
+                let gate_commit = gate_commit_in_middleware.clone();
+                let commit_entered_tx = commit_entered_tx.clone();
+                let commit_release = commit_release_in_middleware.clone();
+                async move {
+                    if request.uri().path() == "/api/objects/commit"
+                        && gate_commit.load(std::sync::atomic::Ordering::Acquire)
+                    {
+                        let released = commit_release.notified();
+                        let _ = commit_entered_tx.send(());
+                        released.await;
+                    }
+                    if request.uri().path().ends_with("/writer") {
+                        if reject_in_middleware
+                            .fetch_update(
+                                std::sync::atomic::Ordering::AcqRel,
+                                std::sync::atomic::Ordering::Acquire,
+                                |remaining| remaining.checked_sub(1),
+                            )
+                            .is_ok()
+                        {
+                            let _ = claims_tx.send(());
+                            return axum::response::IntoResponse::into_response(
+                                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                            );
+                        }
+                        let response = next.run(request).await;
+                        let _ = claims_tx.send(());
+                        return response;
+                    }
+                    next.run(request).await
+                }
+            },
+        ));
+    let address = common::free_addr();
+    let listener_address = address.clone();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let server_thread = std::thread::spawn(move || {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async move {
+                let listener = tokio::net::TcpListener::bind(&listener_address)
+                    .await
+                    .unwrap();
+                ready_tx.send(()).unwrap();
+                axum::serve(listener, app)
+                    .with_graceful_shutdown(async {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+                    .unwrap();
+            });
+    });
+    struct StopServer(
+        Option<tokio::sync::oneshot::Sender<()>>,
+        Option<std::thread::JoinHandle<()>>,
+    );
+    impl Drop for StopServer {
+        fn drop(&mut self) {
+            if let Some(sender) = self.0.take() {
+                let _ = sender.send(());
+            }
+            if let Some(thread) = self.1.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+    let _server = StopServer(Some(shutdown_tx), Some(server_thread));
+    ready_rx.recv_timeout(LINE_TIMEOUT).unwrap();
+
+    let root = temporary.path().join("workspace");
+    std::fs::create_dir(&root).unwrap();
+    let init = common::run_tandem_in(
+        &root,
+        &[
+            "init",
+            "--server",
+            &address,
+            "--token",
+            "renewal-secret",
+            "--workspace",
+            "agent-a",
+            ".",
+        ],
+        &home,
+    );
+    common::assert_ok(&init, "initialize renewal workspace");
+    while claims_rx.try_recv().is_ok() {}
+    let settings =
+        jj_lib::settings::UserSettings::from_config(jj_lib::config::StackedConfig::with_defaults())
+            .unwrap();
+    let mut options = jj_tandem_workspace::DaemonOptions::new(&root);
+    options.writer_ttl = Duration::from_secs(1);
+    let mut daemon = jj_tandem_workspace::Daemon::open(&settings, &options).unwrap();
+    std::fs::write(root.join("blocked.txt"), b"durable after the gate\n").unwrap();
+    faults.hold_next_wal_write();
+    struct ReleaseWal(std::sync::Arc<jj_tandem_repository::FaultPoints>);
+    impl Drop for ReleaseWal {
+        fn drop(&mut self) {
+            self.0.release_wal_write();
+        }
+    }
+    let release = ReleaseWal(faults.clone());
+    let snapshot = std::thread::spawn(move || {
+        let result = daemon.snapshot_once();
+        (daemon, result)
+    });
+    faults.wait_for_held_wal_write();
+    while claims_rx.try_recv().is_ok() {}
+
+    // Four observed renewal requests take more than the original one-second
+    // lease at ttl/3, without a timing sleep in the fixture.
+    for _ in 0..4 {
+        claims_rx
+            .recv_timeout(LINE_TIMEOUT)
+            .expect("the blocked daemon stopped renewing its writer role");
+    }
+    let response = common::http_client()
+        .post(format!("http://{address}/api/workspaces/agent-a/writer"))
+        .bearer_auth("renewal-secret")
+        .json(&serde_json::json!({"holder": "competing-daemon", "ttlSeconds": 1}))
+        .send()
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 409);
+    drop(release);
+    let (mut daemon, outcome) = snapshot.join().unwrap();
+    assert!(matches!(
+        outcome.unwrap(),
+        jj_tandem_workspace::SnapshotOutcome::Published(_)
+    ));
+
+    std::fs::write(root.join("blocked.txt"), b"must remain unacknowledged\n").unwrap();
+    let version_before = common::api_get(&address, "renewal-secret", "/api/heads")
+        .json::<serde_json::Value>()
+        .unwrap()["version"]
+        .as_u64()
+        .unwrap();
+    while claims_rx.try_recv().is_ok() {}
+    gate_commit.store(true, std::sync::atomic::Ordering::Release);
+    struct ReleaseCommit(std::sync::Arc<tokio::sync::Notify>);
+    impl Drop for ReleaseCommit {
+        fn drop(&mut self) {
+            self.0.notify_waiters();
+        }
+    }
+    let release_commit = ReleaseCommit(commit_release);
+    let second = std::thread::spawn(move || daemon.snapshot_once());
+    commit_entered_rx
+        .recv_timeout(LINE_TIMEOUT)
+        .expect("snapshot never reached the commit upload after its early role check");
+    while claims_rx.try_recv().is_ok() {}
+    reject_renewals.store(1, std::sync::atomic::Ordering::Release);
+    claims_rx
+        .recv_timeout(LINE_TIMEOUT)
+        .expect("the daemon did not attempt renewal while its object write was blocked");
+    claims_rx
+        .recv_timeout(LINE_TIMEOUT)
+        .expect("the daemon did not retry renewal after a transient failure");
+    drop(release_commit);
+    assert!(matches!(
+        second.join().unwrap().unwrap(),
+        jj_tandem_workspace::SnapshotOutcome::NotTheWriter { .. }
+    ));
+    let version_after = common::api_get(&address, "renewal-secret", "/api/heads")
+        .json::<serde_json::Value>()
+        .unwrap()["version"]
+        .as_u64()
+        .unwrap();
+    assert_eq!(version_after, version_before, "a known-lost role published");
 }
 
 impl Drop for DaemonProcess {

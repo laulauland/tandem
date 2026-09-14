@@ -19,7 +19,7 @@ pub fn init_tracing(level: &str, format: &str, log_tx: broadcast::Sender<LogEven
             let fmt_layer = fmt::layer()
                 .with_writer(std::io::stderr)
                 .json()
-                .with_current_span(false)
+                .with_current_span(true)
                 .with_span_list(false)
                 .with_filter(fmt_targets(level_filter));
 

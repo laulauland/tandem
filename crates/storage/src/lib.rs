@@ -89,6 +89,86 @@ pub trait ObjectStore: Send + Sync + fmt::Debug {
     ) -> std::result::Result<String, CasError>;
 }
 
+#[derive(Debug)]
+struct MeasuredObjectStore {
+    inner: Arc<dyn ObjectStore>,
+    repository: Option<String>,
+}
+
+impl MeasuredObjectStore {
+    fn emit(&self, operation: &'static str, read_bytes: usize, write_bytes: usize) {
+        tracing::debug!(
+            bucket_operation = operation,
+            bucket_calls = 1_u64,
+            bucket_read_bytes = read_bytes as u64,
+            bucket_write_bytes = write_bytes as u64,
+            bucket_backend = self.inner.backend_name(),
+            repository = self.repository.as_deref().unwrap_or(""),
+            "bucket operation"
+        );
+    }
+}
+
+impl ObjectStore for MeasuredObjectStore {
+    fn backend_name(&self) -> &'static str {
+        self.inner.backend_name()
+    }
+    fn describe(&self) -> String {
+        self.inner.describe()
+    }
+    fn put_immutable(&self, key: &str, data: &[u8]) -> Result<bool> {
+        let result = self.inner.put_immutable(key, data);
+        self.emit("put_immutable", 0, data.len());
+        result
+    }
+    fn exists(&self, key: &str) -> Result<bool> {
+        let result = self.inner.exists(key);
+        self.emit("exists", 0, 0);
+        result
+    }
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        let result = self.inner.get(key);
+        self.emit(
+            "get",
+            result
+                .as_ref()
+                .ok()
+                .and_then(|v| v.as_ref())
+                .map_or(0, Vec::len),
+            0,
+        );
+        result
+    }
+    fn get_with_etag(&self, key: &str) -> Result<Option<(Vec<u8>, String)>> {
+        let result = self.inner.get_with_etag(key);
+        self.emit(
+            "get_with_etag",
+            result
+                .as_ref()
+                .ok()
+                .and_then(|v| v.as_ref())
+                .map_or(0, |(v, _)| v.len()),
+            0,
+        );
+        result
+    }
+    fn put_overwrite(&self, key: &str, data: &[u8]) -> Result<String> {
+        let result = self.inner.put_overwrite(key, data);
+        self.emit("put_overwrite", 0, data.len());
+        result
+    }
+    fn compare_and_put(
+        &self,
+        key: &str,
+        data: &[u8],
+        expected: Option<&str>,
+    ) -> std::result::Result<String, CasError> {
+        let result = self.inner.compare_and_put(key, data, expected);
+        self.emit("compare_and_put", 0, data.len());
+        result
+    }
+}
+
 // ─── Backend selection ────────────────────────────────────────────────────────
 
 /// Open a bucket from a `--bucket` argument.
@@ -101,7 +181,7 @@ pub fn open(spec: &str) -> Result<Arc<dyn ObjectStore>> {
     if spec.is_empty() {
         bail!("empty bucket specification");
     }
-    if let Some(rest) = spec.strip_prefix("s3://") {
+    let inner = if let Some(rest) = spec.strip_prefix("s3://") {
         open_s3(rest)
     } else if let Some(rest) = spec.strip_prefix("file://") {
         open_filesystem(Path::new(rest))
@@ -109,7 +189,14 @@ pub fn open(spec: &str) -> Result<Arc<dyn ObjectStore>> {
         bail!("unsupported bucket scheme: {spec}");
     } else {
         open_filesystem(Path::new(spec))
-    }
+    }?;
+    let repository = spec
+        .split('?')
+        .next()
+        .and_then(|path| path.split_once("/repositories/"))
+        .map(|(_, name)| name.trim_matches('/').to_string())
+        .filter(|name| !name.is_empty());
+    Ok(Arc::new(MeasuredObjectStore { inner, repository }))
 }
 
 #[cfg(feature = "s3")]

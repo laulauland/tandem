@@ -23,8 +23,8 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
@@ -469,7 +469,13 @@ impl Daemon {
     /// Public because the latency bench drives exactly this, and a benchmark
     /// of a private reimplementation would be measuring the benchmark.
     pub fn snapshot_once(&mut self) -> Result<SnapshotOutcome> {
-        if !self.status.writer && !self.claim_writer_role() {
+        // This timer is the caller-visible snapshot-to-ack interval. Writer
+        // validation is part of that hot path and must remain inside it.
+        let started = Instant::now();
+        // `snapshot_once()` is public for the benchmark and other bounded
+        // drivers, so it cannot rely on `run()` having serviced the ticker.
+        // Revalidate even when the cached status says this daemon was writer.
+        if !self.claim_writer_role() {
             let detail = self
                 .status
                 .writer_detail
@@ -477,8 +483,12 @@ impl Daemon {
                 .unwrap_or_else(|| "the writer role is held elsewhere".to_string());
             return Ok(SnapshotOutcome::NotTheWriter { detail });
         }
-
-        let started = Instant::now();
+        let renewal = WriterRenewal::spawn(
+            self.client.independent_session(),
+            self.workspace_id.clone(),
+            self.holder.clone(),
+            self.writer_ttl,
+        );
 
         // Everything published since the last snapshot, merged into the view
         // this one builds on. This is where a concurrent publish from another
@@ -588,6 +598,20 @@ impl Daemon {
             return Ok(SnapshotOutcome::Unchanged);
         }
 
+        if !renewal.is_held() {
+            locked_ws
+                .finish(repo.op_id().clone())
+                .context("cannot release the working copy after losing the writer role")?;
+            self.repo = repo;
+            self.status.writer = false;
+            self.status.writer_detail = Some(
+                "the writer role could not be renewed while preparing the snapshot".to_string(),
+            );
+            return Ok(SnapshotOutcome::NotTheWriter {
+                detail: self.status.writer_detail.clone().unwrap(),
+            });
+        }
+
         let mut tx = repo.start_transaction();
         tx.set_is_snapshot(true);
         let commit = tx
@@ -602,6 +626,20 @@ impl Daemon {
         tx.repo_mut()
             .rebase_descendants()
             .context("cannot rebase rewritten descendants")?;
+
+        if !renewal.is_held() {
+            drop(tx);
+            locked_ws
+                .finish(repo.op_id().clone())
+                .context("cannot release the working copy after losing the writer role")?;
+            self.repo = repo;
+            self.status.writer = false;
+            self.status.writer_detail =
+                Some("the writer role could not be renewed before publication".to_string());
+            return Ok(SnapshotOutcome::NotTheWriter {
+                detail: self.status.writer_detail.clone().unwrap(),
+            });
+        }
 
         // The op-heads store does the CAS against the server here, retrying a
         // lost race itself. What comes back has been acknowledged, which for
@@ -635,16 +673,16 @@ impl Daemon {
 
     /// Watch, debounce, snapshot, publish — until the process is stopped.
     pub fn run(mut self) -> Result<()> {
-        let (tx, rx) = mpsc::channel();
+        let wakes = Arc::new(WakeQueue::default());
 
         let root = self.workspace_root().to_path_buf();
-        let _watcher = watch_files(&root, tx.clone())?;
+        let _watcher = watch_files(&root, wakes.clone())?;
         spawn_event_subscription(
             self.server_addr().to_string(),
             self.client.token().to_string(),
-            tx.clone(),
+            wakes.clone(),
         );
-        spawn_ticker(self.writer_ttl / RENEWALS_PER_TTL, tx);
+        spawn_ticker(self.writer_ttl / RENEWALS_PER_TTL, wakes.clone());
 
         eprintln!(
             "watching {} (workspace {}, server {}, debounce {}ms)",
@@ -663,14 +701,7 @@ impl Daemon {
         self.publish_now(Instant::now());
 
         loop {
-            let Ok(wake) = rx.recv() else {
-                // Every sender is gone: the watcher failed and the threads
-                // with it. Nothing more will ever arrive. The status file goes
-                // with the daemon — a status left behind by a daemon that is
-                // not there reads as a running one.
-                let _ = std::fs::remove_file(&self.status_path);
-                return Ok(());
-            };
+            let wake = wakes.recv();
 
             match wake {
                 Wake::Files { first_seen } => {
@@ -683,11 +714,10 @@ impl Daemon {
                         if left.is_zero() {
                             break;
                         }
-                        match rx.recv_timeout(left) {
+                        match wakes.recv_timeout(left) {
                             Ok(Wake::Files { .. }) => {}
                             Ok(Wake::Other(interrupt)) => self.handle(interrupt),
-                            Err(RecvTimeoutError::Timeout) => break,
-                            Err(RecvTimeoutError::Disconnected) => break,
+                            Err(()) => break,
                         }
                     }
                     self.publish_now(first_seen);
@@ -709,9 +739,13 @@ impl Daemon {
                 }
             }
             Interrupt::Tick => {
-                self.claim_writer_role();
                 if self.pending {
                     self.publish_now(Instant::now());
+                } else {
+                    self.claim_writer_role();
+                }
+                if let Err(err) = self.refresh_staleness() {
+                    eprintln!("warning: cannot refresh heads: {err:#}");
                 }
                 self.write_status();
             }
@@ -794,6 +828,113 @@ enum Wake {
     Other(Interrupt),
 }
 
+#[derive(Default)]
+struct WakeQueue {
+    state: Mutex<WakeState>,
+    changed: Condvar,
+}
+
+#[derive(Default)]
+struct WakeState {
+    first_file: Option<Instant>,
+    ignored_files: bool,
+    heads: bool,
+    tick: bool,
+    prefer_control: bool,
+    next_control: u8,
+}
+
+impl WakeQueue {
+    fn files(&self, first_seen: Instant) {
+        let mut state = self.state.lock().unwrap();
+        state.first_file = Some(
+            state
+                .first_file
+                .map_or(first_seen, |old| old.min(first_seen)),
+        );
+        self.changed.notify_one();
+    }
+
+    fn interrupt(&self, interrupt: Interrupt) {
+        let mut state = self.state.lock().unwrap();
+        match interrupt {
+            Interrupt::IgnoredFiles => state.ignored_files = true,
+            Interrupt::Heads => state.heads = true,
+            Interrupt::Tick => state.tick = true,
+        }
+        self.changed.notify_one();
+    }
+
+    fn take(state: &mut WakeState) -> Option<Wake> {
+        // Renewal is a deadline, unlike the other wake classes. Service it
+        // before starting another potentially slow working-copy scan.
+        if std::mem::take(&mut state.tick) {
+            state.prefer_control = false;
+            state.next_control = 1;
+            return Some(Wake::Other(Interrupt::Tick));
+        }
+        let has_control = state.ignored_files || state.heads || state.tick;
+        if state.first_file.is_some() && (!has_control || !state.prefer_control) {
+            let first_seen = state.first_file.take().unwrap();
+            state.prefer_control = true;
+            return Some(Wake::Files { first_seen });
+        }
+        let mut interrupt = None;
+        for offset in 0..2 {
+            let index = 1 + ((state.next_control.saturating_sub(1) + offset) % 2);
+            let selected = match index {
+                1 if state.heads => {
+                    state.heads = false;
+                    Some(Interrupt::Heads)
+                }
+                2 if state.ignored_files => {
+                    state.ignored_files = false;
+                    Some(Interrupt::IgnoredFiles)
+                }
+                _ => None,
+            };
+            if selected.is_some() {
+                state.next_control = if index == 1 { 2 } else { 1 };
+                interrupt = selected;
+                break;
+            }
+        }
+        if interrupt.is_some() {
+            state.prefer_control = false;
+        }
+        interrupt.map(Wake::Other)
+    }
+
+    fn recv(&self) -> Wake {
+        let mut state = self.state.lock().unwrap();
+        loop {
+            if let Some(wake) = Self::take(&mut state) {
+                return wake;
+            }
+            state = self.changed.wait(state).unwrap();
+        }
+    }
+
+    fn recv_timeout(&self, timeout: Duration) -> Result<Wake, ()> {
+        let deadline = Instant::now() + timeout;
+        let mut state = self.state.lock().unwrap();
+        loop {
+            if let Some(wake) = Self::take(&mut state) {
+                return Ok(wake);
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(());
+            }
+            let (next, timed_out) = self.changed.wait_timeout(state, left).unwrap();
+            state = next;
+            if timed_out.timed_out() {
+                return Self::take(&mut state).ok_or(());
+            }
+        }
+    }
+}
+
 /// A wake-up the daemon answers at once.
 enum Interrupt {
     /// Something changed that the workspace's `.gitignore` disowns. It opens
@@ -839,7 +980,7 @@ enum Change {
 /// late rather than never. Only the workspace root's own `.gitignore` is read,
 /// and it is read once at startup: a per-directory chain would have to be
 /// rebuilt on every event, and it is the root file that names `target/`.
-fn watch_files(root: &Path, tx: Sender<Wake>) -> Result<notify::RecommendedWatcher> {
+fn watch_files(root: &Path, wakes: Arc<WakeQueue>) -> Result<notify::RecommendedWatcher> {
     use notify::{EventKind, RecursiveMode, Watcher as _};
 
     let root_owned = root.to_path_buf();
@@ -870,9 +1011,7 @@ fn watch_files(root: &Path, tx: Sender<Wake>) -> Result<notify::RecommendedWatch
         for path in &event.paths {
             match classify_change(&root_owned, &ignores, path) {
                 Change::Watched => {
-                    let _ = tx.send(Wake::Files {
-                        first_seen: Instant::now(),
-                    });
+                    wakes.files(Instant::now());
                     return;
                 }
                 Change::Ignored => ignored = true,
@@ -881,7 +1020,7 @@ fn watch_files(root: &Path, tx: Sender<Wake>) -> Result<notify::RecommendedWatch
         }
 
         if ignored {
-            let _ = tx.send(Wake::Other(Interrupt::IgnoredFiles));
+            wakes.interrupt(Interrupt::IgnoredFiles);
         }
     })
     .context("cannot start the filesystem watcher")?;
@@ -952,7 +1091,7 @@ fn is_workspace_content(root: &Path, path: &Path) -> bool {
 /// every attempt: the backoff would reset each time and no line would ever be
 /// printed, leaving a daemon reconnecting once a second in silence for as long
 /// as it lasts. See [`classify_stream`].
-fn spawn_event_subscription(server_addr: String, token: String, tx: Sender<Wake>) {
+fn spawn_event_subscription(server_addr: String, token: String, wakes: Arc<WakeQueue>) {
     std::thread::spawn(move || {
         let mut backoff = ResubscribeBackoff::new();
         loop {
@@ -967,9 +1106,7 @@ fn spawn_event_subscription(server_addr: String, token: String, tx: Sender<Wake>
                             break;
                         }
                         delivered += 1;
-                        if tx.send(Wake::Other(Interrupt::Heads)).is_err() {
-                            return;
-                        }
+                        wakes.interrupt(Interrupt::Heads);
                     }
                     classify_stream(delivered, opened.elapsed(), ended_with)
                 }
@@ -1066,14 +1203,73 @@ fn classify_stream(delivered: usize, lasted: Duration, ended_with: Option<String
     })
 }
 
-fn spawn_ticker(every: Duration, tx: Sender<Wake>) {
+fn spawn_ticker(every: Duration, wakes: Arc<WakeQueue>) {
     let every = every.max(Duration::from_secs(1));
     std::thread::spawn(move || loop {
         std::thread::sleep(every);
-        if tx.send(Wake::Other(Interrupt::Tick)).is_err() {
-            return;
-        }
+        wakes.interrupt(Interrupt::Tick);
     });
+}
+
+struct WriterRenewal {
+    stop: Arc<(Mutex<bool>, Condvar)>,
+    held: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl WriterRenewal {
+    fn spawn(client: TandemClient, workspace: String, holder: String, ttl: Duration) -> Self {
+        let stop = Arc::new((Mutex::new(false), Condvar::new()));
+        let held = Arc::new(AtomicBool::new(true));
+        let thread_stop = stop.clone();
+        let thread_held = held.clone();
+        let thread = std::thread::spawn(move || {
+            let every = (ttl / RENEWALS_PER_TTL).max(Duration::from_millis(1));
+            loop {
+                let stopped = thread_stop.0.lock().expect("renewal stop lock");
+                let (stopped, _) = thread_stop
+                    .1
+                    .wait_timeout_while(stopped, every, |stopped| !*stopped)
+                    .expect("renewal stop wait");
+                if *stopped {
+                    return;
+                }
+                drop(stopped);
+                match client.claim_writer_role(&workspace, &holder, Some(ttl)) {
+                    // Failure is latched for this snapshot. A later success
+                    // cannot prove nobody took the role during the gap.
+                    Ok(WriterClaim::Held { .. }) => {}
+                    Ok(WriterClaim::Refused { detail }) => {
+                        thread_held.store(false, Ordering::Release);
+                        eprintln!("warning: writer role was lost during snapshot: {detail}");
+                    }
+                    Err(error) => {
+                        thread_held.store(false, Ordering::Release);
+                        eprintln!("warning: cannot renew the writer role: {error:#}");
+                    }
+                }
+            }
+        });
+        Self {
+            stop,
+            held,
+            thread: Some(thread),
+        }
+    }
+
+    fn is_held(&self) -> bool {
+        self.held.load(Ordering::Acquire)
+    }
+}
+
+impl Drop for WriterRenewal {
+    fn drop(&mut self) {
+        *self.stop.0.lock().expect("renewal stop lock") = true;
+        self.stop.1.notify_all();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 // ─── Odds and ends ────────────────────────────────────────────────────────────
@@ -1106,6 +1302,88 @@ pub fn run_daemon(settings: &UserSettings, options: &DaemonOptions) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wake_queue_coalesces_bursts_and_preserves_the_oldest_edit() {
+        let queue = WakeQueue::default();
+        let oldest = Instant::now();
+        for offset in 0..1_000 {
+            queue.files(oldest + Duration::from_millis(offset));
+            queue.interrupt(Interrupt::Heads);
+        }
+        assert!(matches!(
+            queue.recv_timeout(Duration::ZERO),
+            Ok(Wake::Files { first_seen }) if first_seen == oldest
+        ));
+        assert!(matches!(
+            queue.recv_timeout(Duration::ZERO),
+            Ok(Wake::Other(Interrupt::Heads))
+        ));
+        assert!(queue.recv_timeout(Duration::ZERO).is_err());
+    }
+
+    #[test]
+    fn wake_queue_retains_each_kind_in_bounded_state() {
+        let queue = WakeQueue::default();
+        queue.interrupt(Interrupt::Tick);
+        queue.interrupt(Interrupt::IgnoredFiles);
+        queue.interrupt(Interrupt::Heads);
+        assert!(matches!(
+            queue.recv_timeout(Duration::ZERO),
+            Ok(Wake::Other(Interrupt::Tick))
+        ));
+        assert!(matches!(
+            queue.recv_timeout(Duration::ZERO),
+            Ok(Wake::Other(Interrupt::Heads))
+        ));
+        assert!(matches!(
+            queue.recv_timeout(Duration::ZERO),
+            Ok(Wake::Other(Interrupt::IgnoredFiles))
+        ));
+        assert!(queue.recv_timeout(Duration::ZERO).is_err());
+    }
+
+    #[test]
+    fn sustained_file_wakes_cannot_starve_a_lease_renewal_tick() {
+        let queue = WakeQueue::default();
+        let now = Instant::now();
+        queue.files(now);
+        queue.interrupt(Interrupt::Tick);
+        assert!(matches!(queue.recv(), Wake::Other(Interrupt::Tick)));
+        // Model a scanner that takes longer than the debounce window and is
+        // immediately made dirty again. The already pending renewal must run
+        // before another scan, regardless of how long this continues.
+        queue
+            .files(now + Duration::from_secs(jj_tandem_protocol::http::DEFAULT_WRITER_TTL_SECONDS));
+        assert!(matches!(queue.recv(), Wake::Files { .. }));
+    }
+
+    #[test]
+    fn continuously_rearmed_control_wakes_still_service_renewal() {
+        let queue = WakeQueue::default();
+        let now = Instant::now();
+        queue.files(now);
+        queue.interrupt(Interrupt::IgnoredFiles);
+        queue.interrupt(Interrupt::Heads);
+        queue.interrupt(Interrupt::Tick);
+        let mut saw_tick = false;
+        for generation in 0..8 {
+            match queue.recv() {
+                Wake::Other(Interrupt::Tick) => {
+                    saw_tick = true;
+                    break;
+                }
+                Wake::Files { .. } | Wake::Other(_) => {}
+            }
+            queue.files(now + Duration::from_secs(generation));
+            queue.interrupt(Interrupt::IgnoredFiles);
+            queue.interrupt(Interrupt::Heads);
+        }
+        assert!(
+            saw_tick,
+            "renewal must be selected despite every other wake being rearmed"
+        );
+    }
 
     /// Turn the daemon's own reconnect policy over a made-up sequence of
     /// attempts, answering how long it waited before each one and what it

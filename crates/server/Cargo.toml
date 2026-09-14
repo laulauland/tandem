@@ -31,4 +31,5 @@ url.workspace = true
 workspace = true
 
 [dev-dependencies]
+prost.workspace = true
 tempfile.workspace = true

@@ -54,6 +54,10 @@ pub struct HostedServer {
     distribution_dir: PathBuf,
     public_url: String,
     faults: Arc<jj_tandem_repository::FaultPoints>,
+    staging_budget: Arc<jj_tandem_repository::StagingBudget>,
+    body_admission: Arc<tokio::sync::Semaphore>,
+    control_body_admission: Arc<tokio::sync::Semaphore>,
+    publish_admission: Arc<tokio::sync::Semaphore>,
 }
 
 impl HostedServer {
@@ -94,6 +98,10 @@ impl HostedServer {
                 .unwrap_or_else(|| PathBuf::from("/opt/tandem/releases")),
             public_url,
             faults,
+            staging_budget: Arc::new(jj_tandem_repository::StagingBudget::default()),
+            body_admission: Arc::new(tokio::sync::Semaphore::new(3)),
+            control_body_admission: Arc::new(tokio::sync::Semaphore::new(1)),
+            publish_admission: Arc::new(tokio::sync::Semaphore::new(4)),
         })
     }
 
@@ -104,9 +112,9 @@ impl HostedServer {
         if let Some((bytes, _)) = &value {
             self.catalog_bytes
                 .fetch_add(bytes.len() as u64, Ordering::Relaxed);
-            tracing::debug!(bucket_calls = 1, bucket_bytes = bytes.len(), catalog = %key, "hosted catalog read");
+            tracing::debug!(catalog_bucket_calls = 1, catalog_bucket_bytes = bytes.len(), catalog = %key, "hosted catalog read");
         } else {
-            tracing::debug!(bucket_calls = 1, bucket_bytes = 0, catalog = %key, "hosted catalog read");
+            tracing::debug!(catalog_bucket_calls = 1, catalog_bucket_bytes = 0, catalog = %key, "hosted catalog read");
         }
         value
             .map(|(bytes, etag)| {
@@ -138,11 +146,15 @@ impl HostedServer {
                 repository_bucket_spec(&self.bucket_spec, name.namespace(), name.repository());
             let cache_existed = cache.exists();
             let open = || -> Result<Arc<Server>> {
-                let server = Arc::new(Server::new_with_faults(
+                let server = Arc::new(Server::new_with_faults_and_budget(
                     cache.clone(),
                     Some(&bucket),
                     &signing_key,
                     self.faults.clone(),
+                    self.staging_budget.clone(),
+                    self.body_admission.clone(),
+                    self.control_body_admission.clone(),
+                    self.publish_admission.clone(),
                 )?);
                 server.durably_initialize()?;
                 Ok(server)
@@ -232,6 +244,19 @@ struct LoadingSlots<T> {
     entries: Mutex<HashMap<String, Arc<LoadSlot<T>>>>,
 }
 
+const MAX_RESIDENT_REPOSITORIES: usize = 16;
+
+#[derive(Debug)]
+struct RepositoryCapacity;
+
+impl std::fmt::Display for RepositoryCapacity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "host repository capacity is full")
+    }
+}
+
+impl std::error::Error for RepositoryCapacity {}
+
 struct LoadSlot<T> {
     state: Mutex<LoadState<T>>,
     changed: Condvar,
@@ -259,6 +284,9 @@ impl<T> LoadingSlots<T> {
             match entries.get(&name) {
                 Some(slot) => (slot.clone(), false),
                 None => {
+                    if entries.len() >= MAX_RESIDENT_REPOSITORIES {
+                        return Err(RepositoryCapacity.into());
+                    }
                     let slot = Arc::new(LoadSlot {
                         state: Mutex::new(LoadState::Loading { waiters: 0 }),
                         changed: Condvar::new(),
@@ -344,6 +372,10 @@ impl<T> LoadingSlots<T> {
             LoadState::Ready(value) => Some(value.clone()),
             LoadState::Loading { .. } | LoadState::Failed(_) => None,
         })
+    }
+
+    fn is_capacity_error(error: &anyhow::Error) -> bool {
+        error.downcast_ref::<RepositoryCapacity>().is_some()
     }
 
     #[cfg(test)]
@@ -662,7 +694,11 @@ fn create_repository_parsed(
             Ok(provisioning_etag) => {
                 if let Err(error) = server.repository(&name, &record, true) {
                     tracing::error!(%error, namespace, repository, "repository provisioning failed");
-                    return StatusCode::INTERNAL_SERVER_ERROR;
+                    return if LoadingSlots::<Server>::is_capacity_error(&error) {
+                        StatusCode::SERVICE_UNAVAILABLE
+                    } else {
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    };
                 }
                 after_provisioning();
                 record
@@ -742,7 +778,11 @@ async fn dispatch_repository(
         Ok(Ok(None)) => return StatusCode::NOT_FOUND.into_response(),
         Ok(Err(error)) => {
             tracing::error!(%error, namespace, repository, "hosted repository load failed");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return if LoadingSlots::<Server>::is_capacity_error(&error) {
+                StatusCode::SERVICE_UNAVAILABLE.into_response()
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            };
         }
         Err(error) => {
             tracing::error!(%error, namespace, repository, "hosted repository task failed");
@@ -1193,6 +1233,33 @@ mod tests {
         release_tx.send(()).unwrap();
         assert_eq!(*slow.join().unwrap(), 1);
         assert_eq!(*fast.join().unwrap(), 2);
+    }
+
+    #[test]
+    fn repository_registry_has_a_hard_resident_engine_cap() {
+        let slots = LoadingSlots::new();
+        assert!(slots
+            .load("namespace/failed".into(), || anyhow::bail!(
+                "injected failure"
+            ))
+            .is_err());
+        assert_eq!(slots.len(), 0, "failed loads must not consume capacity");
+        for index in 0..MAX_RESIDENT_REPOSITORIES {
+            slots
+                .load(format!("namespace/repo-{index}"), || Ok(Arc::new(index)))
+                .unwrap();
+        }
+        let error = slots
+            .load("namespace/overflow".into(), || Ok(Arc::new(99)))
+            .unwrap_err();
+        assert!(LoadingSlots::<usize>::is_capacity_error(&error));
+        assert_eq!(slots.len(), MAX_RESIDENT_REPOSITORIES);
+        assert_eq!(
+            *slots
+                .load("namespace/repo-0".into(), || panic!("must remain warm"))
+                .unwrap(),
+            0
+        );
     }
 
     #[test]

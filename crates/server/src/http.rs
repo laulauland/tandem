@@ -32,6 +32,7 @@ use axum::{Json, Router};
 use futures::stream::Stream;
 use futures::StreamExt as _;
 use tokio_stream::wrappers::BroadcastStream;
+use tracing::Instrument as _;
 
 use super::Server;
 use jj_tandem_protocol::{
@@ -49,7 +50,6 @@ use jj_tandem_protocol::{
 // nothing, reports the constants that describe its own behaviour.
 const SERVER_ATTEMPT: u32 = 1;
 const SERVER_CAS_RETRIES: u32 = 0;
-const SERVER_QUEUE_DEPTH: u32 = 0;
 
 // ─── Request size ─────────────────────────────────────────────────────────────
 //
@@ -103,6 +103,7 @@ async fn require_bearer(
     mut request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> ApiResult<Response> {
+    const CONTROL_BODY_MAX_BYTES: usize = 16 * 1024;
     let presented = bearer_from_headers(request.headers())?.to_string();
     let Some(authority) = server.authority_for(&presented) else {
         tracing::debug!(path = %request.uri().path(), "refused an unauthenticated request");
@@ -112,7 +113,70 @@ async fn require_bearer(
         ));
     };
     request.extensions_mut().insert(authority);
-    Ok(next.run(request).await)
+    let is_publish =
+        request.method() == axum::http::Method::POST && request.uri().path() == "/api/heads";
+    if is_publish {
+        let permit = server
+            .acquire_publish()
+            .await
+            .map_err(publish_admission_error)?;
+        request
+            .extensions_mut()
+            .insert(Arc::new(super::PublishPermitCell(std::sync::Mutex::new(
+                Some(permit),
+            ))));
+    }
+    // Authenticate the headers first, then acquire before an extractor polls
+    // the body. GET includes the long-lived event stream and therefore never
+    // consumes a decoded-body permit.
+    let is_writer_control =
+        request.method() == axum::http::Method::POST && request.uri().path().ends_with("/writer");
+    let body_permit = if requires_body_permit(request.method()) {
+        Some(
+            server
+                .acquire_body(is_writer_control)
+                .await
+                .map_err(ApiError::internal)?,
+        )
+    } else {
+        None
+    };
+    if let Some(body_permit) = body_permit {
+        if is_writer_control {
+            let (parts, body) = request.into_parts();
+            let bytes = axum::body::to_bytes(body, CONTROL_BODY_MAX_BYTES)
+                .await
+                .map_err(|_| {
+                    ApiError::new(
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        "writer claim body exceeds 16 KiB",
+                    )
+                })?;
+            request = axum::http::Request::from_parts(parts, axum::body::Body::from(bytes));
+        }
+        // A disconnected caller cancels this middleware future, but Tokio
+        // detaches the task. Its decoded body and admission charge therefore
+        // live together until all downstream work has actually finished.
+        let span = tracing::Span::current();
+        tokio::spawn(
+            async move {
+                let _body_permit = body_permit;
+                next.run(request).await
+            }
+            .instrument(span),
+        )
+        .await
+        .map_err(|error| ApiError::internal(anyhow::anyhow!("request task failed: {error}")))
+    } else {
+        Ok(next.run(request).await)
+    }
+}
+
+fn requires_body_permit(method: &axum::http::Method) -> bool {
+    matches!(
+        *method,
+        axum::http::Method::POST | axum::http::Method::PUT | axum::http::Method::PATCH
+    )
 }
 
 /// The token out of `Authorization: Bearer …`, or the 401 that refuses it.
@@ -236,9 +300,13 @@ where
     T: Send + 'static,
 {
     let server = Arc::clone(server);
-    tokio::task::spawn_blocking(move || work(&server))
-        .await
-        .map_err(|e| anyhow::anyhow!("worker task failed: {e}"))?
+    let span = tracing::Span::current();
+    tokio::task::spawn_blocking(move || {
+        let _entered = span.enter();
+        work(&server)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("worker task failed: {e}"))?
 }
 
 // ─── Handlers: repo info ──────────────────────────────────────────────────────
@@ -294,9 +362,11 @@ async fn put_object(
     body: Bytes,
 ) -> ApiResult<Response> {
     let kind = validated_kind(&kind)?;
-    tracing::info!(rpc_method = "putObject", kind = %kind, bytes = body.len(), "rpc request");
+    let body_len = body.len();
+    tracing::info!(rpc_method = "putObject", kind = %kind, bytes = body_len, "rpc request");
 
     let data = body.to_vec();
+    drop(body);
     let (id, normalized) = blocking(&server, move |server| {
         server.repository.put_object_sync(kind, &data)
     })
@@ -307,7 +377,7 @@ async fn put_object(
         rpc_method = "putObject",
         kind = %kind,
         object_id = %to_hex(&id),
-        bytes = body.len(),
+        bytes = body_len,
         normalized_bytes = normalized.len(),
         "rpc response"
     );
@@ -317,6 +387,7 @@ async fn put_object(
 async fn put_objects_batch(State(server): State<Arc<Server>>, body: Bytes) -> ApiResult<Response> {
     let items = wire::decode_batch_request(&body)
         .map_err(|e| ApiError::bad_request(format!("bad batch frame: {e}")))?;
+    drop(body);
     tracing::info!(
         rpc_method = "putObjectsBatch",
         items = items.len(),
@@ -382,19 +453,17 @@ async fn get_operation(
 }
 
 async fn put_operation(State(server): State<Arc<Server>>, body: Bytes) -> ApiResult<Response> {
-    tracing::info!(
-        rpc_method = "putOperation",
-        bytes = body.len(),
-        "rpc request"
-    );
+    let body_len = body.len();
+    tracing::info!(rpc_method = "putOperation", bytes = body_len, "rpc request");
     let data = body.to_vec();
+    drop(body);
     let id = blocking(&server, move |server| {
         server.repository.put_operation_sync(&data)
     })
     .await
     .map_err(ApiError::from_write)?;
 
-    tracing::info!(rpc_method = "putOperation", operation_id = %to_hex(&id), bytes = body.len(), "rpc response");
+    tracing::info!(rpc_method = "putOperation", operation_id = %to_hex(&id), bytes = body_len, "rpc response");
     Ok(id_and_bytes(wire::HEADER_OPERATION_ID, &id, Vec::new()))
 }
 
@@ -402,14 +471,16 @@ async fn put_operation_with_view(
     State(server): State<Arc<Server>>,
     body: Bytes,
 ) -> ApiResult<Response> {
+    let body_len = body.len();
     tracing::info!(
         rpc_method = "putOperationWithView",
-        bytes = body.len(),
+        bytes = body_len,
         "rpc request"
     );
     let (view, operation) = wire::decode_operation_upload(&body).map_err(ApiError::bad_request)?;
     let view = view.to_vec();
     let operation = operation.to_vec();
+    drop(body);
     let (view_id, id) = blocking(&server, move |server| {
         server
             .repository
@@ -417,7 +488,7 @@ async fn put_operation_with_view(
     })
     .await
     .map_err(ApiError::from_write)?;
-    tracing::info!(rpc_method = "putOperationWithView", operation_id = %to_hex(&id), bytes = body.len(), "rpc response");
+    tracing::info!(rpc_method = "putOperationWithView", operation_id = %to_hex(&id), bytes = body_len, "rpc response");
     let mut response = id_and_bytes(wire::HEADER_OPERATION_ID, &id, Vec::new());
     response.headers_mut().insert(
         wire::HEADER_VIEW_ID,
@@ -442,15 +513,17 @@ async fn get_view(
 }
 
 async fn put_view(State(server): State<Arc<Server>>, body: Bytes) -> ApiResult<Response> {
-    tracing::info!(rpc_method = "putView", bytes = body.len(), "rpc request");
+    let body_len = body.len();
+    tracing::info!(rpc_method = "putView", bytes = body_len, "rpc request");
     let data = body.to_vec();
+    drop(body);
     let id = blocking(&server, move |server| {
         server.repository.put_view_sync(&data)
     })
     .await
     .map_err(ApiError::from_write)?;
 
-    tracing::info!(rpc_method = "putView", view_id = %to_hex(&id), bytes = body.len(), "rpc response");
+    tracing::info!(rpc_method = "putView", view_id = %to_hex(&id), bytes = body_len, "rpc response");
     Ok(id_and_bytes(wire::HEADER_VIEW_ID, &id, Vec::new()))
 }
 
@@ -554,11 +627,23 @@ async fn update_heads(
         old_ids.push(parse_hex(hex, "old operation id")?);
     }
     let new_id = parse_hex(&request.new_id, "new operation id")?;
+    let new_id_hex = request.new_id.clone();
     let workspace_id = if request.workspace_id.is_empty() {
         None
     } else {
         Some(request.workspace_id.clone())
     };
+    let cell = extensions
+        .get::<Arc<super::PublishPermitCell>>()
+        .ok_or_else(|| ApiError::internal(anyhow::anyhow!("publish admission missing")))?;
+    let publish_permit = cell
+        .0
+        .lock()
+        .map_err(|error| ApiError::internal(anyhow::anyhow!("publish admission lock: {error}")))?
+        .take()
+        .ok_or_else(|| ApiError::internal(anyhow::anyhow!("publish admission already used")))?;
+    let queue_depth = publish_permit.queue_depth;
+    let admission_wait_ms = publish_permit.wait_ms;
 
     let started = Instant::now();
     tracing::debug!(
@@ -569,13 +654,15 @@ async fn update_heads(
         workspace_id = request.workspace_id.as_str(),
         attempt = SERVER_ATTEMPT,
         cas_retries = SERVER_CAS_RETRIES,
-        queue_depth = SERVER_QUEUE_DEPTH,
+        queue_depth,
+        admission_wait_ms,
         "rpc request"
     );
 
     let workspace_for_call = workspace_id.clone();
     let new_for_call = new_id.clone();
     let result = blocking(&server, move |server| {
+        let _publish_permit = publish_permit;
         server.update_op_heads_sync(
             old_ids,
             new_for_call,
@@ -599,9 +686,11 @@ async fn update_heads(
         version = result.version,
         heads = result.heads.len(),
         workspace_heads = result.workspace_heads.len(),
+        new_id = %new_id_hex,
         attempt = SERVER_ATTEMPT,
         cas_retries = SERVER_CAS_RETRIES,
-        queue_depth = SERVER_QUEUE_DEPTH,
+        queue_depth,
+        admission_wait_ms,
         latency_ms = started.elapsed().as_millis() as u64,
         "rpc response"
     );
@@ -614,6 +703,14 @@ async fn update_heads(
             workspace_heads: result.workspace_heads,
         },
     ))
+}
+
+fn publish_admission_error(error: anyhow::Error) -> ApiError {
+    if error.downcast_ref::<super::PublishQueueFull>().is_some() {
+        ApiError::new(StatusCode::SERVICE_UNAVAILABLE, error.to_string())
+    } else {
+        ApiError::internal(error)
+    }
 }
 
 /// The CAS version a client is publishing against, taken from `If-Match`.
@@ -768,4 +865,501 @@ fn id_and_bytes(header_name: &'static str, id: &[u8], body: Vec<u8>) -> Response
         headers.insert(header_name, value);
     }
     (headers, body).into_response()
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+    use prost::Message as _;
+    use std::time::Duration;
+    use tower::ServiceExt as _;
+
+    fn gated_request(
+        uri: &'static str,
+    ) -> (
+        axum::http::Request<axum::body::Body>,
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let stream = futures::stream::once(async move {
+            let _ = entered_tx.send(());
+            let _ = release_rx.await;
+            Ok::<_, Infallible>(Bytes::from_static(b"{}"))
+        });
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header(header::AUTHORIZATION, "Bearer router-admission-secret")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::from_stream(stream))
+            .unwrap();
+        (request, entered_rx, release_tx)
+    }
+
+    fn test_router(
+        bodies: Arc<tokio::sync::Semaphore>,
+        publishes: Arc<tokio::sync::Semaphore>,
+    ) -> (tempfile::TempDir, Router) {
+        let directory = tempfile::tempdir().unwrap();
+        let server = super::super::Server::new_with_faults_and_budget(
+            directory.path().to_path_buf(),
+            None,
+            "router-admission-secret",
+            jj_tandem_repository::FaultPoints::inert(),
+            Arc::new(jj_tandem_repository::StagingBudget::default()),
+            bodies,
+            Arc::new(tokio::sync::Semaphore::new(1)),
+            publishes,
+        )
+        .unwrap();
+        (directory, router(Arc::new(server)))
+    }
+
+    async fn publish_child(router: Router, description: &str) -> StatusCode {
+        let request = |method, uri: &str, body: axum::body::Body| {
+            axum::http::Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(header::AUTHORIZATION, "Bearer router-admission-secret")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(body)
+                .unwrap()
+        };
+        let heads_response = router
+            .clone()
+            .oneshot(request(
+                axum::http::Method::GET,
+                "/api/heads",
+                axum::body::Body::empty(),
+            ))
+            .await
+            .unwrap();
+        let etag = heads_response.headers()[header::ETAG].clone();
+        let heads_bytes = axum::body::to_bytes(heads_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let heads: serde_json::Value = serde_json::from_slice(&heads_bytes).unwrap();
+        let old = heads["heads"][0].as_str().unwrap();
+        let operation_response = router
+            .clone()
+            .oneshot(request(
+                axum::http::Method::GET,
+                &format!("/api/ops/{old}"),
+                axum::body::Body::empty(),
+            ))
+            .await
+            .unwrap();
+        let operation_bytes = axum::body::to_bytes(operation_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let mut operation =
+            jj_lib::protos::simple_op_store::Operation::decode(operation_bytes).unwrap();
+        operation.parents = vec![from_hex(old).unwrap()];
+        operation.metadata.get_or_insert_default().description = description.to_owned();
+        let upload = router
+            .clone()
+            .oneshot(request(
+                axum::http::Method::POST,
+                "/api/ops",
+                axum::body::Body::from(operation.encode_to_vec()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(upload.status(), StatusCode::OK);
+        let new_id = upload.headers()[wire::HEADER_OPERATION_ID]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let body = serde_json::to_vec(&serde_json::json!({
+            "oldIds": [old], "newId": new_id, "workspaceId": ""
+        }))
+        .unwrap();
+        let mut publish = request(
+            axum::http::Method::POST,
+            "/api/heads",
+            axum::body::Body::from(body),
+        );
+        publish.headers_mut().insert(header::IF_MATCH, etag);
+        router.oneshot(publish).await.unwrap().status()
+    }
+
+    async fn claim_writer(router: Router, holder: &str, ttl_seconds: u64) -> StatusCode {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "holder": holder,
+            "ttlSeconds": ttl_seconds,
+        }))
+        .unwrap();
+        let request = axum::http::Request::builder()
+            .method(axum::http::Method::POST)
+            .uri("/api/workspaces/agent-a/writer")
+            .header(header::AUTHORIZATION, "Bearer router-admission-secret")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::from(body))
+            .unwrap();
+        router.oneshot(request).await.unwrap().status()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_blocked_wal_publish_does_not_block_another_router() {
+        struct ReleaseWal(Arc<jj_tandem_repository::FaultPoints>);
+        impl Drop for ReleaseWal {
+            fn drop(&mut self) {
+                self.0.release_wal_write();
+            }
+        }
+        let temporary = tempfile::tempdir().unwrap();
+        let bodies = Arc::new(tokio::sync::Semaphore::new(4));
+        let publishes = Arc::new(tokio::sync::Semaphore::new(4));
+        let faults = jj_tandem_repository::FaultPoints::inert();
+        let make = |name: &str| {
+            let cache = temporary.path().join(format!("{name}-cache"));
+            let bucket = temporary.path().join(format!("{name}-bucket"));
+            let server = super::super::Server::new_with_faults_and_budget(
+                cache,
+                Some(bucket.to_str().unwrap()),
+                "router-admission-secret",
+                faults.clone(),
+                Arc::new(jj_tandem_repository::StagingBudget::default()),
+                bodies.clone(),
+                Arc::new(tokio::sync::Semaphore::new(1)),
+                publishes.clone(),
+            )
+            .unwrap();
+            server.durably_initialize().unwrap();
+            router(Arc::new(server))
+        };
+        let first = make("first");
+        let second = make("second");
+        assert_eq!(
+            claim_writer(first.clone(), "healthy-daemon", 0).await,
+            StatusCode::OK
+        );
+        faults.hold_next_wal_write();
+        let release = ReleaseWal(faults.clone());
+        let blocked = tokio::spawn(publish_child(first.clone(), "blocked"));
+        tokio::task::spawn_blocking({
+            let faults = faults.clone();
+            move || faults.wait_for_held_wal_write()
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            claim_writer(first.clone(), "healthy-daemon", 30).await,
+            StatusCode::OK,
+            "writer renewal must not wait for repository WAL work"
+        );
+        assert_eq!(
+            claim_writer(first.clone(), "competing-daemon", 30).await,
+            StatusCode::CONFLICT,
+            "renewal must keep a competing daemon out while publish is gated"
+        );
+        let unrelated =
+            tokio::time::timeout(Duration::from_secs(10), publish_child(second, "unrelated"))
+                .await
+                .expect("another repository did not durably acknowledge before gate release");
+        assert_eq!(unrelated, StatusCode::OK);
+        drop(release);
+        assert_eq!(blocked.await.unwrap(), StatusCode::OK);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn writer_renewal_has_a_reserved_bounded_body_slot() {
+        let bodies = Arc::new(tokio::sync::Semaphore::new(3));
+        let publishes = Arc::new(tokio::sync::Semaphore::new(4));
+        let (_directory, router) = test_router(bodies, publishes);
+        let mut active = Vec::new();
+        let mut releases = Vec::new();
+        for _ in 0..3 {
+            let (request, entered, release) = gated_request("/api/objects/file");
+            let service = router.clone();
+            active.push(tokio::spawn(async move { service.oneshot(request).await }));
+            releases.push(release);
+            entered.await.unwrap();
+        }
+        let (fourth, mut fourth_entered, fourth_release) = gated_request("/api/objects/file");
+        let service = router.clone();
+        let queued = tokio::spawn(async move { service.oneshot(fourth).await });
+        tokio::task::yield_now().await;
+        assert!(matches!(
+            fourth_entered.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+
+        assert_eq!(
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                claim_writer(router.clone(), "healthy-daemon", 30),
+            )
+            .await
+            .expect("writer renewal waited behind general request bodies"),
+            StatusCode::OK
+        );
+
+        for release in releases {
+            let _ = release.send(());
+        }
+        for task in active {
+            let _ = task.await;
+        }
+        tokio::time::timeout(Duration::from_secs(1), &mut fourth_entered)
+            .await
+            .unwrap()
+            .unwrap();
+        let _ = fourth_release.send(());
+        let _ = queued.await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn three_wal_blocked_publishes_and_a_fourth_waiter_leave_renewal_available() {
+        let temporary = tempfile::tempdir().unwrap();
+        let bodies = Arc::new(tokio::sync::Semaphore::new(3));
+        let controls = Arc::new(tokio::sync::Semaphore::new(1));
+        let publishes = Arc::new(tokio::sync::Semaphore::new(4));
+        let mut faults = Vec::new();
+        let mut routers = Vec::new();
+        for index in 0..4 {
+            let fault = jj_tandem_repository::FaultPoints::inert();
+            let cache = temporary.path().join(format!("cache-{index}"));
+            let bucket = temporary.path().join(format!("bucket-{index}"));
+            let server = super::super::Server::new_with_faults_and_budget(
+                cache,
+                Some(bucket.to_str().unwrap()),
+                "router-admission-secret",
+                fault.clone(),
+                Arc::new(jj_tandem_repository::StagingBudget::default()),
+                bodies.clone(),
+                controls.clone(),
+                publishes.clone(),
+            )
+            .unwrap();
+            server.durably_initialize().unwrap();
+            faults.push(fault);
+            routers.push(router(Arc::new(server)));
+        }
+        assert_eq!(
+            claim_writer(routers[0].clone(), "healthy", 0).await,
+            StatusCode::OK
+        );
+        let mut blocked = Vec::new();
+        for (index, fault) in faults.iter().take(3).enumerate() {
+            fault.hold_next_wal_write();
+            blocked.push(tokio::spawn(publish_child(
+                routers[index].clone(),
+                "blocked",
+            )));
+        }
+        struct ReleaseWals(Vec<Arc<jj_tandem_repository::FaultPoints>>);
+        impl Drop for ReleaseWals {
+            fn drop(&mut self) {
+                for fault in &self.0 {
+                    fault.release_wal_write();
+                }
+            }
+        }
+        let release = ReleaseWals(faults[..3].to_vec());
+        for fault in faults.iter().take(3) {
+            tokio::task::spawn_blocking({
+                let fault = fault.clone();
+                move || fault.wait_for_held_wal_write()
+            })
+            .await
+            .unwrap();
+        }
+        let fourth = tokio::spawn(publish_child(routers[3].clone(), "waiting"));
+        tokio::task::yield_now().await;
+        assert_eq!(
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                claim_writer(routers[0].clone(), "healthy", 30),
+            )
+            .await
+            .expect("renewal waited behind saturated general body admission"),
+            StatusCode::OK
+        );
+        assert_eq!(
+            claim_writer(routers[0].clone(), "competitor", 30).await,
+            StatusCode::CONFLICT
+        );
+        drop(release);
+        for task in blocked {
+            assert_eq!(task.await.unwrap(), StatusCode::OK);
+        }
+        assert_eq!(fourth.await.unwrap(), StatusCode::OK);
+    }
+
+    #[test]
+    fn only_methods_with_decoded_request_bodies_need_a_permit() {
+        assert!(requires_body_permit(&axum::http::Method::POST));
+        assert!(requires_body_permit(&axum::http::Method::PUT));
+        assert!(requires_body_permit(&axum::http::Method::PATCH));
+        assert!(!requires_body_permit(&axum::http::Method::GET));
+        assert!(!requires_body_permit(&axum::http::Method::HEAD));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn real_router_retains_body_permits_through_cancel_and_excludes_sse() {
+        let bodies = Arc::new(tokio::sync::Semaphore::new(4));
+        let publishes = Arc::new(tokio::sync::Semaphore::new(4));
+        let mut directories = Vec::new();
+        let mut faults = Vec::new();
+        let mut routers = Vec::new();
+        for _ in 0..5 {
+            let directory = tempfile::tempdir().unwrap();
+            let fault = jj_tandem_repository::FaultPoints::inert();
+            let server = super::super::Server::new_with_faults_and_budget(
+                directory.path().to_path_buf(),
+                None,
+                "router-admission-secret",
+                fault.clone(),
+                Arc::new(jj_tandem_repository::StagingBudget::default()),
+                bodies.clone(),
+                Arc::new(tokio::sync::Semaphore::new(1)),
+                publishes.clone(),
+            )
+            .unwrap();
+            directories.push(directory);
+            faults.push(fault);
+            routers.push(router(Arc::new(server)));
+        }
+        let request = |entered: tokio::sync::oneshot::Sender<()>,
+                       release: tokio::sync::oneshot::Receiver<()>| {
+            let stream = futures::stream::once(async move {
+                let _ = entered.send(());
+                let _ = release.await;
+                Ok::<_, Infallible>(Bytes::from_static(b"body"))
+            });
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/objects/file")
+                .header(header::AUTHORIZATION, "Bearer router-admission-secret")
+                .body(axum::body::Body::from_stream(stream))
+                .unwrap()
+        };
+
+        let mut releases = Vec::new();
+        let mut active = Vec::new();
+        for index in 0..4 {
+            faults[index].hold_next_object_write();
+            let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+            let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+            releases.push(release_tx);
+            let router = routers[index].clone();
+            active.push(tokio::spawn(async move {
+                router.oneshot(request(entered_tx, release_rx)).await
+            }));
+            entered_rx.await.unwrap();
+        }
+
+        let sse = axum::http::Request::builder()
+            .uri("/api/events")
+            .header(header::AUTHORIZATION, "Bearer router-admission-secret")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response =
+            tokio::time::timeout(Duration::from_secs(1), routers[4].clone().oneshot(sse))
+                .await
+                .expect("SSE must not wait for body admission")
+                .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let (fifth_entered_tx, mut fifth_entered_rx) = tokio::sync::oneshot::channel();
+        let (fifth_release_tx, fifth_release_rx) = tokio::sync::oneshot::channel();
+        let fifth_router = routers[4].clone();
+        let fifth = tokio::spawn(async move {
+            fifth_router
+                .oneshot(request(fifth_entered_tx, fifth_release_rx))
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(matches!(
+            fifth_entered_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        active[0].abort();
+        let _ = (&mut active[0]).await;
+        assert!(
+            matches!(
+                fifth_entered_rx.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            ),
+            "client cancellation released a live body charge"
+        );
+        releases.remove(0).send(()).unwrap();
+        faults[0].release_object_write();
+        tokio::time::timeout(Duration::from_secs(1), &mut fifth_entered_rx)
+            .await
+            .expect("fifth body should be polled after actual work releases capacity")
+            .unwrap();
+        let _ = fifth_release_tx.send(());
+        for (index, release) in releases.into_iter().enumerate() {
+            let _ = release.send(());
+            faults[index + 1].release_object_write();
+        }
+        let _ = fifth.await;
+        for task in active.into_iter().skip(1) {
+            let _ = task.await;
+        }
+        drop(directories);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn queued_publishes_do_not_monopolize_body_permits_across_repositories() {
+        let bodies = Arc::new(tokio::sync::Semaphore::new(4));
+        let publishes = Arc::new(tokio::sync::Semaphore::new(4));
+        let (_first_dir, first) = test_router(bodies.clone(), publishes.clone());
+        let (_other_dir, other) = test_router(bodies, publishes);
+
+        let (active_request, active_entered, active_release) = gated_request("/api/heads");
+        let active_router = first.clone();
+        let active = tokio::spawn(async move { active_router.oneshot(active_request).await });
+        active_entered.await.unwrap();
+
+        let mut queued = Vec::new();
+        let mut queued_entered = Vec::new();
+        let mut queued_releases = Vec::new();
+        for _ in 0..3 {
+            let (request, entered, release) = gated_request("/api/heads");
+            let router = first.clone();
+            queued.push(tokio::spawn(async move { router.oneshot(request).await }));
+            queued_entered.push(entered);
+            queued_releases.push(release);
+        }
+        tokio::task::yield_now().await;
+        for entered in &mut queued_entered {
+            assert!(matches!(
+                entered.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            ));
+        }
+
+        let mut unrelated = Vec::new();
+        let mut unrelated_releases = Vec::new();
+        for _ in 0..3 {
+            let (request, entered, release) = gated_request("/api/objects/file");
+            let router = other.clone();
+            unrelated.push(tokio::spawn(async move { router.oneshot(request).await }));
+            unrelated_releases.push(release);
+            tokio::time::timeout(Duration::from_secs(1), entered)
+                .await
+                .expect("another repository should retain the three free body permits")
+                .unwrap();
+        }
+
+        for release in unrelated_releases {
+            let _ = release.send(());
+        }
+        for task in unrelated {
+            let _ = task.await;
+        }
+        let _ = active_release.send(());
+        let _ = active.await;
+        for release in queued_releases {
+            let _ = release.send(());
+        }
+        for task in queued {
+            let _ = task.await;
+        }
+    }
 }

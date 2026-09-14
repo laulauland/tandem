@@ -31,6 +31,9 @@ tokio.workspace = true
 reqwest.workspace = true
 
 [dev-dependencies]
+axum.workspace = true
+jj-tandem-repository.workspace = true
+notify.workspace = true
 pollster.workspace = true
 jj-tandem-jj.workspace = true
 prost.workspace = true

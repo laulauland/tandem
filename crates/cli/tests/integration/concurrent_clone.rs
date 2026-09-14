@@ -2,6 +2,64 @@ use crate::common::{self, ServerFixture};
 use std::sync::{Arc, Barrier};
 
 #[test]
+fn repeated_snapshots_scan_a_ten_thousand_file_tree_without_losing_the_final_edit() {
+    let fx = ServerFixture::start();
+    let workspace = fx.init_workspace("large-tree", Some("scanner"));
+    let tree = workspace.join("tree");
+    std::fs::create_dir(&tree).unwrap();
+    for index in 0..10_000 {
+        std::fs::write(
+            tree.join(format!("file-{index:05}")),
+            format!("initial {index}\n"),
+        )
+        .unwrap();
+    }
+    let settings =
+        jj_lib::settings::UserSettings::from_config(jj_lib::config::StackedConfig::with_defaults())
+            .unwrap();
+    let mut daemon = jj_tandem_workspace::Daemon::open(
+        &settings,
+        &jj_tandem_workspace::DaemonOptions::new(&workspace),
+    )
+    .unwrap();
+    assert!(matches!(
+        daemon.snapshot_once().unwrap(),
+        jj_tandem_workspace::SnapshotOutcome::Published(_)
+    ));
+    let mut scan_millis = Vec::new();
+    for generation in 0..43u8 {
+        let bytes = vec![0, generation, 255, b'\n'];
+        std::fs::write(tree.join("file-09999"), &bytes).unwrap();
+        let started = std::time::Instant::now();
+        let jj_tandem_workspace::SnapshotOutcome::Published(published) =
+            daemon.snapshot_once().unwrap()
+        else {
+            panic!("rewritten scan file must publish");
+        };
+        if generation >= 3 {
+            scan_millis.push(started.elapsed().as_secs_f64() * 1_000.0);
+        }
+        assert_eq!(std::fs::read(tree.join("file-09999")).unwrap(), bytes);
+        let read = common::run_tandem_in_with_env(
+            &workspace,
+            &[
+                "file",
+                "show",
+                "--ignore-working-copy",
+                "-r",
+                &published.commit_id,
+                "tree/file-09999",
+            ],
+            &[("TANDEM_DISABLE_CACHE", "1")],
+            &fx.home,
+        );
+        common::assert_ok(&read, "read acknowledged scan generation");
+        assert_eq!(read.stdout, bytes);
+    }
+    println!("stage6_scan_millis={scan_millis:?}");
+}
+
+#[test]
 fn concurrent_new_workspaces_can_publish_without_stale_repair() {
     concurrent_clones_after_rewrites("bench", false);
 }
@@ -18,7 +76,7 @@ fn concurrent_clones_after_reattached_workspace_rewrites_can_publish_without_rep
 
 fn concurrent_clones_after_rewrites(seed_name: &str, reattach: bool) {
     let bucket = tempfile::tempdir().unwrap();
-    let fx = ServerFixture::builder()
+    let mut fx = ServerFixture::builder()
         .args(&["--bucket", bucket.path().to_str().unwrap()])
         .log_to_file()
         .start();
@@ -112,12 +170,11 @@ fn concurrent_clones_after_rewrites(seed_name: &str, reattach: bool) {
                 )
                 .unwrap();
                 let outcome = daemon.snapshot_once().unwrap();
-                assert!(
-                    matches!(outcome, jj_tandem_workspace::SnapshotOutcome::Published(_)),
-                    "{name}: first daemon snapshot must publish without stale repair: {outcome:?}"
-                );
+                let jj_tandem_workspace::SnapshotOutcome::Published(published) = outcome else {
+                    panic!("{name}: first daemon snapshot must publish without stale repair: {outcome:?}");
+                };
                 assert_eq!(std::fs::read(dir.join("payload.bin")).unwrap(), bytes);
-                (dir, name, bytes)
+                (dir, name, bytes, published.operation_id)
             })
         })
         .collect();
@@ -125,8 +182,30 @@ fn concurrent_clones_after_rewrites(seed_name: &str, reattach: bool) {
         .into_iter()
         .map(|publisher| publisher.join().unwrap())
         .collect();
+    fx.stop();
+    std::fs::remove_dir_all(&fx.repo).unwrap();
+    fx.restart_with_env(&[]);
     let observer = &workspaces[0].0;
-    for (_, workspace, bytes) in &published {
+    let operations = common::run_tandem_in_with_env(
+        observer,
+        &[
+            "op",
+            "log",
+            "--ignore-working-copy",
+            "--no-graph",
+            "-T",
+            "id ++ \"\\n\"",
+        ],
+        &[("TANDEM_DISABLE_CACHE", "1")],
+        &fx.home,
+    );
+    common::assert_ok(&operations, "walk recovered operation ancestry");
+    let operations = String::from_utf8(operations.stdout).unwrap();
+    for (_, workspace, bytes, operation) in &published {
+        assert!(
+            operations.lines().any(|line| line == operation),
+            "acknowledged operation must remain reachable after cold recovery"
+        );
         let revision = format!("{workspace}@");
         let read = common::run_tandem_in_with_env(
             observer,

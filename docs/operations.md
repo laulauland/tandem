@@ -11,8 +11,13 @@ ownership, the repository catalog, and published history in the bucket. Each
 repository has a disposable colocated jj/Git cache beneath the host cache root.
 Repository engines load independently with bounded concurrent recovery and stay
 resident for the host lifetime so active leases and event streams retain one
-identity. Capacity budgets beyond this conservative lifetime policy belong to a
-later hosting stage.
+identity. The host admits at most 16 resident engines and four concurrent cold
+opens. It admits three general decoded request bodies plus one bounded writer
+control body, and four active publishes across the host; each repository has
+one active publish and up to eight queued. Staged
+objects stop below 64 MiB per repository to reserve WAL framing and metadata,
+and at 512 MiB across the host. An encoded WAL entry is capped at 64 MiB before
+its output allocation.
 The current delivery and qualification status is recorded in the
 [hosting plan](hosting-on-exe.md); production deployment is a later stage.
 
@@ -108,11 +113,12 @@ publication; this repository refactor does not perform one.
   logs and apply retention outside Tandem.
 - Run the server at normal verbosity and raise the streaming filter during an
   incident. Never enable ad-hoc token or request-body logging.
-- Debug events for catalog reads and WAL ancestry checks/writes report their
-  own bucket calls and transferred payload bytes. These fields measure those
-  named operations only; they are not totals for index commits, recovery, or
-  all object-store traffic. Hosted request events carry the repository name so
-  request counts can be separated on a shared host.
+- Every object-store operation emits `bucket_calls`, `bucket_read_bytes`, and
+  `bucket_write_bytes`. Its operation and backend fields state the coverage;
+  hosted repository stores also carry the repository name. Catalog and WAL
+  events retain separately named detail counters and are not added to the total
+  object-store count. Publish events report admission wait and queue depth;
+  repository coordination reports lock wait and hold time.
 - Alert on repeated publish failures, index conflicts that do not settle,
   writer-lease churn, restart loops, storage errors, disk pressure, and an
   unexpectedly large cold replay.

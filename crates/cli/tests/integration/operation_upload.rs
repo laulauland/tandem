@@ -209,30 +209,30 @@ fn oversized_view_uploads_without_entering_pending_buffer() {
 }
 
 #[test]
-fn aggregate_body_overflow_uses_two_bounded_uploads() {
-    use jj_lib::ref_name::WorkspaceNameBuf;
-    use jj_tandem_protocol::wire::MAX_REQUEST_BODY_BYTES;
+fn oversized_operation_metadata_is_rejected_before_the_view_is_stored() {
     let fx = ServerFixture::builder().log_to_file().start();
     let store = store(&fx, "metadata");
-    let mut contents = view(91);
-    contents.wc_commit_ids.insert(
-        WorkspaceNameBuf::from("v".repeat(8192)),
-        CommitId::from_bytes(&[91; 20]),
-    );
+    let contents = view(91);
     let view_id = store.write_view(&contents).block_on().unwrap();
     let mut operation = operation(&store, view_id.clone());
-    operation.metadata.description = "o".repeat(MAX_REQUEST_BODY_BYTES - 4096);
-    let operation_size = proto_convert::operation_to_proto(&operation).encoded_len();
-    let view_size = proto_convert::view_to_proto(&contents).encoded_len();
-    assert!(operation_size <= MAX_REQUEST_BODY_BYTES);
-    assert!(operation_size + view_size + 4 > MAX_REQUEST_BODY_BYTES);
-    let id = store.write_operation(&operation).block_on().unwrap();
+    operation.metadata.description = "o".repeat(3 * 1024 * 1024);
+    let error = store.write_operation(&operation).block_on().unwrap_err();
+    assert!(error.to_string().contains("operation needs"), "{error:#}");
+    assert_eq!(fx.rpc_request_count("putOperationWithView"), 1);
+    assert_eq!(fx.rpc_request_count("putView"), 0);
+    assert_eq!(fx.rpc_request_count("putOperation"), 0);
     assert_eq!(
-        id.as_bytes(),
-        &jj_lib::content_hash::blake2b_hash(&operation)[..]
+        common::http_client()
+            .get(common::api_url(
+                &fx.addr,
+                &format!("/api/views/{}", view_id.hex()),
+            ))
+            .bearer_auth(fx.token())
+            .send()
+            .unwrap()
+            .status()
+            .as_u16(),
+        404,
+        "rejected paired metadata must not leave its view stored",
     );
-    assert_eq!(fx.rpc_request_count("putOperationWithView"), 0);
-    assert_eq!(fx.rpc_request_count("putView"), 1);
-    assert_eq!(fx.rpc_request_count("putOperation"), 1);
-    assert_eq!(store.read_view(&view_id).block_on().unwrap(), contents);
 }

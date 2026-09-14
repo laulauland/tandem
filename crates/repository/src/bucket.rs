@@ -16,6 +16,8 @@ use jj_lib::backend::{CommitId, TreeId, TreeValue};
 use jj_lib::object_id::ObjectId as _;
 use jj_lib::op_store::{Operation, OperationId};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use super::{
@@ -186,37 +188,150 @@ impl DurableOps {
 /// WAL entry. Objects are content-addressed, so the same id staged twice is the
 /// same bytes twice: stage it once and keep the buffer proportional to distinct
 /// content rather than to request count.
-#[derive(Default)]
 pub(super) struct PendingBlobs {
     records: Vec<wal::WalRecord>,
     staged: HashSet<Vec<u8>>,
     bytes: usize,
+    encoded_bytes: usize,
+    encoded_limit: usize,
+    host_budget: Arc<StagingBudget>,
+}
+
+pub const HOST_STAGING_MAX_BYTES: usize = 512 * 1024 * 1024;
+
+pub struct StagingBudget {
+    bytes: AtomicUsize,
+    limit: usize,
+}
+
+impl Default for StagingBudget {
+    fn default() -> Self {
+        Self {
+            bytes: AtomicUsize::new(0),
+            limit: HOST_STAGING_MAX_BYTES,
+        }
+    }
+}
+
+impl StagingBudget {
+    fn reserve(&self, bytes: usize) -> Result<()> {
+        self.bytes
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                current
+                    .checked_add(bytes)
+                    .filter(|next| *next <= self.limit)
+            })
+            .map(|_| ())
+            .map_err(|current| {
+                anyhow!(
+                    "the host is holding {current} bytes of staged objects (limit {})",
+                    self.limit
+                )
+            })
+    }
+
+    fn release(&self, bytes: usize) {
+        self.bytes.fetch_sub(bytes, Ordering::AcqRel);
+    }
+
+    #[cfg(test)]
+    fn used(&self) -> usize {
+        self.bytes.load(Ordering::Acquire)
+    }
+
+    #[cfg(test)]
+    fn with_limit(limit: usize) -> Self {
+        Self {
+            bytes: AtomicUsize::new(0),
+            limit,
+        }
+    }
+}
+
+impl Default for PendingBlobs {
+    fn default() -> Self {
+        Self::new(Arc::new(StagingBudget::default()))
+    }
+}
+
+impl PendingBlobs {
+    pub(super) fn new(host_budget: Arc<StagingBudget>) -> Self {
+        Self {
+            records: Vec::new(),
+            staged: HashSet::new(),
+            bytes: 0,
+            encoded_bytes: 0,
+            encoded_limit: PENDING_BLOBS_MAX_BYTES,
+            host_budget,
+        }
+    }
+}
+
+impl Drop for PendingBlobs {
+    fn drop(&mut self) {
+        self.host_budget.release(self.bytes);
+    }
 }
 
 /// The staging buffer holds objects until the next publish, so its size is set
 /// by how much a client writes before it commits. Past this much, say so once:
 /// a silent buffer is worse than a loud one.
-const PENDING_BLOBS_WARN_BYTES: usize = 512 * 1024 * 1024;
+const PENDING_BLOBS_WARN_BYTES: usize = 48 * 1024 * 1024;
 
 /// And past this much, refuse. A client that writes without ever publishing —
 /// or a bucket outage that makes every publish fail and restage — otherwise
 /// grows the server's memory without limit. Refusing the write is backpressure
 /// the client can act on; running the server out of memory is not.
-const PENDING_BLOBS_MAX_BYTES: usize = 1024 * 1024 * 1024;
+const WAL_MAX_BYTES: usize = 64 * 1024 * 1024;
+// Leave room for framing plus the operation and view. Without a reserve, a
+// single accepted 64 MiB blob can never be published even with the smallest
+// possible operation, permanently wedging that repository's staging buffer.
+// lib.rs bounds the encoded operation, view, parent count, and total parent ID
+// bytes. Eight MiB covers those complete bounds plus record/entry framing.
+const WAL_METADATA_RESERVE_BYTES: usize = 8 * 1024 * 1024;
+const PENDING_BLOBS_MAX_BYTES: usize = WAL_MAX_BYTES - WAL_METADATA_RESERVE_BYTES;
+
+fn checked_wal_size(entry: &wal::WalEntry) -> Result<usize> {
+    let encoded_len = entry.encoded_len()?;
+    if encoded_len > WAL_MAX_BYTES {
+        bail!(
+            "WAL entry needs {encoded_len} encoded bytes (limit {WAL_MAX_BYTES}); publish less staged data"
+        );
+    }
+    Ok(encoded_len)
+}
 
 impl PendingBlobs {
+    #[cfg(test)]
+    fn with_encoded_limit(host_budget: Arc<StagingBudget>, encoded_limit: usize) -> Self {
+        let mut pending = Self::new(host_budget);
+        pending.encoded_limit = encoded_limit;
+        pending
+    }
+
     /// Accept a newly written object. Fails once the buffer is over its cap.
     pub(super) fn stage(&mut self, record: wal::WalRecord) -> Result<()> {
         if self.staged.contains(&record.id) {
             return Ok(());
         }
-        if self.bytes + record.data.len() > PENDING_BLOBS_MAX_BYTES {
+        let encoded_bytes = 1usize
+            .checked_add(4 + record.id.len())
+            .and_then(|bytes| bytes.checked_add(4 + record.data.len()))
+            .context("staged WAL record size overflow")?;
+        if self
+            .encoded_bytes
+            .checked_add(encoded_bytes)
+            .is_none_or(|next| next > self.encoded_limit)
+        {
             bail!(
-                "the server is holding {} bytes of objects that no publish has made durable yet \
-                 (limit {PENDING_BLOBS_MAX_BYTES}); commit an operation to flush them",
-                self.bytes
+                "the server is holding {} encoded bytes of objects that no publish has made durable yet \
+                 (limit {}); commit an operation to flush them",
+                self.encoded_bytes,
+                self.encoded_limit
             );
         }
+        self.host_budget.reserve(record.data.len())?;
+        self.encoded_bytes += encoded_bytes;
         self.accept(record);
         Ok(())
     }
@@ -258,6 +373,8 @@ impl PendingBlobs {
         for record in records {
             if object_kind_for_record(record.kind).is_some() && self.staged.remove(&record.id) {
                 self.bytes -= record.data.len();
+                self.encoded_bytes -= 1 + 4 + record.id.len() + 4 + record.data.len();
+                self.host_budget.release(record.data.len());
             }
         }
     }
@@ -346,8 +463,8 @@ impl Repository {
             .with_context(|| format!("check WAL entry {key}"))?;
         tracing::debug!(
             op_id = %op_hex,
-            bucket_calls = 1,
-            bucket_bytes = 0,
+            wal_bucket_calls = 1,
+            wal_bucket_bytes = 0,
             exists,
             "checked WAL ancestry"
         );
@@ -402,11 +519,15 @@ impl Repository {
     /// already held an entry for this operation — immutable, so the records
     /// just built are not in it.
     fn put_wal_entry(&self, op_hex: &str, entry: &wal::WalEntry) -> Result<bool> {
+        let encoded_len = checked_wal_size(entry)
+            .with_context(|| format!("size WAL entry for operation {op_hex}"))?;
         let encoded = entry.encode()?;
+        debug_assert_eq!(encoded.len(), encoded_len);
         let key = wal::wal_key(op_hex);
         if self.faults.take_wal_write_failure() {
             bail!("injected bucket failure while writing WAL entry {key}");
         }
+        self.faults.hold_wal_write_if_armed();
         let stored = self
             .bucket
             .put_immutable(&key, &encoded)
@@ -414,16 +535,16 @@ impl Repository {
         if stored {
             tracing::debug!(
                 op_id = %op_hex,
-                bucket_calls = 1,
-                bucket_bytes = encoded.len(),
+                wal_bucket_calls = 1,
+                wal_bucket_bytes = encoded.len(),
                 records = entry.records.len(),
                 "wrote WAL entry"
             );
         } else {
             tracing::debug!(
                 op_id = %op_hex,
-                bucket_calls = 1,
-                bucket_bytes = encoded.len(),
+                wal_bucket_calls = 1,
+                wal_bucket_bytes = encoded.len(),
                 "WAL entry was already in the bucket"
             );
         }
@@ -1437,7 +1558,8 @@ mod tests {
     #[test]
     fn staging_refuses_writes_past_its_cap() {
         let mut pending = PendingBlobs::default();
-        let chunk = PENDING_BLOBS_MAX_BYTES / 4;
+        let per_record_framing = 10;
+        let chunk = PENDING_BLOBS_MAX_BYTES / 4 - per_record_framing;
 
         for tag in 0..4u8 {
             pending
@@ -1461,11 +1583,49 @@ mod tests {
             4,
             "a refused write must not be buffered"
         );
-        assert_eq!(pending.bytes, PENDING_BLOBS_MAX_BYTES);
+        assert_eq!(pending.encoded_bytes, PENDING_BLOBS_MAX_BYTES);
+        assert_eq!(pending.bytes, chunk * 4);
         let committed = pending.take();
         pending.committed(&committed);
         assert_eq!(pending.bytes, 0, "only an index commit releases capacity");
         assert!(pending.staged.is_empty());
+    }
+
+    #[test]
+    fn host_staging_budget_counts_drained_records_until_commit() {
+        let budget = Arc::new(StagingBudget::with_limit(5));
+        let mut first = PendingBlobs::new(budget.clone());
+        let mut second = PendingBlobs::new(budget.clone());
+        first.stage(blob(1, 3)).unwrap();
+        let publishing = first.take();
+        assert_eq!(budget.used(), 3, "a publish in flight remains charged");
+        let error = second.stage(blob(2, 3)).unwrap_err();
+        assert!(error.to_string().contains("host is holding 3 bytes"));
+        first.committed(&publishing);
+        assert_eq!(budget.used(), 0);
+        second.stage(blob(2, 3)).unwrap();
+        assert_eq!(budget.used(), 3);
+    }
+
+    #[test]
+    fn staging_limit_counts_each_records_id_and_framing() {
+        let budget = Arc::new(StagingBudget::with_limit(100));
+        let mut pending = PendingBlobs::with_encoded_limit(budget, 20);
+        pending.stage(blob(1, 3)).unwrap(); // 1 tag + 4 + 1 id + 4 + 3 data = 13
+        let error = pending.stage(blob(2, 3)).unwrap_err();
+        assert!(error.to_string().contains("13 encoded bytes"));
+        assert_eq!(pending.bytes, 3);
+    }
+
+    #[test]
+    fn wal_refuses_a_sixty_four_mib_blob_before_encoding_it() {
+        assert!(
+            checked_wal_size(&entry(1, PENDING_BLOBS_MAX_BYTES)).is_ok(),
+            "the largest accepted staging buffer needs a minimally framed escape path"
+        );
+        let entry = entry(1, WAL_MAX_BYTES);
+        let error = checked_wal_size(&entry).unwrap_err();
+        assert!(error.to_string().contains("publish less staged data"));
     }
 
     fn entry(tag: u8, len: usize) -> wal::WalEntry {
@@ -1550,7 +1710,7 @@ mod tests {
     #[test]
     fn restaging_is_not_subject_to_the_cap() {
         let mut pending = PendingBlobs::default();
-        let chunk = PENDING_BLOBS_MAX_BYTES / 2;
+        let chunk = PENDING_BLOBS_MAX_BYTES / 2 - 10;
 
         pending.stage(blob(1, chunk)).expect("first stage");
         let drained = pending.take();

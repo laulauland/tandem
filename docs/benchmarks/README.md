@@ -18,6 +18,53 @@ The [recorded workspace probe](workspace-build-cache.json) rebuilt only the CLI
 and server after a server touch, and only the CLI, client, and workspace after a
 client touch. These are warm invalidation checks, not a cold-build speedup claim.
 
+## Mixed-load qualification (2026-09-15)
+
+The [Stage 6 comparison](stage6-mixed-load.json) records the frozen
+[workload and budgets](stage6-workload.md), executable identities, observations,
+and paths and hashes for the complete raw reports. It compares Stage 5 with the
+reviewed native-host candidate. Both variants ran the same ten-repository mix:
+three small publishers and a repeated 32 MiB uploader, with burst and steady
+edit schedules. The table measures snapshot-to-ack latency using the first 40 attempts per small writer; the
+artifact also includes full-run statistics and each writer separately.
+
+| Profile | Baseline p95 (ms) | Candidate p50 / p95 / p99 (ms) |
+|---|---:|---:|
+| Real R2, burst | 3013.6 | 2842.2 / 3481.6 / 3879.2 |
+| Real R2, steady | 2916.2 | 2796.7 / 3945.1 / 4329.2 |
+| Filesystem + 50 ms/request, burst | 586.4 | 558.3 / 572.9 / 587.2 |
+| Filesystem + 50 ms/request, steady | 558.9 | 568.4 / 593.5 / 607.6 |
+
+All declared latency, memory, queue and recovery checks passed. The real-R2
+candidate peaked at 198.2 MiB RSS on the 2 CPU, 8 GiB exe.dev host in Dallas;
+R2 uses a WEUR location hint, and the controller's physical location is
+unverified. The R2 p95 increased by 15.5% in bursts and 35.3% with steady edits.
+These measurements establish bounded resource use under the declared mix.
+The benchmark uses a 3,600-second writer lease; renewal across expiry and
+latched ownership loss are verified by separate deterministic regressions.
+These results do not establish a general speedup or capacity
+beyond that workload. The earlier paired publish comparison records the
+separately measured round-trip reduction.
+
+All idle 1/10/100-connection cases passed independently of active writer count.
+After each active profile, fresh clients verified acknowledged-operation
+reachability and exact final bytes following restart. Every captured small
+commit also received an exact-byte check; intermediate large commits received
+reachability checks, with exact bytes checked at the final large commit.
+Baseline reports explicitly mark unavailable coordination instrumentation.
+
+The [supplementary distributed journey](stage6-distributed.json) passed on two
+separate exe.dev client machines plus the controller. Installation, owner setup,
+scoped clones and initial publishes overlapped 66.9 seconds of a separate
+240-second background burst at the declared rates. Existing agents published
+again after restart without moving local files; a fresh controller verified all
+five expected files with caching disabled. Disposable client workspaces and
+daemons were cleaned. This added-client drill does not expand the capacity claim.
+
+The [10,000-file scan measurement](stage6-scan.json) retains 40 samples and
+exact-byte checks. Upstream jj filesystem-monitor comparison is deferred because
+no Watchman service was available on the controller or validation host.
+
 ## snapshot → publish latency
 
 The gate metric: how long a file change takes to become durable.
