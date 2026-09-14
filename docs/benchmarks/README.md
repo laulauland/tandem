@@ -65,6 +65,35 @@ The [10,000-file scan measurement](stage6-scan.json) retains 40 samples and
 exact-byte checks. Upstream jj filesystem-monitor comparison is deferred because
 no Watchman service was available on the controller or validation host.
 
+## Final production envelope (2026-09-15)
+
+The [final four-run report](stage8-production-envelope.json) repeats the frozen
+[Stage 6 workload](stage6-workload.md) with the exact production candidate. It
+contains the original Stage 5 baseline and final candidate for real R2 and for a
+filesystem backend with 50 ms added to each request. All idle-connection,
+latency, coordination, memory, restart, acknowledged-operation reachability,
+and exact-byte checks passed.
+
+| Profile | Candidate snapshot-to-ack p50 / p95 / p99 (ms) | Baseline-to-candidate p95 |
+|---|---:|---:|
+| Real R2, burst | 2709.0 / 3500.1 / 3819.2 | +16.1% |
+| Real R2, steady | 2711.9 / 3900.1 / 4215.8 | +33.7% |
+| Filesystem + 50 ms/request, burst | 559.4 / 573.6 / 578.3 | -2.2% |
+| Filesystem + 50 ms/request, steady | 569.4 / 594.1 / 614.2 | +6.3% |
+
+The real-R2 candidate peaked at 203.2 MiB RSS. The workload uses ten
+repositories, three small publishers, one ACK-paced 32 MiB publisher, and the
+separate 1/10/100 idle SSE matrix defined in the frozen workload. The production
+candidate source is `ddc772196466d11f136fbbc0552ad1bbdda35a13`; both client and
+server binaries have SHA-256
+`0e9165cdc5ab6a7b470d4a401f80e1b5905e4d66158abdebd5daa404b4ed64ab`.
+The real server was the 2 CPU, 8 GiB exe.dev Dallas VM backed by R2 with a WEUR
+location hint; the controller location was not verified. This is one run per
+variant under the declared workload, not a capacity claim for other mixes.
+Positive comparison percentages mean increased latency. Both the baseline and
+candidate meet the frozen budgets; the candidate additionally supplies the
+recorded admission, lock, bucket, and retry instrumentation.
+
 ## snapshot → publish latency
 
 The gate metric: how long a file change takes to become durable.

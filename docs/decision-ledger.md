@@ -88,6 +88,26 @@ that may no longer describe current performance.
   first authenticated known-repository request took 18.898 seconds, while the
   complete private qualification took 138.940 seconds. Those measurements are
   separate from total traffic-transition downtime and come from one drill.
+- Production run `337df851b4` exercised the installed native service through
+  `https://tandem.land` from two separate exe.dev client VMs and a fresh
+  controller. The website, installer, owner bootstrap, scoped clones, and five
+  acknowledged publishes used the reviewed binary above. Three initial
+  acknowledgements survived the first complete host-cache removal; the agents
+  then published two more operations, and all five operation IDs and exact file
+  bytes survived a second complete cache removal. The original agent daemons
+  published without moving their local files. The successful run removed its
+  recorded client roots and daemons. Final cleanup removed both production-test
+  namespaces, emptied the validation prefix, removed the retired and client VMs
+  and controller fixtures, and restarted the production service. A final
+  post-cleanup check reached the health, home, architecture, installer, and
+  `www` URLs over public HTTPS without retry, and the downloaded binary matched
+  the deployed SHA-256. An earlier run, `0ead33e937`, reached
+  the same five durable acknowledgements but its final controller clone met a
+  transient transport error. That manifest remains failed; a separate
+  cache-disabled recovery oracle subsequently proved all five operations and
+  exact bytes without rewriting the failed result. Sanitized deployment, DNS,
+  readiness, journey, failed-run recovery, controller-review, and final cleanup
+  manifests are retained in the production qualification state.
 
 ## Unresolved risks and follow-up
 

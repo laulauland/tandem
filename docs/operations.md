@@ -18,8 +18,11 @@ one active publish and up to eight queued. Staged
 objects stop below 64 MiB per repository to reserve WAL framing and metadata,
 and at 512 MiB across the host. An encoded WAL entry is capped at 64 MiB before
 its output allocation.
-The current delivery and qualification status is recorded in the
-[hosting plan](hosting-on-exe.md); production deployment is a later stage.
+The production service runs this shape at `https://tandem.land` on the
+supervised exe.dev host `tandem-native`, with published history under the R2
+prefix `tandem-native/production`. The deployed source revision is
+`ddc772196466d11f136fbbc0552ad1bbdda35a13`; its GNU/Linux binary SHA-256 is
+`0e9165cdc5ab6a7b470d4a401f80e1b5905e4d66158abdebd5daa404b4ed64ab`.
 
 Keep the active host signing secret, retained signing keys and bucket
 credentials in protected configuration outside the VM as well as in its
@@ -32,6 +35,13 @@ new credentials use the active key. This overlap does not reissue owners or
 retire an old key. Never run a replacement alongside an active host: stop or
 fence the old process first.
 
+The controller recovery source is
+`$HOME/.config/tandem-native/host.env`. The reviewed service definition is
+archived at `$HOME/.local/state/tandem-native/production/tandem.service`, and
+the deployment manifest identifies the immutable binary. Restore all three;
+the environment file contains protected material and must not enter logs,
+evidence, images, or the repository.
+
 For a host replacement, preserve the reviewed binary, service unit, active and
 retained signing keys, bucket configuration, proxy configuration, and the
 deployment script outside both machines. Fence the serving machine and verify
@@ -41,7 +51,9 @@ availability check. Authenticate with existing credentials, walk acknowledged
 operations, and compare exact file bytes before moving traffic. Move the
 custom-domain allowlist or proxy attachment explicitly after readiness. A VM
 rename or its default provider hostname does not prove that the public custom
-domain moved. Keep the old machine fenced and intact until the replacement has
+domain moved. Verify the exact domain in the provider's current domain list;
+do not treat a domain-add command's exit status as proof. Keep the old machine
+fenced and intact until the replacement has
 accepted and recovered a new publish. Apply the same private-readiness gate
 before rollback.
 
@@ -61,7 +73,7 @@ Before admitting clients:
    request headers.
 4. Bind to a private interface, use a VPN/tunnel, or terminate TLS at a reverse
    proxy. Tandem does not encrypt HTTP itself.
-5. Run `tandem serve` under a service manager for supervised production use;
+5. Run `td serve` under a service manager for supervised production use;
    Use the generated serve help to select hosted mode.
 6. Verify status, inspect startup replay metrics, then perform a byte-level
    publish/read smoke test before distributing workspace credentials.

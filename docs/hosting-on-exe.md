@@ -1,14 +1,16 @@
 # Native hosting on exe.dev
 
-Proposed target, recorded on 2026-09-14. This is a plan, not a claim about the
-running service. The empty descendant jj revisions own stage acceptance and
-verification. Current behavior remains owned by [architecture](../ARCHITECTURE.md),
+Recorded on 2026-09-14 and implemented on 2026-09-15. The native Rust service
+is deployed at `https://tandem.land`; its production behavior and procedures
+are owned by [architecture](../ARCHITECTURE.md),
 [reliability](reliability.md), [testing](testing.md), and
-[operations](operations.md); update those owners as stages land.
+[operations](operations.md). This document retains the delivery plan and its
+constraints. Final disposal of recorded qualification resources is tracked by
+the deployment evidence and is complete.
 
 ## Target
 
-Daytona agents and Mac mini agents keep local td workspaces. They reach
+Agents keep local td workspaces. They reach
 `tandem.land` through the exe.dev HTTPS proxy. Cloudflare retains DNS and R2;
 the Rust host replaces the Worker and Durable Objects.
 
