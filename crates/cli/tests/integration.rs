@@ -20,6 +20,8 @@ mod bucket_replay;
 mod client_cache;
 #[path = "integration/clone.rs"]
 mod clone;
+#[path = "integration/concurrent_clone.rs"]
+mod concurrent_clone;
 #[path = "integration/contention.rs"]
 mod contention;
 #[path = "integration/control_socket.rs"]

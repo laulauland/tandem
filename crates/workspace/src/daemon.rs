@@ -169,7 +169,7 @@ pub fn read_status(workspace_root: &Path) -> Result<DaemonStatus> {
     let path = status_path(workspace_root);
     let text = std::fs::read_to_string(&path).with_context(|| {
         format!(
-            "no daemon status at {} — is `tandem daemon` running for this workspace?",
+            "no daemon status at {} — is `td daemon` running for this workspace?",
             path.display()
         )
     })?;
@@ -256,6 +256,33 @@ pub struct Daemon {
     pending: bool,
     status: DaemonStatus,
     status_path: PathBuf,
+}
+
+// Carried from 45b65022: a shortest shared ancestor is not an ancestry proof
+// when merges have shortcut parents. Only unchanged trees can use this
+// metadata-only fallback.
+fn unchanged_tree_ancestor(
+    head: &jj_lib::operation::Operation,
+    checkout: &jj_lib::op_store::OperationId,
+    same_tree: bool,
+) -> Result<bool> {
+    if !same_tree {
+        return Ok(false);
+    }
+    let mut frontier = std::collections::VecDeque::from([head.clone()]);
+    let mut seen = BTreeSet::new();
+    while let Some(operation) = frontier.pop_front() {
+        if operation.id() == checkout {
+            return Ok(true);
+        }
+        if !seen.insert(operation.id().clone()) {
+            continue;
+        }
+        for parent in operation.parents() {
+            frontier.push_back(parent?);
+        }
+    }
+    Ok(false)
 }
 
 impl Daemon {
@@ -423,7 +450,7 @@ impl Daemon {
             self.status.stale = stale;
             if stale {
                 println!(
-                    "stale=true workspace={} hint=\"run `tandem workspace update-stale` when you \
+                    "stale=true workspace={} hint=\"run `td workspace update-stale` when you \
                      want the files moved\"",
                     self.workspace_id
                 );
@@ -479,9 +506,23 @@ impl Daemon {
             .get_commit(&wc_commit_id)
             .context("cannot load the working-copy commit")?;
 
-        match WorkingCopyFreshness::check_stale(locked_ws.locked_wc(), &wc_commit, &repo)
-            .context("cannot tell whether the working copy is up to date")?
-        {
+        let mut freshness =
+            WorkingCopyFreshness::check_stale(locked_ws.locked_wc(), &wc_commit, &repo)
+                .context("cannot tell whether the working copy is up to date")?;
+        if matches!(freshness, WorkingCopyFreshness::SiblingOperation) {
+            let locked_wc = locked_ws.locked_wc();
+            if unchanged_tree_ancestor(
+                repo.operation(),
+                locked_wc.old_operation_id(),
+                locked_wc.old_tree().tree_ids_and_labels()
+                    == wc_commit.tree().tree_ids_and_labels(),
+            )
+            .context("cannot verify the working copy's operation ancestry")?
+            {
+                freshness = WorkingCopyFreshness::Fresh;
+            }
+        }
+        match freshness {
             WorkingCopyFreshness::Fresh => {}
             WorkingCopyFreshness::Updated(wc_operation) => {
                 // The working copy is ahead of the repo this daemon holds:
@@ -509,7 +550,7 @@ impl Daemon {
                     self.status.stale = true;
                     println!(
                         "stale=true workspace={} hint=\"the working copy was moved elsewhere; run \
-                         `tandem workspace update-stale`\"",
+                         `td workspace update-stale`\"",
                         self.workspace_id
                     );
                     self.write_status();
@@ -1080,6 +1121,38 @@ mod tests {
             printed.extend(line);
         }
         (waits, printed)
+    }
+
+    #[test]
+    fn shortcut_merge_ancestry_requires_tree_equality_and_actual_reachability() {
+        use jj_lib::backend::CommitId;
+        use jj_lib::op_store::{OpStore, OperationId, RootOperationData};
+        let dir = tempfile::tempdir().unwrap();
+        let store: Arc<dyn OpStore> = Arc::new(
+            jj_lib::simple_op_store::SimpleOpStore::init(
+                dir.path(),
+                RootOperationData {
+                    root_commit_id: CommitId::new(vec![0; 20]),
+                },
+            )
+            .unwrap(),
+        );
+        let root = store.root_operation_id().clone();
+        let write = |name: &str, parents: Vec<OperationId>| {
+            let mut operation = store.read_operation(&root).block_on().unwrap();
+            operation.metadata.description = name.to_string();
+            operation.parents = parents;
+            let id = store.write_operation(&operation).block_on().unwrap();
+            jj_lib::operation::Operation::new(store.clone(), id, operation)
+        };
+        let checkout = write("checkout", vec![root.clone()]);
+        let first = write("first", vec![checkout.id().clone()]);
+        let second = write("second", vec![first.id().clone()]);
+        let head = write("shortcut merge", vec![second.id().clone(), root.clone()]);
+        let sibling = write("genuine sibling", vec![root.clone()]);
+        assert!(unchanged_tree_ancestor(&head, checkout.id(), true).unwrap());
+        assert!(!unchanged_tree_ancestor(&head, checkout.id(), false).unwrap());
+        assert!(!unchanged_tree_ancestor(&head, sibling.id(), true).unwrap());
     }
 
     #[test]

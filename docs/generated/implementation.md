@@ -116,6 +116,7 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/cli/tests/integration/bucket_replay.rs`
 - `crates/cli/tests/integration/client_cache.rs`
 - `crates/cli/tests/integration/clone.rs`
+- `crates/cli/tests/integration/concurrent_clone.rs`
 - `crates/cli/tests/integration/contention.rs`
 - `crates/cli/tests/integration/control_socket.rs`
 - `crates/cli/tests/integration/daemon_lifecycle.rs`

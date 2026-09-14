@@ -94,21 +94,53 @@ fn named_repository_recovers_exact_bytes_and_accepts_another_publish() {
     let second_repository_address = format!("http://{address}/beta/stage-two");
     let first = temporary.path().join("first");
     let first_text = first.to_string_lossy().to_string();
-    assert_ok(
-        &run_binary_in(
-            &installed_td,
-            temporary.path(),
-            &[
-                "clone",
-                &repository_address,
-                &first_text,
-                "--workspace",
-                "agent-one",
-            ],
-            &home,
-        ),
-        "installed td clone using its credential file",
-    );
+    let peer = temporary.path().join("peer");
+    let peer_text = peer.to_string_lossy().to_string();
+    std::thread::scope(|scope| {
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let first_barrier = barrier.clone();
+        let installed_td = &installed_td;
+        let repository_address = &repository_address;
+        let first_text = &first_text;
+        let peer_text = &peer_text;
+        let home = &home;
+        let temporary = temporary.path();
+        let first_clone = scope.spawn(move || {
+            first_barrier.wait();
+            run_binary_in(
+                &installed_td,
+                temporary,
+                &[
+                    "clone",
+                    &repository_address,
+                    &first_text,
+                    "--workspace",
+                    "agent-one",
+                ],
+                &home,
+            )
+        });
+        let peer_clone = scope.spawn(move || {
+            barrier.wait();
+            run_tandem_in_with_env(
+                temporary,
+                &[
+                    "clone",
+                    &repository_address,
+                    &peer_text,
+                    "--workspace",
+                    "agent-peer",
+                ],
+                &[("TANDEM_TOKEN", owner_token)],
+                &home,
+            )
+        });
+        assert_ok(
+            &first_clone.join().unwrap(),
+            "concurrent installed td clone",
+        );
+        assert_ok(&peer_clone.join().unwrap(), "concurrent peer clone");
+    });
     let second = temporary.path().join("second");
     let second_text = second.to_string_lossy().to_string();
     assert_ok(
@@ -211,16 +243,40 @@ fn named_repository_recovers_exact_bytes_and_accepts_another_publish() {
         "workspace token escaped its workspace scope"
     );
 
-    let expected = b"\0\x01\xffstage one\n";
-    let second_expected = b"\xff\0stage two belongs to beta\n";
-    std::fs::write(first.join("payload.bin"), expected).unwrap();
-    std::fs::write(second.join("payload.bin"), second_expected).unwrap();
-    std::thread::scope(|scope| {
-        let first_publish = scope.spawn(|| publish_one_change(&first, &home));
-        let second_publish = scope.spawn(|| publish_one_change(&second, &home));
-        first_publish.join().unwrap();
-        second_publish.join().unwrap();
-    });
+    let mut expected = Vec::new();
+    let mut peer_expected = Vec::new();
+    let mut second_expected = Vec::new();
+    let mut first_daemon = start_workspace_daemon(&first, &home);
+    let mut peer_daemon = start_workspace_daemon(&peer, &home);
+    let mut second_daemon = start_workspace_daemon(&second, &home);
+    first_daemon.wait_for_output("writer=held");
+    peer_daemon.wait_for_output("writer=held");
+    second_daemon.wait_for_output("writer=held");
+    for round in 0..3u8 {
+        expected = vec![0, 1, 255, b'a', round, b'\n'];
+        peer_expected = vec![255, 0, b'p', round, b'\n'];
+        second_expected = vec![255, 0, b'b', round, b'\n'];
+        std::fs::write(first.join("payload.bin"), &expected).unwrap();
+        std::fs::write(peer.join("peer.bin"), &peer_expected).unwrap();
+        std::fs::write(second.join("payload.bin"), &second_expected).unwrap();
+        first_daemon.wait_for_output("published op=");
+        peer_daemon.wait_for_output("published op=");
+        second_daemon.wait_for_output("published op=");
+        assert_eq!(std::fs::read(first.join("payload.bin")).unwrap(), expected);
+        assert_eq!(std::fs::read(peer.join("peer.bin")).unwrap(), peer_expected);
+    }
+    let held_elsewhere = reqwest::blocking::Client::new()
+        .post(format!(
+            "{repository_address}/api/workspaces/agent-one/writer"
+        ))
+        .bearer_auth(scoped)
+        .json(&serde_json::json!({"holder":"competing-writer","ttlSeconds":30}))
+        .send()
+        .unwrap();
+    assert_eq!(held_elsewhere.status(), reqwest::StatusCode::CONFLICT);
+    first_daemon.stop();
+    peer_daemon.stop();
+    second_daemon.stop();
     server.stop();
     std::fs::rename(&cache, temporary.path().join("discarded-cache")).unwrap();
     let interrupted_recovery = cache.join("repositories/acme/stage-one/.jj");
@@ -246,6 +302,15 @@ fn named_repository_recovers_exact_bytes_and_accepts_another_publish() {
     );
     let mut recovered = ProcessGuard::with_lines(child, lines);
     recovered.wait_for_listening(&address);
+    let reacquired = reqwest::blocking::Client::new()
+        .post(format!(
+            "{repository_address}/api/workspaces/agent-one/writer"
+        ))
+        .bearer_auth(scoped)
+        .json(&serde_json::json!({"holder":"reconnected-writer","ttlSeconds":30}))
+        .send()
+        .unwrap();
+    assert_eq!(reacquired.status(), reqwest::StatusCode::OK);
     let fresh = temporary.path().join("fresh");
     let fresh_text = fresh.to_string_lossy().to_string();
     let fresh_environment = [
@@ -268,6 +333,14 @@ fn named_repository_recovers_exact_bytes_and_accepts_another_publish() {
         "clone after cache loss",
     );
     assert_eq!(std::fs::read(fresh.join("payload.bin")).unwrap(), expected);
+    let peer_revision = run_tandem_in_with_env(
+        &fresh,
+        &["file", "show", "-r", "agent-peer@", "peer.bin"],
+        &fresh_environment,
+        &home,
+    );
+    assert_ok(&peer_revision, "fresh observer reads peer revision");
+    assert_eq!(peer_revision.stdout, peer_expected);
     assert!(!interrupted_recovery.join("partial").exists());
     let second_fresh = temporary.path().join("second-fresh");
     let second_fresh_text = second_fresh.to_string_lossy().to_string();
@@ -463,6 +536,24 @@ impl ProcessGuard {
             panic!("host at {address} did not announce readiness before deadline");
         }
     }
+    fn wait_for_output(&mut self, expected: &str) {
+        let lines = self.lines.as_mut().expect("process output stream");
+        if lines
+            .wait_for(Duration::from_secs(10), |line| line.contains(expected))
+            .is_none()
+        {
+            if let Ok(Some(status)) = self.child.try_wait() {
+                panic!(
+                    "process exited before output containing {expected:?} ({status}):\n{}",
+                    lines.transcript()
+                );
+            }
+            panic!(
+                "process produced no output containing {expected:?}:\n{}",
+                lines.transcript()
+            );
+        }
+    }
     fn stop(&mut self) {
         self.child.kill().ok();
         self.child.wait().ok();
@@ -492,6 +583,16 @@ fn publish_one_change(workspace: &std::path::Path, home: &std::path::Path) {
         lines.transcript()
     );
     daemon.stop();
+}
+
+fn start_workspace_daemon(workspace: &std::path::Path, home: &std::path::Path) -> ProcessGuard {
+    let mut command = Command::new(common::tandem_bin());
+    command.args(["daemon", workspace.to_str().unwrap(), "--debounce-ms", "10"]);
+    isolate_env(&mut command, home);
+    command.stdout(Stdio::piped()).stderr(Stdio::null());
+    let mut child = command.spawn().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    ProcessGuard::with_lines(child, common::lines::Lines::from(stdout))
 }
 
 fn create_owner_when_ready(
