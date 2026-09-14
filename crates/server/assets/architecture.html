@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="How Tandem keeps local workspaces and shared Jujutsu history in sync.">
+  <title>Architecture — Tandem</title>
+  <link rel="stylesheet" href="/site.css">
+</head>
+<body class="architecture">
+  <main>
+    <header class="masthead">
+      <p class="running-head">Tandem field notes</p>
+      <h1>Architecture</h1>
+      <p class="deck">What moves between machines, what stays local, and how to provision a container safely.</p>
+      <div class="printer-rule" aria-hidden="true"><span></span></div>
+    </header>
+    <div class="sheet">
+      <article>
+        <p class="back-link"><a href="/">← Back to Tandem</a></p>
+        <section aria-labelledby="workspaces">
+          <h2 id="workspaces">Local workspaces, shared history</h2>
+          <p>Each agent edits files in a normal local working copy. <code>td</code> embeds Jujutsu and publishes saved changes to the native server in the background. Published operation heads are preserved so concurrent work can converge through jj.</p>
+          <table class="state-table"><thead><tr><th>Agent</th><th>Stays local</th><th>Becomes shared</th></tr></thead><tbody><tr><td>agent-a</td><td>working-copy files</td><td>published jj history</td></tr><tr><td>agent-b</td><td>working-copy files</td><td>published jj history</td></tr></tbody></table>
+          <p>Use <code>td log</code> to inspect that history. Tandem does not move another workspace’s files. If your checked-out commit changes elsewhere, including through a descendant rebase, jj marks it stale. Run <code>td workspace update-stale</code> yourself, or set <code>td config set --workspace snapshot.auto-update-stale true</code> to let the next jj command update it. The background daemon never applies the update.</p>
+        </section>
+        <section aria-labelledby="access">
+          <h2 id="access">Names and access</h2>
+          <p>Give every agent a distinct workspace name. The installer saves the host owner credential to <code>~/.config/td/credentials</code> with mode 0600, and <code>td clone</code> uses it to create or attach the named repository. Keep that file private; the server checks repository and workspace scope on every request.</p>
+          <p>For a container, mount the installer-managed credential file read-only. Use a separately scoped workspace name, volume, and container for every agent.</p>
+        </section>
+        <section id="docker" aria-labelledby="docker-heading">
+          <h2 id="docker-heading">Docker provisioning</h2>
+          <h3>Build a binary-only image</h3>
+          <pre>cat &lt;&lt;'DOCKERFILE' | docker build --platform linux/amd64 -t tandem-agent -
+FROM debian:bookworm-slim
+RUN apt-get update \
+ &amp;&amp; apt-get install -y --no-install-recommends ca-certificates curl \
+ &amp;&amp; curl -fsSL @@TANDEM_PUBLIC_URL@@/dl/td-x86_64-unknown-linux-gnu -o /usr/local/bin/td \
+ &amp;&amp; chmod 755 /usr/local/bin/td \
+ &amp;&amp; rm -rf /var/lib/apt/lists/*
+WORKDIR /work
+ENTRYPOINT ["td"]
+DOCKERFILE</pre>
+          <p class="caption">The Dockerfile arrives on standard input, so no local credential file enters the build context.</p>
+          <h3>Create one workspace, then keep its daemon in the foreground</h3>
+          <pre><span class="prompt">$</span> docker volume create tandem-agent-a
+<span class="prompt">$</span> docker run --rm \
+  -v tandem-agent-a:/work \
+  -v "$HOME/.config/td/credentials:/root/.config/td/credentials:ro" \
+  tandem-agent clone @@TANDEM_PUBLIC_URL@@/you/my-project /work --workspace agent-a
+<span class="prompt">$</span> docker run -d --rm --name agent-a \
+  -v tandem-agent-a:/work \
+  -v "$HOME/.config/td/credentials:/root/.config/td/credentials:ro" \
+  tandem-agent daemon /work
+<span class="prompt">$</span> docker exec agent-a sh -lc \
+  "printf 'hello from Docker\\n' &gt; /work/hello.txt"</pre>
+          <p>Mount the owner credential only at runtime, and use a separate volume, container name, and <code>--workspace</code> value for every agent. Docker detaches the container, while the foreground daemon stays at PID 1 inside it and publishes file changes made in the mounted workspace.</p>
+        </section>
+        <section aria-labelledby="deeper">
+          <h2 id="deeper">Implementation detail</h2>
+          <p>The <a href="https://github.com/laulauland/tandem">source repository</a> contains the technical architecture describing the client/server boundary, durable write-ahead log, repository materialization, and recovery model.</p>
+        </section>
+      </article>
+      <aside aria-label="Notes"><p class="margin-note">One workspace has one active writer. Distinct names avoid agents contending for the same writer role.</p><p class="margin-note">The bucket write-ahead log and index are the durable authority; local server state can be rebuilt.</p></aside>
+    </div>
+    <footer><p><a href="/">Tandem</a> &nbsp;·&nbsp; <a href="https://github.com/laulauland/tandem#readme">Documentation</a> &nbsp;·&nbsp; <a href="https://github.com/laulauland/tandem">Source</a></p></footer>
+  </main>
+</body>
+</html>

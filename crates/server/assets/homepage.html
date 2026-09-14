@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Tandem gives coding agents local jj workspaces with shared history.">
+  <title>Tandem — jj workspaces over the network</title>
+  <link rel="stylesheet" href="/site.css">
+</head>
+<body>
+  <main>
+    <header class="masthead">
+      <p class="running-head">Jujutsu workspaces over the network</p>
+      <h1>Tandem</h1>
+      <p class="deck">Coding agents work on the same project from different machines, each with local files and a shared version history.</p>
+      <div class="printer-rule" aria-hidden="true"><span></span></div>
+      <nav class="top-nav" aria-label="Main navigation"><a href="#quick-start">Get started</a><a href="/architecture">How it works</a><a href="https://github.com/laulauland/tandem">Source</a></nav>
+    </header>
+    <article class="home-sheet">
+      <section id="quick-start" aria-labelledby="quick-start-heading">
+        <h2 id="quick-start-heading">Quick start</h2>
+        <pre class="sample" data-label="Install, clone, and start the workspace daemon"><span class="prompt">$</span> curl -fsSL @@TANDEM_PUBLIC_URL@@/install | sh
+<span class="prompt">$</span> td clone @@TANDEM_PUBLIC_URL@@/you/my-project my-project --workspace agent-a
+<span class="prompt">$</span> cd my-project
+<span class="prompt">$</span> td daemon</pre>
+        <p class="caption">The installer keeps its owner credential in the standard <code>td</code> credentials file; on another platform, install with <code>cargo install jj-tandem</code>.</p>
+      </section>
+      <section aria-labelledby="visible-result">
+        <h2 id="visible-result">What you see</h2>
+        <pre class="output sample" data-label="Agent A writes and describes a change"><span class="prompt">$</span> printf 'hello from agent-a\n' &gt; hello.txt
+<span class="prompt">$</span> td diff --git
+<span class="result">diff --git a/hello.txt b/hello.txt
+new file mode 100644
+index 0000000000..f5ccd1bacb
+--- /dev/null
++++ b/hello.txt
+@@ -0,0 +1,1 @@
++hello from agent-a</span>
+<span class="prompt">$</span> td describe -m 'Add a greeting'
+<span class="prompt">$</span> td log --no-graph -r @ -T description
+Add a greeting</pre>
+        <pre class="output sample" data-label="Agent B reads the published history from its own workspace"><span class="prompt">$</span> td file show -r 'agent-a@' hello.txt
+<span class="result">hello from agent-a</span></pre>
+      </section>
+      <section aria-labelledby="docker-heading">
+        <h2 id="docker-heading">Run an agent in Docker</h2>
+        <pre class="sample" data-label="After placing td in the image and provisioning its volume"><span class="prompt">$</span> docker run -d --rm --name agent-a \
+  -v tandem-agent-a:/work \
+  -v "$HOME/.config/td/credentials:/root/.config/td/credentials:ro" \
+  tandem-agent daemon /work</pre>
+        <p class="caption">Credentials are mounted at runtime, never copied into the image. Each container uses its own workspace name and volume.</p>
+        <p><a href="/architecture#docker">Build the image and provision its workspace →</a></p>
+      </section>
+    </article>
+    <footer><p><a href="/architecture">Architecture</a> &nbsp;·&nbsp; <a href="https://github.com/laulauland/tandem#readme">Documentation</a> &nbsp;·&nbsp; <a href="https://github.com/laulauland/tandem">Source</a></p><p><i>Native Tandem host</i></p></footer>
+  </main>
+</body>
+</html>

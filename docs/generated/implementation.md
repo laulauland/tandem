@@ -54,6 +54,7 @@ All other accepted commands are dispatched to embedded jj.
 ## Source modules
 
 - `crates/cli/src/address.rs`
+- `crates/cli/src/credentials.rs`
 - `crates/cli/src/main.rs`
 - `crates/cli/src/td.rs`
 - `crates/client/src/backend.rs`

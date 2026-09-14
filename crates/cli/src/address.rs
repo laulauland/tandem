@@ -21,6 +21,8 @@ pub struct CloneTarget {
     pub base_url: String,
     /// `<namespace>/<repository>`, when the address named one.
     pub name: Option<RepositoryName>,
+    /// Host key used by the installer-managed credential file.
+    pub credential_host: Option<String>,
 }
 
 use jj_tandem_protocol::names::RepositoryName;
@@ -82,7 +84,12 @@ impl CloneTarget {
             None => format!("{scheme}://{host}"),
         };
 
-        Ok(Self { base_url, name })
+        let credential_host = name.is_some().then(|| host.to_string());
+        Ok(Self {
+            base_url,
+            name,
+            credential_host,
+        })
     }
 
     fn parse_name(address: &str, path: &str) -> Result<RepositoryName, String> {

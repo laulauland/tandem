@@ -21,12 +21,19 @@ fn foreground_server_requires_an_explicit_admin_token_without_logging_secrets() 
     let help = common::run_tandem_in(tmp.path(), &["--help"], &home);
     assert!(help.status.success());
     let help = common::stdout_str(&help);
-    assert!(help.contains("Required for `tandem serve`"), "{help}");
-    assert!(!help.contains("`tandem serve` logs it"), "{help}");
-    assert!(
-        help.contains("`tandem init`, `tandem clone`, and"),
-        "{help}"
-    );
+    assert!(help.contains("Required for `td serve`"), "{help}");
+    assert!(!help.contains("`td serve` logs it"), "{help}");
+    assert!(help.contains("`td init`, `td clone`, and"), "{help}");
+    assert!(!help.contains("      tandem "), "{help}");
+    assert!(help.contains("      td file show"), "{help}");
+    for flag in ["--version", "-V"] {
+        let version = common::run_tandem_in(tmp.path(), &[flag], &home);
+        common::assert_ok(&version, "offline td version");
+        assert_eq!(
+            common::stdout_str(&version),
+            format!("td {}\n", env!("CARGO_PKG_VERSION"))
+        );
+    }
     let mut command = std::process::Command::new(common::tandem_bin());
     common::isolate_env(&mut command, &home);
     // An invalid address also bounds the old behavior: it used to generate and

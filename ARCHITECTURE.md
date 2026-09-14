@@ -18,6 +18,8 @@ namespace owners and provisions repository engines; each engine coordinates
 operation heads, persists publishes, emits wake-ups, and owns Git interop.
 Clients retain control of their working files. Hosted recovery is implemented;
 repository identities are isolated and open independently within one host.
+That process also serves the public site, installer, GNU/Linux release artifact,
+and signed owner bootstrap; none of those paths introduces a second runtime.
 
 ## State and authority
 

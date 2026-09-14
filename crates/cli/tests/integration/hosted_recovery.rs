@@ -12,6 +12,13 @@ fn named_repository_recovers_exact_bytes_and_accepts_another_publish() {
     let home = isolated_home(temporary.path());
     let cache = temporary.path().join("host-cache");
     let bucket = temporary.path().join("bucket");
+    let distribution = temporary.path().join("distribution");
+    std::fs::create_dir_all(&distribution).unwrap();
+    std::fs::copy(
+        common::tandem_bin(),
+        distribution.join("td-x86_64-unknown-linux-gnu"),
+    )
+    .unwrap();
     let address = free_addr();
     let bucket_text = std::env::var("TANDEM_TEST_S3_BUCKET")
         .map(|base| {
@@ -34,7 +41,13 @@ fn named_repository_recovers_exact_bytes_and_accepts_another_publish() {
         })
         .unwrap_or_else(|_| bucket.to_string_lossy().to_string());
     let host_secret = jj_tandem_server::generate_admin_token();
-    let environment = [("TANDEM_ADMIN_TOKEN", host_secret.as_str())];
+    let distribution_text = distribution.to_string_lossy().to_string();
+    let public_url = format!("http://{address}");
+    let environment = [
+        ("TANDEM_ADMIN_TOKEN", host_secret.as_str()),
+        ("TANDEM_DISTRIBUTION_DIR", distribution_text.as_str()),
+        ("TANDEM_PUBLIC_URL", public_url.as_str()),
+    ];
     let (child, lines) = spawn_server_with_args_and_env_with_lines(
         &cache,
         &address,
@@ -50,17 +63,40 @@ fn named_repository_recovers_exact_bytes_and_accepts_another_publish() {
     );
     let mut server = ProcessGuard::with_lines(child, lines);
     let serving_pid = server.child.id();
-    let owner = create_owner_when_ready(&address, &host_secret, &mut server);
-    let owner_token = owner["token"].as_str().unwrap();
+    server.wait_for_listening(&address);
+    let installed_td = install_from_host(&address, temporary.path(), &home);
+    let credentials = home.join(".config/td/credentials");
+    let installed_credentials = std::fs::read(&credentials).unwrap();
+    install_from_host(&address, temporary.path(), &home);
+    assert_eq!(
+        std::fs::read(&credentials).unwrap(),
+        installed_credentials,
+        "reinstall replaced the existing same-host owner credential"
+    );
+    let forged = format!("{address} = tdmo_{}_{}\n", "0".repeat(64), "0".repeat(64));
+    std::fs::write(&credentials, forged.as_bytes()).unwrap();
+    install_from_host(&address, temporary.path(), &home);
+    let repaired_credentials = std::fs::read(&credentials).unwrap();
+    assert_ne!(
+        repaired_credentials,
+        forged.as_bytes(),
+        "reinstall preserved a shaped but invalid owner credential"
+    );
+    let owner_token = std::str::from_utf8(&repaired_credentials)
+        .unwrap()
+        .split_once('=')
+        .unwrap()
+        .1
+        .trim();
     let second_owner = create_owner(&address, &host_secret);
     let second_owner_token = second_owner["token"].as_str().unwrap();
     let repository_address = format!("http://{address}/acme/stage-one");
     let second_repository_address = format!("http://{address}/beta/stage-two");
     let first = temporary.path().join("first");
     let first_text = first.to_string_lossy().to_string();
-    let token_environment = [("TANDEM_TOKEN", owner_token)];
     assert_ok(
-        &run_tandem_in_with_env(
+        &run_binary_in(
+            &installed_td,
             temporary.path(),
             &[
                 "clone",
@@ -69,10 +105,9 @@ fn named_repository_recovers_exact_bytes_and_accepts_another_publish() {
                 "--workspace",
                 "agent-one",
             ],
-            &token_environment,
             &home,
         ),
-        "initial hosted clone",
+        "installed td clone using its credential file",
     );
     let second = temporary.path().join("second");
     let second_text = second.to_string_lossy().to_string();
@@ -347,6 +382,59 @@ fn named_repository_recovers_exact_bytes_and_accepts_another_publish() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn installer_preserves_credentials_when_verification_is_unavailable() {
+    let temporary = tempfile::tempdir().unwrap();
+    let home = isolated_home(temporary.path());
+    let fake_bin = temporary.path().join("fake-bin");
+    let config = home.join(".config/td");
+    std::fs::create_dir_all(&fake_bin).unwrap();
+    std::fs::create_dir_all(&config).unwrap();
+    common::write_test_executable(
+        &fake_bin.join("curl"),
+        r#"#!/bin/sh
+case "$*" in
+  */dl/*)
+    previous=""
+    for argument in "$@"; do
+      if [ "$previous" = "-o" ]; then printf binary >"$argument"; exit 0; fi
+      previous="$argument"
+    done
+    exit 2 ;;
+  */install/token/verify*) printf 500; exit 0 ;;
+  */install/token*) touch "$MINT_MARKER"; printf '{"token":"tdmo_%064d_%064d"}' 1 1; exit 0 ;;
+esac
+exit 2
+"#,
+    );
+    let credential = format!(
+        "native.example = tdmo_{}_{}\n",
+        "a".repeat(64),
+        "b".repeat(64)
+    );
+    let credentials = config.join("credentials");
+    std::fs::write(&credentials, &credential).unwrap();
+    let installer = temporary.path().join("install.sh");
+    std::fs::write(
+        &installer,
+        include_str!("../../../server/assets/install.sh")
+            .replace("@@TANDEM_PUBLIC_URL@@", "https://native.example"),
+    )
+    .unwrap();
+    let marker = temporary.path().join("minted");
+    let mut command = Command::new("/bin/sh");
+    command.arg(&installer);
+    isolate_env(&mut command, &home);
+    command.env("TANDEM_INSTALL_BIN_DIR", temporary.path().join("installed"));
+    command.env("MINT_MARKER", &marker);
+    command.env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()));
+    let output = command.output().unwrap();
+    assert!(!output.status.success());
+    assert_eq!(std::fs::read(&credentials).unwrap(), credential.as_bytes());
+    assert!(!marker.exists(), "installer minted after an ambiguous 500");
+}
+
 struct ProcessGuard {
     child: std::process::Child,
     lines: Option<common::lines::Lines>,
@@ -425,4 +513,43 @@ fn create_owner(address: &str, host_secret: &str) -> serde_json::Value {
         .expect("host rejected owner creation after announcing readiness")
         .json()
         .expect("decode owner response")
+}
+
+fn install_from_host(
+    address: &str,
+    temporary: &std::path::Path,
+    home: &std::path::Path,
+) -> std::path::PathBuf {
+    let script = common::http_client()
+        .get(format!("http://{address}/install.sh"))
+        .send()
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .bytes()
+        .unwrap();
+    let script_path = temporary.join("install.sh");
+    std::fs::write(&script_path, script).unwrap();
+    let bin = temporary.join("installed-bin");
+    let mut command = Command::new("sh");
+    command.arg(&script_path);
+    isolate_env(&mut command, home);
+    command.env("TANDEM_INSTALL_BASE", format!("http://{address}"));
+    command.env("TANDEM_INSTALL_BIN_DIR", &bin);
+    command.env("TANDEM_INSTALL_TARGET", "x86_64-unknown-linux-gnu");
+    let output = command.output().unwrap();
+    assert_ok(&output, "native installer");
+    bin.join("td")
+}
+
+fn run_binary_in(
+    binary: &std::path::Path,
+    directory: &std::path::Path,
+    args: &[&str],
+    home: &std::path::Path,
+) -> std::process::Output {
+    let mut command = Command::new(binary);
+    command.current_dir(directory).args(args);
+    isolate_env(&mut command, home);
+    command.output().unwrap()
 }

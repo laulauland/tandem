@@ -31,6 +31,11 @@ Before admitting clients:
    separately when upstream interoperation is needed.
 3. Supply a stable admin token through protected environment or service-secret
    storage. Do not put it in shell history, process arguments, images, or logs.
+   Set `TANDEM_DISTRIBUTION_DIR` to the protected deployment's release directory;
+   the current installer serves `td-x86_64-unknown-linux-gnu` from that directory.
+   Set `TANDEM_PUBLIC_URL` to the proxy's public HTTP(S) origin. The host renders
+   that validated origin into its site and installer and does not infer it from
+   request headers.
 4. Bind to a private interface, use a VPN/tunnel, or terminate TLS at a reverse
    proxy. Tandem does not encrypt HTTP itself.
 5. Run `tandem serve` under a service manager for supervised production use;
@@ -44,12 +49,13 @@ materialization and its supposed backup.
 
 ## Workspace access
 
-Hosted owner bootstrap requires the protected host admin credential. Save the
-returned owner credential through a protected file or environment; never capture
-the response in logs. A named clone claims its namespace and creates the
-repository when needed. Retrying creation preserves the same ownership. Owner
-credentials authorize repository access within their namespaces; clone exchanges
-that authority for the agent workspace credential.
+The public installer downloads the native GNU/Linux binary and asks the host for
+a signed owner credential. It stores one credential per exact host in
+`$XDG_CONFIG_HOME/td/credentials`, or `$HOME/.config/td/credentials`, with mode
+0600. Reinstall verifies and preserves a valid credential from the same host so
+namespace ownership is not replaced. A named clone reads that file, claims its
+namespace, and creates the repository when needed. Explicit `TANDEM_TOKEN` still
+takes precedence. Never capture installer responses or credentials in logs.
 
 Give each active agent a unique workspace identity. `tandem clone` accepts the
 admin token and exchanges it for a scoped token, or accepts an already-scoped

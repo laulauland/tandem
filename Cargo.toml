@@ -38,6 +38,7 @@ pollster = "0.4"
 rand = "0.9"
 tokio-stream = { version = "0.1", features = ["sync"] }
 tracing-subscriber = { version = "0.3", features = ["fmt", "json", "registry"] }
+url = "2"
 
 jj-tandem-protocol = { package = "jj-tandem-protocol", path = "crates/protocol", version = "0.4.0" }
 jj-tandem-wal = { package = "jj-tandem-wal", path = "crates/wal", version = "0.4.0" }

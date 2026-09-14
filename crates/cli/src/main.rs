@@ -21,6 +21,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use clap::{CommandFactory, Parser, Subcommand};
 
 mod address;
+mod credentials;
 use address::CloneTarget;
 
 // ─── Help text ────────────────────────────────────────────────────────────────
@@ -28,32 +29,34 @@ use address::CloneTarget;
 const AFTER_HELP: &str = "\
 JJ COMMANDS:
     All standard jj commands work transparently:
-      tandem log            Show commit history
-      tandem new            Create a new change
-      tandem diff           Show changes in a revision
-      tandem file show      Print file contents at a revision
-      tandem bookmark       Manage bookmarks
-      tandem describe       Update change description
+      td log            Show commit history
+      td new            Create a new change
+      td diff           Show changes in a revision
+      td file show      Print file contents at a revision
+      td bookmark       Manage bookmarks
+      td describe       Update change description
       ... and every other jj command
 
 ENVIRONMENT:
     TANDEM_SERVER           Server address (host:port) — used by the tandem
                             backend when connecting to a remote store
-    TANDEM_WORKSPACE        Workspace name for `tandem init` when --workspace
+    TANDEM_WORKSPACE        Workspace name for `td init` when --workspace
                             is not provided
-    TANDEM_ADMIN_TOKEN      The token `tandem serve` and `tandem up` accept as
+    TANDEM_ADMIN_TOKEN      The token `td serve` and `td up` accept as
                             the administrator's. It is what mints workspace
-                            tokens. Required for `tandem serve`. If unset,
-                            `tandem up` generates and prints it; treat that
+                            tokens. Required for `td serve`. If unset,
+                            `td up` generates and prints it; treat that
                             terminal output as secret
-    TANDEM_TOKEN            The token `tandem init`, `tandem clone`, and
-                            `tandem watch` present.
+    TANDEM_TOKEN            The token `td init`, `td clone`, and
+                            `td watch` present.
                             Either the admin token or one already scoped to the
-                            workspace
-    TANDEM_LISTEN           Listen address for `tandem up` (host:port).
+                            workspace. Hosted clone also reads the exact host
+                            from $XDG_CONFIG_HOME/td/credentials, else
+                            $HOME/.config/td/credentials
+    TANDEM_LISTEN           Listen address for `td up` (host:port).
                             If unset, tandem auto-selects a free port
                             in 0.0.0.0:13013-13063
-    TANDEM_DEBOUNCE_MS      How long `tandem daemon` collects file changes
+    TANDEM_DEBOUNCE_MS      How long `td daemon` collects file changes
                             before it snapshots. It is a durability window:
                             work done inside one is work a dying machine takes
                             with it. Defaults to 1000
@@ -67,35 +70,33 @@ ENVIRONMENT:
 
 SETUP:
     # Set TANDEM_ADMIN_TOKEN through a protected environment, then start a server
-    tandem serve --listen 0.0.0.0:13013 --repo /path/to/repo
+    td serve --listen 0.0.0.0:13013 --repo /path/to/repo
 
     # Set TANDEM_TOKEN through a protected environment, then create a workspace
-    tandem clone server:13013 my-workspace --workspace agent-a
+    td clone server:13013 my-workspace --workspace agent-a
 
     # Let file changes publish themselves
     cd my-workspace
-    tandem daemon &
+    td daemon &
     echo 'hello' > hello.txt
 
     # Use jj normally
-    tandem describe -m 'add hello'
-    tandem log";
+    td describe -m 'add hello'
+    td log";
 
 const SERVE_AFTER_HELP: &str = "\
 EXAMPLES:
-    tandem serve --listen 0.0.0.0:13013 --repo /srv/project
-    tandem serve --listen 127.0.0.1:13013 --repo .";
+    td serve --listen 0.0.0.0:13013 --repo /srv/project
+    td serve --listen 127.0.0.1:13013 --repo .";
 
 const INIT_AFTER_HELP: &str = "\
 EXAMPLES:
-    tandem init --server server:13013 --token tdma_… my-workspace
-    tandem init --server server:13013 --token tdma_… --workspace agent-a .
-    TANDEM_SERVER=server:13013 TANDEM_TOKEN=tdma_… tandem init .";
+    TANDEM_SERVER=server:13013 TANDEM_TOKEN=tdma_… td init .";
 
 const CLONE_AFTER_HELP: &str = "\
 EXAMPLES:
-    tandem clone server:13013 ./work --workspace agent-a --token tdma_…
-    TANDEM_TOKEN=tdma_… tandem clone server:13013 ./work --workspace agent-a
+    td clone tandem.example/you/my-project ./work --workspace agent-a
+    TANDEM_TOKEN=tdma_… td clone server:13013 ./work --workspace agent-a
 
 A clone of a workspace name the server already knows attaches to it: the files
 that come back are the last snapshot that name published, wherever the machine
@@ -104,29 +105,30 @@ makes it the thing to run when baking an image.";
 
 const DAEMON_AFTER_HELP: &str = "\
 EXAMPLES:
-    tandem daemon
-    tandem daemon /path/to/workspace --debounce-ms 300
-    tandem daemon --status
+    td daemon
+    td daemon /path/to/workspace --debounce-ms 300
+    td daemon --status
 
 The daemon watches the workspace for file changes and publishes each burst of
 them as one jj operation. Nothing has to ask it to: there is no checkpoint
 command, and no `jj` command has to be run for work to be durable.
 
 A head change published anywhere else marks this workspace stale and stops
-there. `tandem workspace update-stale` is never run for you — it moves files
+there. `td workspace update-stale` is never run for you — it moves files
 under whoever is editing them, and that is a decision, not a reflex.";
 
 const SERVER_AFTER_HELP: &str = "\
 EXAMPLES:
-    tandem server status
-    tandem server logs --level debug
-    tandem server logs --json";
+    td server status
+    td server logs --level debug
+    td server logs --json";
 
 // ─── CLI definition ───────────────────────────────────────────────────────────
 
 #[derive(Parser)]
 #[command(
-    name = "tandem",
+    name = "td",
+    version,
     about = "tandem — jj workspaces over the network",
     after_help = AFTER_HELP,
     disable_help_subcommand = true
@@ -156,7 +158,7 @@ enum Commands {
         /// Path to control socket
         #[arg(long)]
         control_socket: Option<String>,
-        /// Run as daemon (internal, set by `tandem up`)
+        /// Run as daemon (internal, set by `td up`)
         #[arg(long, hide = true)]
         daemon: bool,
         /// Log file path (used in daemon mode)
@@ -206,10 +208,9 @@ enum Commands {
         /// Workspace name (auto-generated if omitted)
         #[arg(long, env = "TANDEM_WORKSPACE")]
         workspace: Option<String>,
-        /// The server's admin token, or a token already scoped to this
-        /// workspace
+        /// Owner or workspace token; hosted clone can read its credential file
         #[arg(long, env = "TANDEM_TOKEN")]
-        token: String,
+        token: Option<String>,
     },
 
     /// Watch a workspace and publish its file changes as operations
@@ -260,7 +261,7 @@ enum Commands {
         /// Path to control socket
         #[arg(long)]
         control_socket: Option<String>,
-        /// Bucket holding the write-ahead log (see `tandem serve --bucket`)
+        /// Bucket holding the write-ahead log (see `td serve --bucket`)
         #[arg(long, env = "TANDEM_BUCKET")]
         bucket: Option<String>,
         /// The token that mints workspace tokens. Generated and printed if
@@ -323,7 +324,7 @@ pub fn main() -> ExitCode {
         None
         | Some(
             "serve" | "init" | "clone" | "daemon" | "watch" | "up" | "down" | "server" | "--help"
-            | "-h",
+            | "-h" | "--version" | "-V",
         ) => {}
         _ => return run_jj(),
     }
@@ -374,7 +375,7 @@ pub fn main() -> ExitCode {
             token,
         }) => {
             let workspace_name = resolve_init_workspace_name(workspace.as_deref());
-            run_clone(&server, &token, &workspace_name, &dir)
+            run_clone(&server, token.as_deref(), &workspace_name, &dir)
         }
         Some(Commands::Daemon {
             path,
@@ -582,7 +583,7 @@ fn run_logs(level: &str, json: bool, control_socket: Option<&str>) -> ExitCode {
     let sock_path = resolve_control_socket(control_socket);
 
     if control::client_status(&sock_path).is_err() {
-        eprintln!("no tandem daemon running. Start one with `tandem up`.");
+        eprintln!("no tandem daemon running. Start one with `td up`.");
         return ExitCode::FAILURE;
     }
 
@@ -675,7 +676,7 @@ fn run_tandem_init(
 
 fn run_clone(
     server_addr: &str,
-    token: &str,
+    token: Option<&str>,
     workspace_name: &str,
     workspace_path_str: &str,
 ) -> ExitCode {
@@ -686,18 +687,25 @@ fn run_clone(
             return ExitCode::FAILURE;
         }
     };
+    let token = match credentials::resolve(token, target.credential_host.as_deref()) {
+        Ok(token) => token,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     if target.name.is_some() {
         let client = reqwest::blocking::Client::new();
         let info = client
             .get(format!("{}/api/info", target.base_url))
-            .bearer_auth(token)
+            .bearer_auth(&token)
             .send();
         match info {
             Ok(response) if response.status().is_success() => {}
             Ok(response) if response.status() == reqwest::StatusCode::NOT_FOUND => {
                 match client
                     .put(&target.base_url)
-                    .bearer_auth(token)
+                    .bearer_auth(&token)
                     .body(Vec::new())
                     .send()
                 {
@@ -740,7 +748,7 @@ fn run_clone(
     match clone_tandem_workspace(
         &settings,
         &target.base_url,
-        token,
+        &token,
         workspace_name,
         Path::new(workspace_path_str),
     ) {
@@ -848,10 +856,7 @@ fn run_daemon_status(workspace_path_str: &str, json: bool) -> ExitCode {
                 if let Some(op) = status.last_published_op.as_deref() {
                     println!("  Last op:   {op}");
                 }
-                println!(
-                    "  Start one with `tandem daemon {}`.",
-                    status.workspace_root
-                );
+                println!("  Start one with `td daemon {}`.", status.workspace_root);
             } else {
                 println!("workspace: {}", status.workspace);
                 println!("  Root:      {}", status.workspace_root);
@@ -876,7 +881,7 @@ fn run_daemon_status(workspace_path_str: &str, json: bool) -> ExitCode {
                 println!("  Stale:     {}", status.stale);
                 if status.stale {
                     println!(
-                        "  The heads moved elsewhere. Run `tandem workspace update-stale` when \
+                        "  The heads moved elsewhere. Run `td workspace update-stale` when \
                          you want the files moved — nothing does it for you."
                     );
                 }

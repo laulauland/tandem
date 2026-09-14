@@ -59,6 +59,15 @@ pub fn isolated_home(tmp: &Path) -> PathBuf {
     home
 }
 
+#[cfg(unix)]
+pub fn write_test_executable(path: &Path, contents: &str) {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    std::fs::write(path, contents).expect("write test executable");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+        .expect("make test executable");
+}
+
 /// Apply test isolation env vars to a Command.
 /// Sets HOME and XDG_CONFIG_HOME to a temp dir so jj doesn't
 /// pollute the real ~/.config/jj/repos/ registry.

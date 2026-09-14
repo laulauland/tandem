@@ -7,7 +7,7 @@ use axum::body::Body;
 use axum::extract::{Path, Request, State};
 use axum::http::{header, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{post, put};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use blake2::{Blake2b512, Digest as _};
 use jj_tandem_protocol::names::RepositoryName;
@@ -34,7 +34,7 @@ enum RepositoryState {
     Ready,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct OwnerBody {
     token: String,
 }
@@ -46,6 +46,8 @@ pub struct HostedServer {
     host_secret: String,
     repositories: LoadingSlots<Server>,
     open_limit: OpenLimit,
+    distribution_dir: PathBuf,
+    public_url: String,
     faults: Arc<jj_tandem_repository::FaultPoints>,
 }
 
@@ -69,6 +71,9 @@ impl HostedServer {
         if !jj_tandem_storage::probe_conditional_put(bucket.as_ref())? {
             bail!("hosted repositories require a bucket with conditional puts");
         }
+        let public_url = std::env::var("TANDEM_PUBLIC_URL")
+            .unwrap_or_else(|_| "https://tandem.land".to_string());
+        let public_url = validate_public_url(&public_url)?;
         Ok(Self {
             cache_root,
             bucket_spec: bucket_spec.to_string(),
@@ -76,6 +81,10 @@ impl HostedServer {
             host_secret: host_secret.to_string(),
             repositories: LoadingSlots::new(),
             open_limit: OpenLimit::new(4),
+            distribution_dir: std::env::var_os("TANDEM_DISTRIBUTION_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/opt/tandem/releases")),
+            public_url,
             faults,
         })
     }
@@ -355,16 +364,145 @@ impl Drop for OpenPermit<'_> {
 
 pub fn router(server: Arc<HostedServer>) -> Router {
     Router::new()
+        .route("/", get(homepage))
+        .route("/architecture", get(architecture))
+        .route("/site.css", get(site_css))
+        .route("/healthz", get(health))
+        .route("/install", get(installer))
+        .route("/install.sh", get(installer))
+        .route("/install/token", post(create_public_owner))
+        .route("/install/token/verify", post(verify_public_owner))
+        .route("/dl/{artifact}", get(download))
         .route("/api/owners", post(create_owner))
         .route("/{namespace}/{repository}", put(create_repository))
         .fallback(dispatch_repository)
         .with_state(server)
 }
 
+async fn homepage(State(server): State<Arc<HostedServer>>) -> Response {
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        render_html_asset(include_str!("../assets/homepage.html"), &server.public_url),
+    )
+        .into_response()
+}
+
+async fn architecture(State(server): State<Arc<HostedServer>>) -> Response {
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        render_html_asset(
+            include_str!("../assets/architecture.html"),
+            &server.public_url,
+        ),
+    )
+        .into_response()
+}
+
+async fn site_css() -> Response {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        include_str!("../assets/site.css"),
+    )
+        .into_response()
+}
+
+async fn health() -> &'static str {
+    "ok\n"
+}
+
+async fn installer(State(server): State<Arc<HostedServer>>) -> Response {
+    (
+        [(header::CONTENT_TYPE, "text/x-shellscript; charset=utf-8")],
+        render_shell_asset(include_str!("../assets/install.sh"), &server.public_url),
+    )
+        .into_response()
+}
+
+fn render_html_asset(asset: &str, public_url: &str) -> String {
+    asset.replace("@@TANDEM_PUBLIC_URL@@", &escape_html(public_url))
+}
+
+fn render_shell_asset(asset: &str, public_url: &str) -> String {
+    asset.replace(
+        "@@TANDEM_PUBLIC_URL@@",
+        &public_url
+            .replace('\\', "\\\\")
+            .replace('$', "\\$")
+            .replace('`', "\\`")
+            .replace('"', "\\\""),
+    )
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn validate_public_url(value: &str) -> Result<String> {
+    if !value.chars().all(|character| {
+        character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | ':' | '/' | '[' | ']')
+    }) {
+        bail!("TANDEM_PUBLIC_URL contains a character that is not valid in a public origin");
+    }
+    let parsed = url::Url::parse(value).context("parse TANDEM_PUBLIC_URL")?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || parsed.path() != "/"
+    {
+        bail!("TANDEM_PUBLIC_URL must be an HTTP(S) origin without userinfo, path or query");
+    }
+    Ok(parsed.origin().ascii_serialization())
+}
+
+async fn create_public_owner(State(server): State<Arc<HostedServer>>) -> Response {
+    owner_response(&server)
+}
+
+async fn verify_public_owner(
+    State(server): State<Arc<HostedServer>>,
+    request: Request,
+) -> Response {
+    match bearer(&request).filter(|token| server.verifies_owner_token(token)) {
+        Some(_) => StatusCode::NO_CONTENT.into_response(),
+        None => StatusCode::UNAUTHORIZED.into_response(),
+    }
+}
+
+async fn download(
+    State(server): State<Arc<HostedServer>>,
+    Path(artifact): Path<String>,
+) -> Response {
+    if artifact != "td-x86_64-unknown-linux-gnu" {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    match tokio::fs::read(server.distribution_dir.join(&artifact)).await {
+        Ok(bytes) => ([(header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            StatusCode::NOT_FOUND.into_response()
+        }
+        Err(error) => {
+            tracing::error!(%error, artifact, "distribution artifact read failed");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
 async fn create_owner(State(server): State<Arc<HostedServer>>, request: Request) -> Response {
     if bearer(&request) != Some(server.host_secret.as_str()) {
         return StatusCode::NOT_FOUND.into_response();
     }
+    owner_response(&server)
+}
+
+fn owner_response(server: &HostedServer) -> Response {
     let mut entropy = [0u8; 32];
     if rand::rngs::OsRng.try_fill_bytes(&mut entropy).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -614,6 +752,7 @@ fn repository_bucket_spec(root: &str, namespace: &str, repository: &str) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::to_bytes;
     use std::sync::Barrier;
 
     fn host() -> (tempfile::TempDir, Arc<HostedServer>) {
@@ -626,6 +765,121 @@ mod tests {
             .to_string();
         let host = Arc::new(HostedServer::new(cache, &bucket, "host-secret").unwrap());
         (temporary, host)
+    }
+
+    #[tokio::test]
+    async fn public_install_surface_serves_native_bytes_and_a_signed_owner() {
+        let temporary = tempfile::tempdir().unwrap();
+        let bucket = temporary.path().join("bucket");
+        let distribution = temporary.path().join("distribution");
+        std::fs::create_dir_all(&distribution).unwrap();
+        let artifact: &[u8] = b"native-gnu-binary\0\xff";
+        std::fs::write(distribution.join("td-x86_64-unknown-linux-gnu"), artifact).unwrap();
+        let mut server = HostedServer::new(
+            temporary.path().join("cache"),
+            &bucket.to_string_lossy(),
+            "secret",
+        )
+        .unwrap();
+        server.distribution_dir = distribution;
+        server.public_url = "https://native.example".to_string();
+        let server = Arc::new(server);
+
+        let download = router(server.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/dl/td-x86_64-unknown-linux-gnu")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(download.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(download.into_body(), usize::MAX).await.unwrap(),
+            artifact
+        );
+
+        let install = router(server.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/install.sh")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let install = to_bytes(install.into_body(), usize::MAX).await.unwrap();
+        let install = std::str::from_utf8(&install).unwrap();
+        assert!(install.contains("x86_64-unknown-linux-gnu"));
+        assert!(!install.contains("linux-musl"));
+        assert!(install.contains("https://native.example"));
+        assert!(!install.contains("@@TANDEM_PUBLIC_URL@@"));
+
+        let homepage = router(server.clone())
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let homepage = to_bytes(homepage.into_body(), usize::MAX).await.unwrap();
+        let homepage = std::str::from_utf8(&homepage).unwrap();
+        assert!(homepage.contains("https://native.example/install"));
+        assert!(!homepage.contains("--token"));
+
+        let minted = router(server.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/install/token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(minted.status(), StatusCode::CREATED);
+        let owner: OwnerBody =
+            serde_json::from_slice(&to_bytes(minted.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert!(server.verifies_owner_token(&owner.token));
+        let created = router(server)
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/public/repository")
+                    .header(header::AUTHORIZATION, format!("Bearer {}", owner.token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::CREATED);
+    }
+
+    #[test]
+    fn public_origin_is_an_explicit_origin_not_a_request_path() {
+        assert_eq!(
+            validate_public_url("https://native.example/").unwrap(),
+            "https://native.example"
+        );
+        for invalid in [
+            "native.example",
+            "https://native.example/path",
+            "https://native.example?query",
+            "https://native.example bad",
+            "https://user@native.example",
+            "https://$(id)",
+            "https://`id`",
+            "https://native.example\"bad",
+        ] {
+            assert!(validate_public_url(invalid).is_err(), "{invalid}");
+        }
+        assert_eq!(
+            render_shell_asset("\"@@TANDEM_PUBLIC_URL@@\"", "https://x/\"$(`"),
+            "\"https://x/\\\"\\$(\\`\""
+        );
+        assert_eq!(
+            render_html_asset("@@TANDEM_PUBLIC_URL@@", "<&\"'>"),
+            "&lt;&amp;&quot;&#39;&gt;"
+        );
     }
 
     #[test]

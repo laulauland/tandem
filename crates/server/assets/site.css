@@ -1,0 +1,88 @@
+:root {
+  color-scheme: light;
+  --paper: #f4ebdd;
+  --ink: #231f1a;
+  --faint: #6b6257;
+  --rule: #9d9385;
+  --shade: #e9dfcf;
+  --added: #3c5538;
+}
+
+* { box-sizing: border-box; }
+html, body { min-height: 100%; margin: 0; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font: 1.2rem/1.52 "EB Garamond", Georgia, serif;
+  font-variant-numeric: oldstyle-nums proportional-nums;
+  padding: clamp(2rem, 7vw, 5.5rem) 1.4rem 4rem;
+}
+main { width: 100%; max-width: 68rem; margin: 0 auto; }
+.masthead { max-width: 49rem; margin: 0 auto; text-align: center; }
+.running-head, h2 {
+  font-size: .78rem;
+  font-weight: 400;
+  letter-spacing: .2em;
+  font-variant-caps: small-caps;
+}
+.running-head { margin: 0 0 .8rem; color: var(--faint); }
+h1 { margin: 0; font-size: clamp(4rem, 12vw, 7.4rem); font-weight: 500; letter-spacing: .025em; line-height: .82; }
+.deck { max-width: 34rem; margin: 1.15rem auto 0; font-size: 1.35rem; font-style: italic; line-height: 1.3; }
+.printer-rule { display: flex; align-items: center; gap: .7rem; max-width: 24rem; margin: 1.4rem auto 0; }
+.printer-rule::before, .printer-rule::after { content: ""; height: 1px; flex: 1; background: var(--ink); }
+.printer-rule span { width: 3.6rem; height: 3px; background: var(--ink); }
+.top-nav { display: flex; justify-content: center; gap: 1.4rem; margin-top: 1.2rem; color: var(--faint); font-size: .95rem; }
+.home-sheet { max-width: 43rem; margin: clamp(3rem, 7vw, 5.5rem) auto 0; }
+.home-sheet section { margin-bottom: 3rem; }
+.sheet { display: grid; grid-template-columns: minmax(0, 43rem) 12rem; gap: clamp(2.5rem, 6vw, 5.5rem); justify-content: center; margin-top: clamp(3rem, 7vw, 5.5rem); }
+article { min-width: 0; }
+section { margin: 0 0 3.4rem; }
+h2 { display: flex; align-items: center; gap: .8rem; margin: 0 0 1.15rem; white-space: nowrap; }
+h2::before, h2::after { content: ""; height: 1px; background: var(--rule); }
+h2::before { width: 2rem; }
+h2::after { flex: 1; }
+p { margin: 0 0 .85rem; }
+p + p { text-indent: 1.1em; }
+a { color: inherit; text-decoration-color: var(--rule); text-underline-offset: .16em; }
+a:hover { color: var(--added); text-decoration-color: currentColor; }
+a:focus-visible { outline: 2px solid var(--added); outline-offset: 3px; }
+code, pre, .state-table { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-variant-ligatures: none; font-variant-numeric: lining-nums tabular-nums; }
+code { font-size: .82em; }
+pre { margin: 1.4rem 0 1.1rem; padding: 1.15rem 1.3rem; overflow-x: auto; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); background: var(--shade); color: var(--ink); font-size: .79rem; line-height: 1.7; }
+.sample { position: relative; }
+.sample::before { content: attr(data-label); display: block; margin-bottom: .55rem; color: var(--faint); font: italic .9rem/1.3 "EB Garamond", Georgia, serif; }
+.prompt { color: var(--added); font-weight: 400; }
+.caption { color: var(--faint); font-size: .95rem; font-style: italic; text-indent: 0; }
+.output { background: transparent; color: var(--faint); border-top-color: var(--rule); border-bottom-color: var(--rule); }
+.output .result { color: var(--added); }
+.state-table { width: 100%; margin: 1.4rem 0 1rem; border-collapse: collapse; font-size: .75rem; line-height: 1.45; }
+.state-table th { padding: .55rem .65rem; border-top: 2px solid var(--ink); border-bottom: 1px solid var(--ink); text-align: left; font-weight: 400; letter-spacing: .08em; font-variant-caps: small-caps; }
+.state-table td { padding: .65rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+aside { color: var(--faint); font-size: .94rem; font-style: italic; line-height: 1.35; }
+.margin-note { margin: 0 0 2.5rem; padding-top: .55rem; border-top: 1px solid var(--rule); }
+.margin-note:first-child { margin-top: 1.85rem; }
+footer { max-width: 43rem; margin: 0 auto; padding-top: 1rem; border-top: 3px double var(--ink); color: var(--faint); font-size: .95rem; text-align: center; }
+footer p { margin: .35rem 0; }
+.architecture .sheet { margin-top: 3.6rem; }
+.architecture h1 { font-size: clamp(3rem, 10vw, 6rem); }
+.architecture h3 { margin: 1.5rem 0 .5rem; font-size: 1.05rem; font-weight: 400; font-variant-caps: small-caps; letter-spacing: .12em; }
+.architecture ul { margin: .7rem 0 1rem; padding-left: 1.2rem; }
+.architecture li { margin-bottom: .45rem; }
+.back-link { margin: 0 0 2rem; font-size: .95rem; }
+
+@media (max-width: 48rem) {
+  body { font-size: 1.1rem; }
+  .sheet { display: block; margin-top: 3.2rem; }
+  article, aside { max-width: 43rem; margin-left: auto; margin-right: auto; }
+  aside { margin-top: -1rem; margin-bottom: 2.5rem; }
+  .margin-note, .margin-note:first-child { margin: 0 0 1rem; }
+}
+@media (max-width: 30rem) {
+  body { padding-inline: 1rem; }
+  h1 { font-size: clamp(3.6rem, 20vw, 5rem); }
+  .deck { font-size: 1.2rem; }
+  .state-table { display: block; overflow-x: auto; }
+  .top-nav { gap: .9rem; flex-wrap: wrap; }
+  .architecture h1 { font-size: 2.65rem; }
+  .architecture h2 { white-space: normal; }
+}
