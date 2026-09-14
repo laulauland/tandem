@@ -139,6 +139,7 @@ impl Server {
         Ok(Self::from_repository_with_admission(
             Repository::new(&settings, repo, bucket)?,
             admin_token,
+            Vec::new(),
             Arc::new(tokio::sync::Semaphore::new(MAX_DECODED_BODIES - 1)),
             Arc::new(tokio::sync::Semaphore::new(1)),
             Arc::new(tokio::sync::Semaphore::new(MAX_ACTIVE_PUBLISHES)),
@@ -155,6 +156,30 @@ impl Server {
         control_body_admission: Arc<tokio::sync::Semaphore>,
         publish_admission: Arc<tokio::sync::Semaphore>,
     ) -> Result<Self> {
+        Self::new_with_signing_keys_and_budget(
+            repo,
+            bucket,
+            admin_token,
+            Vec::new(),
+            faults,
+            staging_budget,
+            body_admission,
+            control_body_admission,
+            publish_admission,
+        )
+    }
+
+    pub(crate) fn new_with_signing_keys_and_budget(
+        repo: PathBuf,
+        bucket: Option<&str>,
+        admin_token: &str,
+        retained_signing_keys: Vec<String>,
+        faults: Arc<jj_tandem_repository::FaultPoints>,
+        staging_budget: Arc<jj_tandem_repository::StagingBudget>,
+        body_admission: Arc<tokio::sync::Semaphore>,
+        control_body_admission: Arc<tokio::sync::Semaphore>,
+        publish_admission: Arc<tokio::sync::Semaphore>,
+    ) -> Result<Self> {
         let settings = user_settings()?;
         Ok(Self::from_repository_with_admission(
             jj_tandem_repository::Repository::new_with_faults_and_budget(
@@ -165,6 +190,7 @@ impl Server {
                 staging_budget,
             )?,
             admin_token,
+            retained_signing_keys,
             body_admission,
             control_body_admission,
             publish_admission,
@@ -195,6 +221,7 @@ impl Server {
         Self::from_repository_with_admission(
             repository,
             admin_token,
+            Vec::new(),
             Arc::new(tokio::sync::Semaphore::new(MAX_DECODED_BODIES - 1)),
             Arc::new(tokio::sync::Semaphore::new(1)),
             Arc::new(tokio::sync::Semaphore::new(MAX_ACTIVE_PUBLISHES)),
@@ -204,13 +231,14 @@ impl Server {
     fn from_repository_with_admission(
         repository: Repository,
         admin_token: &str,
+        retained_signing_keys: Vec<String>,
         body_admission: Arc<tokio::sync::Semaphore>,
         control_body_admission: Arc<tokio::sync::Semaphore>,
         host_publish: Arc<tokio::sync::Semaphore>,
     ) -> Self {
         Self {
             repository: Arc::new(repository),
-            tokens: auth::TokenStore::new(admin_token),
+            tokens: auth::TokenStore::with_retained(admin_token, retained_signing_keys),
             writer_roles: writer::WriterRoles::new(),
             body_admission,
             control_body_admission,
@@ -383,7 +411,13 @@ pub async fn run_serve(opts: ServeOptions) -> Result<()> {
         })
         .transpose()?
         .map(|bucket| {
-            hosted::HostedServer::new(PathBuf::from(&opts.repo_path), bucket, &admin_token)
+            let retained = std::env::var("TANDEM_RETAINED_SIGNING_KEYS").ok();
+            let keys = hosted::SigningKeys::parse(&admin_token, retained.as_deref())?;
+            hosted::HostedServer::new_with_signing_keys(
+                PathBuf::from(&opts.repo_path),
+                bucket,
+                keys,
+            )
         })
         .transpose()?;
     let server = if hosted.is_none() {

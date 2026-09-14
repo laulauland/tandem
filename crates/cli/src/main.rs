@@ -47,6 +47,10 @@ ENVIRONMENT:
                             tokens. Required for `td serve`. If unset,
                             `td up` generates and prints it; treat that
                             terminal output as secret
+    TANDEM_RETAINED_SIGNING_KEYS
+                            Comma-separated prior hosted signing keys accepted
+                            only for existing owner and workspace credentials.
+                            Configure through a protected environment file
     TANDEM_TOKEN            The token `td init`, `td clone`, and
                             `td watch` present.
                             Either the admin token or one already scoped to the

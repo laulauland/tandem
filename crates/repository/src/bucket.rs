@@ -1053,6 +1053,10 @@ impl Repository {
                     };
                     self.apply_wal_entry(&entry)
                         .with_context(|| format!("apply WAL entry {hex}"))?;
+                    self.faults.hold_replay_apply_if_armed();
+                    if self.faults.take_replay_apply_failure() {
+                        anyhow::bail!("injected failure after applying replay entry {hex}");
+                    }
                     applied += 1;
                 }
             }
@@ -1165,12 +1169,15 @@ impl Repository {
     /// from anywhere else is another writer's, and dropping one of those is
     /// last-writer-wins, against invariant 6.
     fn retire_bootstrap_heads(&self, index: &wal::IndexObject) -> Result<()> {
-        if self.bootstrap_op_heads.is_empty() {
+        let mut bootstrap_op_heads = self
+            .bootstrap_op_heads
+            .lock()
+            .map_err(|e| anyhow!("bootstrap heads lock: {e}"))?;
+        if bootstrap_op_heads.is_empty() {
             return Ok(());
         }
         let named: HashSet<&str> = index.op_heads.iter().map(String::as_str).collect();
-        let stale: Vec<OperationId> = self
-            .bootstrap_op_heads
+        let stale: Vec<OperationId> = bootstrap_op_heads
             .iter()
             .filter(|hex| !named.contains(hex.as_str()))
             .map(|hex| from_hex(hex).map(OperationId::new))
@@ -1198,6 +1205,12 @@ impl Repository {
             retired = stale.len(),
             "retired the operations this boot's repo init minted"
         );
+        match std::fs::remove_file(self.tandem_dir.join("bootstrap-heads.json")) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err).context("remove retired repo-init head record"),
+        }
+        bootstrap_op_heads.clear();
         Ok(())
     }
 

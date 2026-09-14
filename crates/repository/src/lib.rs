@@ -77,7 +77,7 @@ pub struct Repository {
     /// disk has no local state worth comparing against the bucket.
     bootstrapped: bool,
     /// Op heads that repo init left behind on an empty disk, before any replay.
-    bootstrap_op_heads: Vec<String>,
+    bootstrap_op_heads: Mutex<Vec<String>>,
     /// What materializing the repo from the bucket cost at startup.
     boot_replay: Mutex<bucket::BootReplay>,
     /// The faults this server is under. Inert unless a test says otherwise.
@@ -354,11 +354,32 @@ impl Repository {
     ) -> Result<Self> {
         fs::create_dir_all(&repo)?;
 
+        // This cache is disposable until its initializer head has been
+        // identified durably. A process killed inside jj initialization (or
+        // before that identity record lands) leaves this intent behind; the
+        // next process starts the local cache over rather than trusting an
+        // initializer it cannot distinguish from bucket history.
+        let initialization_intent = repo.join(".tandem-initializing");
+        if initialization_intent.exists() {
+            for local_state in [".jj", ".git"] {
+                match fs::remove_dir_all(repo.join(local_state)) {
+                    Ok(()) => {}
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(err) => {
+                        return Err(err).with_context(|| {
+                            format!("discard interrupted {local_state} initialization")
+                        })
+                    }
+                }
+            }
+        }
+
         // An empty directory is not an empty repo: with a bucket behind it, it
         // is a repo whose whole history is somewhere else. Remember which of
         // the two this is, because everything about the boot depends on it.
         let bootstrapped = !repo.join(".jj").exists();
         if bootstrapped {
+            write_bytes_if_missing(&initialization_intent, b"initializing\n")?;
             tracing::info!(
                 repo = %repo.display(),
                 "no repo on disk; creating one to materialize into"
@@ -422,7 +443,7 @@ impl Repository {
         }
 
         let op_heads_store = loader.op_heads_store().clone();
-        let mut server = Self {
+        let server = Self {
             store: loader.store().clone(),
             repo_loader: loader,
             op_store_path,
@@ -434,16 +455,37 @@ impl Repository {
             pending_blobs: Mutex::new(PendingBlobs::new(staging_budget)),
             durable_ops: Mutex::new(DurableOps::default()),
             bootstrapped,
-            bootstrap_op_heads: Vec::new(),
+            bootstrap_op_heads: Mutex::new(Vec::new()),
             boot_replay: Mutex::new(bucket::BootReplay::default()),
             faults,
             lock: Mutex::new(()),
             heads_events: broadcast::channel(HEADS_EVENT_BUFFER).0,
         };
+        let bootstrap_heads_path = server.tandem_dir.join("bootstrap-heads.json");
         if bootstrapped {
-            // Read before the replay, so recovery can tell the operation this
-            // init just minted from the ones the bucket is about to hand back.
-            server.bootstrap_op_heads = server.read_jj_op_heads()?;
+            // Persist this before replay starts. If the process dies while
+            // materializing the bucket, the next process must still know which
+            // local head came from disposable repo initialization.
+            let bootstrap_op_heads = server.read_jj_op_heads()?;
+            write_bytes_if_missing(
+                &bootstrap_heads_path,
+                &serde_json::to_vec_pretty(&bootstrap_op_heads)?,
+            )?;
+            *server
+                .bootstrap_op_heads
+                .lock()
+                .expect("bootstrap heads lock") = bootstrap_op_heads;
+            fs::remove_file(&initialization_intent)
+                .context("finish local repository initialization")?;
+        } else if bootstrap_heads_path.exists() {
+            *server
+                .bootstrap_op_heads
+                .lock()
+                .expect("bootstrap heads lock") = serde_json::from_slice(
+                &fs::read(&bootstrap_heads_path)
+                    .with_context(|| format!("read {}", bootstrap_heads_path.display()))?,
+            )
+            .with_context(|| format!("decode {}", bootstrap_heads_path.display()))?;
         }
         server.recover_from_bucket()?;
         Ok(server)

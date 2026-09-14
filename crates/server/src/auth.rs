@@ -100,6 +100,7 @@ pub struct TokenStore {
     /// Kept in the clear because it is the signing key. Nothing prints it.
     admin_token: String,
     admin_digest: [u8; 64],
+    retained_signing_keys: Vec<String>,
 }
 
 impl std::fmt::Debug for TokenStore {
@@ -110,10 +111,20 @@ impl std::fmt::Debug for TokenStore {
 
 impl TokenStore {
     /// A store whose admin token is `admin_token`.
+    #[cfg(test)]
     pub fn new(admin_token: &str) -> Self {
         Self {
             admin_token: admin_token.to_string(),
             admin_digest: digest(admin_token),
+            retained_signing_keys: Vec::new(),
+        }
+    }
+
+    pub fn with_retained(admin_token: &str, retained_signing_keys: Vec<String>) -> Self {
+        Self {
+            admin_token: admin_token.to_string(),
+            admin_digest: digest(admin_token),
+            retained_signing_keys,
         }
     }
 
@@ -149,7 +160,10 @@ impl TokenStore {
         if presented_tag.len() != 32 {
             return None;
         }
-        if !constant_time_eq(&self.tag(&payload)[..32], &presented_tag) {
+        if !self
+            .signing_keys()
+            .any(|key| constant_time_eq(&tag(key, &payload)[..32], &presented_tag))
+        {
             return None;
         }
 
@@ -171,12 +185,21 @@ impl TokenStore {
     /// MAC rather than a hash somebody can extend. The separator byte keeps the
     /// key and the payload from running together into an ambiguity.
     fn tag(&self, payload: &str) -> [u8; 64] {
-        let mut hasher = Blake2b512::new();
-        hasher.update(self.admin_token.as_bytes());
-        hasher.update([0x1f]);
-        hasher.update(payload.as_bytes());
-        hasher.finalize().into()
+        tag(&self.admin_token, payload)
     }
+
+    fn signing_keys(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.admin_token.as_str())
+            .chain(self.retained_signing_keys.iter().map(String::as_str))
+    }
+}
+
+fn tag(key: &str, payload: &str) -> [u8; 64] {
+    let mut hasher = Blake2b512::new();
+    hasher.update(key.as_bytes());
+    hasher.update([0x1f]);
+    hasher.update(payload.as_bytes());
+    hasher.finalize().into()
 }
 
 /// A token nobody can guess: 32 bytes from the system CSPRNG, in hex, behind a
@@ -285,6 +308,21 @@ mod tests {
         // A different admin token is a different server, and rejects it.
         let stranger = TokenStore::new("another-admin");
         assert_eq!(stranger.authority_for(&minted.token), None);
+    }
+
+    #[test]
+    fn rotation_retains_old_scoped_tokens_without_retaining_old_admin_authority() {
+        let old = TokenStore::new("key-one");
+        let old_scoped = old.mint("agent-a", DEFAULT_TOKEN_TTL);
+        let rotated = TokenStore::with_retained("key-two", vec!["key-one".into()]);
+        assert_eq!(
+            rotated.authority_for(&old_scoped.token),
+            Some(Authority::Workspace("agent-a".into()))
+        );
+        assert_eq!(rotated.authority_for("key-one"), None);
+        assert_eq!(rotated.authority_for("key-two"), Some(Authority::Admin));
+        let new_scoped = rotated.mint("agent-a", DEFAULT_TOKEN_TTL);
+        assert_eq!(old.authority_for(&new_scoped.token), None);
     }
 
     #[test]

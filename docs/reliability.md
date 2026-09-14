@@ -126,6 +126,11 @@ Startup reads the local metadata and bucket index before serving:
 - On a cold materialization, it walks every indexed head's ancestry, applies
   parents before children, retires only the synthetic init heads created by
   that boot, then records the bucket version.
+- Before jj initialization begins, the cache records an initialization intent.
+  It then records the exact synthetic init heads before replay. A restart
+  discards a cache whose initialization intent remains, while an interrupted
+  replay retains the recorded identities until those heads are retired. This
+  prevents a local initializer from being reconciled into durable history.
 - On a warm restart with a newer bucket version, it replays only the missing
   ancestry.
 - If local metadata is newer than the bucket index, it republishes local heads.

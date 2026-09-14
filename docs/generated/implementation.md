@@ -98,6 +98,7 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/workspace/src/watch.rs`
 - `crates/workspace/src/workspace_init.rs`
 - `testing/test-support/src/agent.rs`
+- `testing/test-support/src/bin/recovery_probe.rs`
 - `testing/test-support/src/cluster.rs`
 - `testing/test-support/src/lib.rs`
 - `testing/test-support/src/oracle.rs`

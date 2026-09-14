@@ -21,11 +21,29 @@ its output allocation.
 The current delivery and qualification status is recorded in the
 [hosting plan](hosting-on-exe.md); production deployment is a later stage.
 
-Keep the host signing secret and bucket credentials in protected configuration
-outside the VM as well as in its service environment. Losing the signing secret
-loses access through existing owner and workspace credentials. Bucket recovery
-alone does not replace that secret. Never run a replacement alongside an active
-host: stop or fence the old process first.
+Keep the active host signing secret, retained signing keys and bucket
+credentials in protected configuration outside the VM as well as in its
+service environment. Losing those keys loses access through credentials they
+signed; bucket recovery alone does not replace them. During rotation,
+`TANDEM_ADMIN_TOKEN` is the active key and `TANDEM_RETAINED_SIGNING_KEYS` is a
+comma-separated overlap set. Only the active raw key is administrator
+authority. Retained keys verify existing owner and scoped credentials, while
+new credentials use the active key. This overlap does not reissue owners or
+retire an old key. Never run a replacement alongside an active host: stop or
+fence the old process first.
+
+For a host replacement, preserve the reviewed binary, service unit, active and
+retained signing keys, bucket configuration, proxy configuration, and the
+deployment script outside both machines. Fence the serving machine and verify
+its listener is absent before provisioning the replacement. Recover a known
+repository through a private endpoint first; process health is only an
+availability check. Authenticate with existing credentials, walk acknowledged
+operations, and compare exact file bytes before moving traffic. Move the
+custom-domain allowlist or proxy attachment explicitly after readiness. A VM
+rename or its default provider hostname does not prove that the public custom
+domain moved. Keep the old machine fenced and intact until the replacement has
+accepted and recovered a new publish. Apply the same private-readiness gate
+before rollback.
 
 Before admitting clients:
 
@@ -78,8 +96,10 @@ out of the curl process arguments. Do not wrap this command in evidence capture;
 its response contains the new workspace token.
 
 Workspace tokens expire and are not refreshable in place. There is no
-individual revocation; rotate the admin token to invalidate all tokens minted
-from it. Treat the admin token as repository-wide authority.
+individual revocation. Removing a retained key invalidates credentials it
+signed, so do that only after owners and workspaces have another credential;
+automatic reissue and retirement are not implemented. Treat the active admin
+token as repository-wide authority.
 
 One workspace identity has one writer lease. Cooperating daemons refuse to
 snapshot while another holder owns it. This is coordination, not a publish

@@ -45,7 +45,7 @@ pub struct HostedServer {
     cache_root: PathBuf,
     bucket_spec: String,
     bucket: Arc<dyn ObjectStore>,
-    host_secret: String,
+    signing_keys: SigningKeys,
     repositories: LoadingSlots<Server>,
     ready_owners: Mutex<HashMap<String, String>>,
     catalog_reads: AtomicU64,
@@ -60,20 +60,75 @@ pub struct HostedServer {
     publish_admission: Arc<tokio::sync::Semaphore>,
 }
 
+#[derive(Clone)]
+pub(crate) struct SigningKeys {
+    active: String,
+    retained: Vec<String>,
+}
+
+impl SigningKeys {
+    pub(crate) fn parse(active: &str, retained: Option<&str>) -> Result<Self> {
+        anyhow::ensure!(!active.trim().is_empty(), "active signing key is empty");
+        let active = active.trim().to_string();
+        let mut keys = Vec::new();
+        if let Some(retained) = retained {
+            for raw in retained.split(',') {
+                let key = raw.trim();
+                anyhow::ensure!(!key.is_empty(), "retained signing key is empty");
+                anyhow::ensure!(key != active, "active signing key is also retained");
+                anyhow::ensure!(
+                    !keys.iter().any(|existing| existing == key),
+                    "retained signing key is duplicated"
+                );
+                keys.push(key.to_string());
+            }
+        }
+        Ok(Self {
+            active,
+            retained: keys,
+        })
+    }
+}
+
 impl HostedServer {
-    pub fn new(cache_root: PathBuf, bucket_spec: &str, host_secret: &str) -> Result<Self> {
-        Self::new_with_faults(
+    #[cfg(test)]
+    fn new(cache_root: PathBuf, bucket_spec: &str, host_secret: &str) -> Result<Self> {
+        let signing_keys = SigningKeys::parse(host_secret, None)?;
+        Self::new_with_signing_keys(cache_root, bucket_spec, signing_keys)
+    }
+
+    pub(crate) fn new_with_signing_keys(
+        cache_root: PathBuf,
+        bucket_spec: &str,
+        signing_keys: SigningKeys,
+    ) -> Result<Self> {
+        Self::new_with_faults_and_keys(
             cache_root,
             bucket_spec,
-            host_secret,
+            signing_keys,
             jj_tandem_repository::FaultPoints::from_environment(),
         )
     }
 
+    #[cfg(test)]
     fn new_with_faults(
         cache_root: PathBuf,
         bucket_spec: &str,
         host_secret: &str,
+        faults: Arc<jj_tandem_repository::FaultPoints>,
+    ) -> Result<Self> {
+        Self::new_with_faults_and_keys(
+            cache_root,
+            bucket_spec,
+            SigningKeys::parse(host_secret, None)?,
+            faults,
+        )
+    }
+
+    fn new_with_faults_and_keys(
+        cache_root: PathBuf,
+        bucket_spec: &str,
+        signing_keys: SigningKeys,
         faults: Arc<jj_tandem_repository::FaultPoints>,
     ) -> Result<Self> {
         let bucket = jj_tandem_storage::open(bucket_spec).context("open hosted bucket")?;
@@ -87,7 +142,7 @@ impl HostedServer {
             cache_root,
             bucket_spec: bucket_spec.to_string(),
             bucket,
-            host_secret: host_secret.to_string(),
+            signing_keys,
             repositories: LoadingSlots::new(),
             ready_owners: Mutex::new(HashMap::new()),
             catalog_reads: AtomicU64::new(0),
@@ -133,7 +188,8 @@ impl HostedServer {
         let name_text = name.path();
         self.repositories.load(name_text.clone(), || {
             let _permit = self.open_limit.acquire()?;
-            let signing_key = self.repository_signing_key(&record.owner_fingerprint, &name_text);
+            let (signing_key, retained_signing_keys) =
+                self.repository_signing_keys(&record.owner_fingerprint, &name_text);
             let cache = self
                 .cache_root
                 .join("repositories")
@@ -146,10 +202,11 @@ impl HostedServer {
                 repository_bucket_spec(&self.bucket_spec, name.namespace(), name.repository());
             let cache_existed = cache.exists();
             let open = || -> Result<Arc<Server>> {
-                let server = Arc::new(Server::new_with_faults_and_budget(
+                let server = Arc::new(Server::new_with_signing_keys_and_budget(
                     cache.clone(),
                     Some(&bucket),
                     &signing_key,
+                    retained_signing_keys.clone(),
                     self.faults.clone(),
                     self.staging_budget.clone(),
                     self.body_admission.clone(),
@@ -175,14 +232,25 @@ impl HostedServer {
         })
     }
 
-    fn repository_signing_key(&self, owner: &str, name: &str) -> String {
+    fn derive_repository_signing_key(host_key: &str, owner: &str, name: &str) -> String {
         let mut hash = Blake2b512::new();
-        hash.update(self.host_secret.as_bytes());
+        hash.update(host_key.as_bytes());
         hash.update([0]);
         hash.update(owner.as_bytes());
         hash.update([0]);
         hash.update(name.as_bytes());
         format!("tdma_{}", hex(&hash.finalize()))
+    }
+
+    fn repository_signing_keys(&self, owner: &str, name: &str) -> (String, Vec<String>) {
+        (
+            Self::derive_repository_signing_key(&self.signing_keys.active, owner, name),
+            self.signing_keys
+                .retained
+                .iter()
+                .map(|key| Self::derive_repository_signing_key(key, owner, name))
+                .collect(),
+        )
     }
 
     fn remember_ready(&self, name: &RepositoryName, owner_fingerprint: &str) -> Result<()> {
@@ -207,7 +275,7 @@ impl HostedServer {
     fn owner_token(&self, entropy: &[u8; 32]) -> String {
         let body = hex(entropy);
         let mut hash = Blake2b512::new();
-        hash.update(self.host_secret.as_bytes());
+        hash.update(self.signing_keys.active.as_bytes());
         hash.update([0]);
         hash.update(body.as_bytes());
         format!("tdmo_{body}_{}", hex(&hash.finalize()[..32]))
@@ -229,14 +297,18 @@ impl HostedServer {
         {
             return false;
         }
-        let mut hash = Blake2b512::new();
-        hash.update(self.host_secret.as_bytes());
-        hash.update([0]);
-        hash.update(entropy.as_bytes());
-        constant_time_eq(
-            presented_tag.as_bytes(),
-            hex(&hash.finalize()[..32]).as_bytes(),
-        )
+        std::iter::once(&self.signing_keys.active)
+            .chain(self.signing_keys.retained.iter())
+            .any(|key| {
+                let mut hash = Blake2b512::new();
+                hash.update(key.as_bytes());
+                hash.update([0]);
+                hash.update(entropy.as_bytes());
+                constant_time_eq(
+                    presented_tag.as_bytes(),
+                    hex(&hash.finalize()[..32]).as_bytes(),
+                )
+            })
     }
 }
 
@@ -581,7 +653,7 @@ async fn download(
 }
 
 async fn create_owner(State(server): State<Arc<HostedServer>>, request: Request) -> Response {
-    if bearer(&request) != Some(server.host_secret.as_str()) {
+    if bearer(&request) != Some(server.signing_keys.active.as_str()) {
         return StatusCode::NOT_FOUND.into_response();
     }
     owner_response(&server)
@@ -799,8 +871,8 @@ async fn dispatch_repository(
         if fingerprint(&presented) != owner_fingerprint {
             return StatusCode::NOT_FOUND.into_response();
         }
-        let key =
-            hosted.repository_signing_key(&owner_fingerprint, &format!("{namespace}/{repository}"));
+        let (key, _) = hosted
+            .repository_signing_keys(&owner_fingerprint, &format!("{namespace}/{repository}"));
         request.headers_mut().insert(
             header::AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {key}")).unwrap(),
@@ -874,6 +946,79 @@ mod tests {
             .to_string();
         let host = Arc::new(HostedServer::new(cache, &bucket, "host-secret").unwrap());
         (temporary, host)
+    }
+
+    #[test]
+    fn rotation_preserves_owner_identity_and_old_scopes_but_uses_the_active_repo_key() {
+        let temporary = tempfile::tempdir().unwrap();
+        let bucket = temporary
+            .path()
+            .join("bucket")
+            .to_string_lossy()
+            .to_string();
+        let old = HostedServer::new_with_faults_and_keys(
+            temporary.path().join("old-cache"),
+            &bucket,
+            SigningKeys::parse("key-one", None).unwrap(),
+            jj_tandem_repository::FaultPoints::inert(),
+        )
+        .unwrap();
+        let owner = old.owner_token(&[17; 32]);
+        let owner_fingerprint = fingerprint(&owner);
+        assert!(
+            create_repository_sync(&old, "owner".into(), "repo".into(), owner.clone()).is_success()
+        );
+        let name = RepositoryName::parse("owner", "repo").unwrap();
+        let record = old.namespace("owner").unwrap().unwrap().0;
+        let old_server = old.repository(&name, &record, false).unwrap();
+        let old_scope = old_server
+            .mint_token_sync("agent-a", std::time::Duration::from_secs(60))
+            .token;
+        drop(old_server);
+        drop(old);
+
+        let rotated = HostedServer::new_with_faults_and_keys(
+            temporary.path().join("new-cache"),
+            &bucket,
+            SigningKeys::parse("key-two", Some("key-one")).unwrap(),
+            jj_tandem_repository::FaultPoints::inert(),
+        )
+        .unwrap();
+        assert!(rotated.verifies_owner_token(&owner));
+        let record = rotated.namespace("owner").unwrap().unwrap().0;
+        assert_eq!(record.owner_fingerprint, owner_fingerprint);
+        let server = rotated.repository(&name, &record, false).unwrap();
+        assert_eq!(
+            server.authority_for(&old_scope),
+            Some(crate::auth::Authority::Workspace("agent-a".into()))
+        );
+        let (active_repo_key, retained_repo_keys) =
+            rotated.repository_signing_keys(&owner_fingerprint, "owner/repo");
+        assert_eq!(
+            server.authority_for(&active_repo_key),
+            Some(crate::auth::Authority::Admin)
+        );
+        assert_eq!(server.authority_for(&retained_repo_keys[0]), None);
+        let new_scope = server
+            .mint_token_sync("agent-a", std::time::Duration::from_secs(60))
+            .token;
+        assert_eq!(
+            crate::auth::TokenStore::new(&retained_repo_keys[0]).authority_for(&new_scope),
+            None
+        );
+    }
+
+    #[test]
+    fn retained_signing_key_configuration_fails_closed() {
+        assert!(SigningKeys::parse("active", Some("")).is_err());
+        assert!(SigningKeys::parse("active", Some("active")).is_err());
+        assert!(SigningKeys::parse("active", Some("old,old")).is_err());
+        assert_eq!(
+            SigningKeys::parse(" active ", Some(" old-one, old-two "))
+                .unwrap()
+                .retained,
+            vec!["old-one", "old-two"]
+        );
     }
 
     #[tokio::test]

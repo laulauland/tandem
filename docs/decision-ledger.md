@@ -69,6 +69,25 @@ that may no longer describe current performance.
   serialized round trips rather than the local bucket write. The retained
   artifacts and reproducible methods live in
   [benchmarks/README.md](benchmarks/README.md).
+- The Stage 7 replacement drill first exposed a real interrupted-recovery bug:
+  a killed cold materialization forgot its disposable jj initializer head and
+  later reconciled that local-only commit into durable history. The failed run
+  and exported bucket/cache forensic set are retained as
+  `stage7-failed-89389ca372` and `stage7-forensics`. After persisting the
+  initializer identity, run `539ebd095c` replaced an exe.dev VM, killed
+  recovery after one applied WAL entry, resumed from the partial cache, rotated
+  from an active K1 signing key to active K2 with K1 retained, rolled back, and
+  promoted the replacement again. After the supervised restart and two further
+  publishes, all 11 acknowledged operations were reachable and their exact
+  file bytes were verified. The reviewed source was
+  `ddc772196466d11f136fbbc0552ad1bbdda35a13`, and the GNU/Linux binary SHA-256
+  was `0e9165cdc5ab6a7b470d4a401f80e1b5905e4d66158abdebd5daa404b4ed64ab`.
+  The sanitized records are `stage7-replacement.json`,
+  `stage7-infrastructure.json`, and `stage7-local-review.json` in the retained
+  qualification state. Replacement process health took 3.638 seconds; the
+  first authenticated known-repository request took 18.898 seconds, while the
+  complete private qualification took 138.940 seconds. Those measurements are
+  separate from total traffic-transition downtime and come from one drill.
 
 ## Unresolved risks and follow-up
 

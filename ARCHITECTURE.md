@@ -84,8 +84,11 @@ stale but never moves files under an active editor.
 The hosting layer conditionally claims namespaces in the bucket and records
 repository provisioning before opening an engine. It marks a repository ready
 only after its initial history is durable. Namespace ownership is bound to a
-signed owner credential. The protected host signing secret derives repository
-credentials and must survive replacement independently of the cache disk.
+signed owner credential. One protected active signing key derives new owner
+and repository credentials; retained keys verify credentials during a rotation
+overlap. Namespace identity remains the hash of the whole owner bearer. Only
+the active raw key is administrator authority. The active and retained keys
+must survive replacement independently of the cache disk.
 After that durable catalog state has been validated, the host retains the
 immutable namespace owner with the live repository engine. Warm requests do
 not reread the catalog; a cold host validates the bucket record again before

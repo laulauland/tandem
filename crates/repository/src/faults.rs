@@ -85,6 +85,8 @@ pub struct FaultPoints {
     object_on_index_conflict: Mutex<Option<Vec<u8>>>,
     wal_gate: (Mutex<WalGate>, Condvar),
     object_gate: (Mutex<WalGate>, Condvar),
+    replay_apply_gate: (Mutex<WalGate>, Condvar),
+    replay_apply_failures: AtomicU64,
 }
 
 #[derive(Default)]
@@ -164,6 +166,56 @@ impl FaultPoints {
         while !gate.released {
             gate = self.object_gate.1.wait(gate).unwrap();
         }
+    }
+
+    /// Pause after one WAL entry has been applied locally but before the
+    /// bucket index can be adopted. Used by replacement recovery drills.
+    pub fn hold_next_replay_apply(&self) {
+        let mut gate = self.replay_apply_gate.0.lock().unwrap();
+        *gate = WalGate {
+            armed: true,
+            entered: false,
+            released: false,
+        };
+    }
+
+    pub fn wait_for_held_replay_apply(&self) {
+        let mut gate = self.replay_apply_gate.0.lock().unwrap();
+        while !gate.entered {
+            gate = self.replay_apply_gate.1.wait(gate).unwrap();
+        }
+    }
+
+    pub fn release_replay_apply(&self) {
+        let mut gate = self.replay_apply_gate.0.lock().unwrap();
+        gate.released = true;
+        self.replay_apply_gate.1.notify_all();
+    }
+
+    pub(super) fn hold_replay_apply_if_armed(&self) {
+        let mut gate = self.replay_apply_gate.0.lock().unwrap();
+        if !gate.armed {
+            return;
+        }
+        gate.armed = false;
+        gate.entered = true;
+        self.replay_apply_gate.1.notify_all();
+        while !gate.released {
+            gate = self.replay_apply_gate.1.wait(gate).unwrap();
+        }
+    }
+
+    /// Fail recovery after applying a WAL entry but before adopting the index.
+    pub fn fail_after_replay_apply(&self, count: u64) {
+        self.replay_apply_failures.store(count, Ordering::Relaxed);
+    }
+
+    pub(super) fn take_replay_apply_failure(&self) -> bool {
+        self.replay_apply_failures
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
+                remaining.checked_sub(1)
+            })
+            .is_ok()
     }
     /// Reject the next index writes while leaving the server running, allowing
     /// another workspace to publish after the failed caller abandons its work.

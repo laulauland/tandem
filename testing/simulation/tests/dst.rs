@@ -116,6 +116,61 @@ fn a_failed_ancestor_replay_cannot_be_skipped_on_the_next_boot() -> anyhow::Resu
     Ok(())
 }
 
+/// A cold materialization creates a disposable jj head before replay. If that
+/// process dies after applying one WAL entry, the next process must still know
+/// that the local initializer was never part of durable history.
+#[test]
+fn interrupted_cold_recovery_does_not_publish_its_initializer() -> anyhow::Result<()> {
+    use support::{agent::Agent, cluster::Cluster, oracle};
+
+    let mut cluster = Cluster::start()?;
+    let mut agent = Agent::join(&cluster, "replacement")?;
+    agent.commit_files(
+        &[("before.txt".to_string(), b"before replacement\n".to_vec())],
+        "before replacement",
+    )?;
+
+    cluster.stop();
+    std::fs::remove_dir_all(&cluster.repo)?;
+    std::fs::create_dir_all(&cluster.repo)?;
+    jj_lib::workspace::Workspace::init_colocated_git(&support::test_settings()?, &cluster.repo)?;
+    std::fs::write(cluster.repo.join(".tandem-initializing"), b"initializing\n")?;
+    cluster.restart()?;
+    assert!(
+        !cluster.repo.join(".tandem-initializing").exists(),
+        "a recognized interrupted initialization must be replaced completely"
+    );
+
+    cluster.stop();
+    std::fs::remove_dir_all(&cluster.repo)?;
+    std::fs::create_dir_all(&cluster.repo)?;
+    cluster.faults.fail_after_replay_apply(1);
+    assert!(
+        cluster.restart().is_err(),
+        "the first cold recovery must stop after applying one WAL entry"
+    );
+    assert!(
+        cluster
+            .repo
+            .join(".jj/repo/tandem/bootstrap-heads.json")
+            .is_file(),
+        "the disposable initializer identity must survive the interrupted process"
+    );
+
+    cluster.restart()?;
+    agent.commit_files(
+        &[("after.bin".to_string(), b"after replacement\0\xff".to_vec())],
+        "after replacement",
+    )?;
+    cluster.cold_restart()?;
+    oracle::check(
+        &cluster,
+        &[agent],
+        "interrupted recovery and replacement publish",
+    )?;
+    Ok(())
+}
+
 #[test]
 fn an_existing_head_marker_cannot_hide_a_missing_indexed_operation() -> anyhow::Result<()> {
     use jj_tandem_wal::{IndexObject, INDEX_KEY};
