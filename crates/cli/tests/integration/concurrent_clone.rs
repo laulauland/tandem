@@ -130,7 +130,14 @@ fn concurrent_clones_after_rewrites(seed_name: &str, reattach: bool) {
         let revision = format!("{workspace}@");
         let read = common::run_tandem_in_with_env(
             observer,
-            &["file", "show", "-r", &revision, "payload.bin"],
+            &[
+                "file",
+                "show",
+                "--ignore-working-copy",
+                "-r",
+                &revision,
+                "payload.bin",
+            ],
             &[("TANDEM_DISABLE_CACHE", "1")],
             &fx.home,
         );

@@ -340,11 +340,18 @@ impl Repository {
             return Ok(true);
         }
         let key = wal::wal_key(op_hex);
-        if !self
+        let exists = self
             .bucket
             .exists(&key)
-            .with_context(|| format!("check WAL entry {key}"))?
-        {
+            .with_context(|| format!("check WAL entry {key}"))?;
+        tracing::debug!(
+            op_id = %op_hex,
+            bucket_calls = 1,
+            bucket_bytes = 0,
+            exists,
+            "checked WAL ancestry"
+        );
+        if !exists {
             return Ok(false);
         }
         self.remember_durable_wal_entry(op_hex)?;
@@ -405,9 +412,20 @@ impl Repository {
             .put_immutable(&key, &encoded)
             .with_context(|| format!("write WAL entry {key}"))?;
         if stored {
-            tracing::debug!(op_id = %op_hex, bytes = encoded.len(), records = entry.records.len(), "wrote WAL entry");
+            tracing::debug!(
+                op_id = %op_hex,
+                bucket_calls = 1,
+                bucket_bytes = encoded.len(),
+                records = entry.records.len(),
+                "wrote WAL entry"
+            );
         } else {
-            tracing::debug!(op_id = %op_hex, "WAL entry was already in the bucket");
+            tracing::debug!(
+                op_id = %op_hex,
+                bucket_calls = 1,
+                bucket_bytes = encoded.len(),
+                "WAL entry was already in the bucket"
+            );
         }
         self.remember_durable_wal_entry(op_hex)?;
         Ok(stored)
@@ -510,6 +528,7 @@ impl Repository {
         }
 
         let mut seen: HashSet<String> = HashSet::new();
+        let mut written = 0usize;
         let mut stack = vec![Step::Visit(op_hex.to_string())];
         while let Some(step) = stack.pop() {
             match step {
@@ -531,9 +550,16 @@ impl Repository {
                     // operation and its view. The blobs belong to the publish
                     // that drains them, not to this walk.
                     self.put_operation_wal_entry(&hex)?;
+                    written += 1;
                 }
             }
         }
+        tracing::debug!(
+            op_id = %op_hex,
+            history_operations = seen.len(),
+            wal_entries_written = written,
+            "completed durable ancestry walk"
+        );
         Ok(())
     }
 

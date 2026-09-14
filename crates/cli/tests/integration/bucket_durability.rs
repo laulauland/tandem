@@ -283,6 +283,19 @@ fn wal_put_attempts(log: &Path) -> (usize, usize) {
     (written, already_present)
 }
 
+fn maximum_history_work(log: &Path) -> usize {
+    std::fs::read_to_string(log)
+        .expect("read server log")
+        .lines()
+        .filter_map(|line| {
+            line.split_whitespace()
+                .find_map(|field| field.strip_prefix("history_operations="))
+        })
+        .map(|value| value.parse().expect("numeric history work field"))
+        .max()
+        .expect("publish emitted structured history work")
+}
+
 /// The ancestry walk must ask the bucket, not only this process's cache.
 ///
 /// The cache is empty at every process start. A walk that prunes on the cache
@@ -344,4 +357,49 @@ fn publishing_after_a_restart_does_not_rewalk_the_history() {
         "the first publish after a restart wrote {written} WAL entries; it should write only the \
          operations the bucket is missing (history is {history} entries)"
     );
+}
+
+#[test]
+fn warm_restart_work_stays_bounded_as_history_grows() {
+    if using_s3() {
+        eprintln!("skipping: this test counts bucket writes from filesystem logs");
+        return;
+    }
+    let mut harness = Harness::new("history-growth");
+    harness.start_server();
+    let ws = harness.init_workspace("agent-a");
+    let mut measurements = Vec::new();
+    for target in [4usize, 16, 40] {
+        while harness.wal_entries().len() < target {
+            let next = harness.wal_entries().len();
+            common::assert_ok(
+                &harness.run(&ws, &["describe", "-m", &format!("history {next}")]),
+                "grow durable history",
+            );
+        }
+        let history = harness.wal_entries().len();
+        harness.stop_server();
+        let log = harness.tmp.path().join(format!("restart-{target}.log"));
+        harness.start_server_logging(Some(&log));
+        common::assert_ok(
+            &harness.run(&ws, &["describe", "-m", &format!("after {target}")]),
+            "small publish after warm restart",
+        );
+        let (written, already_present) = wal_put_attempts(&log);
+        let history_work = maximum_history_work(&log);
+        measurements.push((history, written, already_present, history_work));
+        assert_eq!(
+            already_present, 0,
+            "history was reuploaded: {measurements:?}"
+        );
+        assert!(
+            written <= 3,
+            "warm work grew with history: {measurements:?}"
+        );
+        assert!(
+            history_work <= 1,
+            "ancestry work grew with history: {measurements:?}"
+        );
+    }
+    assert_eq!(measurements.len(), 3);
 }

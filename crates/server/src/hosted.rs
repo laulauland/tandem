@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 use anyhow::{bail, Context, Result};
@@ -15,6 +16,7 @@ use jj_tandem_storage::{CasError, ObjectStore};
 use rand::TryRngCore as _;
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt as _;
+use tracing::Instrument as _;
 
 use crate::Server;
 
@@ -45,6 +47,9 @@ pub struct HostedServer {
     bucket: Arc<dyn ObjectStore>,
     host_secret: String,
     repositories: LoadingSlots<Server>,
+    ready_owners: Mutex<HashMap<String, String>>,
+    catalog_reads: AtomicU64,
+    catalog_bytes: AtomicU64,
     open_limit: OpenLimit,
     distribution_dir: PathBuf,
     public_url: String,
@@ -80,6 +85,9 @@ impl HostedServer {
             bucket,
             host_secret: host_secret.to_string(),
             repositories: LoadingSlots::new(),
+            ready_owners: Mutex::new(HashMap::new()),
+            catalog_reads: AtomicU64::new(0),
+            catalog_bytes: AtomicU64::new(0),
             open_limit: OpenLimit::new(4),
             distribution_dir: std::env::var_os("TANDEM_DISTRIBUTION_DIR")
                 .map(PathBuf::from)
@@ -91,8 +99,16 @@ impl HostedServer {
 
     fn namespace(&self, namespace: &str) -> Result<Option<(NamespaceRecord, String)>> {
         let key = format!("{CATALOG_PREFIX}/{namespace}.json");
-        self.bucket
-            .get_with_etag(&key)?
+        let value = self.bucket.get_with_etag(&key)?;
+        self.catalog_reads.fetch_add(1, Ordering::Relaxed);
+        if let Some((bytes, _)) = &value {
+            self.catalog_bytes
+                .fetch_add(bytes.len() as u64, Ordering::Relaxed);
+            tracing::debug!(bucket_calls = 1, bucket_bytes = bytes.len(), catalog = %key, "hosted catalog read");
+        } else {
+            tracing::debug!(bucket_calls = 1, bucket_bytes = 0, catalog = %key, "hosted catalog read");
+        }
+        value
             .map(|(bytes, etag)| {
                 let record = serde_json::from_slice(&bytes).context("decode namespace catalog")?;
                 Ok((record, etag))
@@ -155,6 +171,25 @@ impl HostedServer {
         hash.update([0]);
         hash.update(name.as_bytes());
         format!("tdma_{}", hex(&hash.finalize()))
+    }
+
+    fn remember_ready(&self, name: &RepositoryName, owner_fingerprint: &str) -> Result<()> {
+        self.ready_owners
+            .lock()
+            .map_err(|error| anyhow::anyhow!("ready repository registry lock: {error}"))?
+            .insert(name.path(), owner_fingerprint.to_string());
+        Ok(())
+    }
+
+    fn warm_repository(&self, name: &RepositoryName) -> Result<Option<(String, Arc<Server>)>> {
+        let name_text = name.path();
+        let owner = self
+            .ready_owners
+            .lock()
+            .map_err(|error| anyhow::anyhow!("ready repository registry lock: {error}"))?
+            .get(&name_text)
+            .cloned();
+        Ok(owner.zip(self.repositories.ready(&name_text)?))
     }
 
     fn owner_token(&self, entropy: &[u8; 32]) -> String {
@@ -291,6 +326,24 @@ impl<T> LoadingSlots<T> {
                 }
             }
         }
+    }
+
+    fn ready(&self, name: &str) -> Result<Option<Arc<T>>> {
+        let slot = self
+            .entries
+            .lock()
+            .map_err(|error| anyhow::anyhow!("repository registry lock: {error}"))?
+            .get(name)
+            .cloned();
+        let Some(slot) = slot else { return Ok(None) };
+        let state = slot
+            .state
+            .lock()
+            .map_err(|error| anyhow::anyhow!("repository load slot lock: {error}"))?;
+        Ok(match &*state {
+            LoadState::Ready(value) => Some(value.clone()),
+            LoadState::Loading { .. } | LoadState::Failed(_) => None,
+        })
     }
 
     #[cfg(test)]
@@ -627,6 +680,10 @@ fn create_repository_parsed(
                         return StatusCode::INTERNAL_SERVER_ERROR;
                     }
                 }
+                if let Err(error) = server.remember_ready(&name, &record.owner_fingerprint) {
+                    tracing::error!(%error, namespace, repository, "repository ready cache failed");
+                    return StatusCode::INTERNAL_SERVER_ERROR;
+                }
                 return if created || repository_created {
                     StatusCode::CREATED
                 } else {
@@ -657,6 +714,7 @@ async fn dispatch_repository(
     let Ok(name) = RepositoryName::parse(namespace, repository) else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    let repository_identity = name.path();
     let namespace = name.namespace().to_string();
     let repository = name.repository().to_string();
     let loaded = tokio::task::spawn_blocking({
@@ -664,6 +722,9 @@ async fn dispatch_repository(
         let namespace = namespace.clone();
         let repository = repository.clone();
         move || {
+            if let Some((owner, server)) = hosted.warm_repository(&name)? {
+                return Ok(Some((owner, server)));
+            }
             let Some((record, _)) = hosted.namespace(&namespace)? else {
                 return Ok(None);
             };
@@ -671,11 +732,12 @@ async fn dispatch_repository(
                 return Ok(None);
             }
             let server = hosted.repository(&name, &record, false)?;
-            Ok::<_, anyhow::Error>(Some((record, server)))
+            hosted.remember_ready(&name, &record.owner_fingerprint)?;
+            Ok::<_, anyhow::Error>(Some((record.owner_fingerprint, server)))
         }
     })
     .await;
-    let (record, server) = match loaded {
+    let (owner_fingerprint, server) = match loaded {
         Ok(Ok(Some(value))) => value,
         Ok(Ok(None)) => return StatusCode::NOT_FOUND.into_response(),
         Ok(Err(error)) => {
@@ -694,13 +756,11 @@ async fn dispatch_repository(
         if !hosted.verifies_owner_token(&presented) {
             return StatusCode::NOT_FOUND.into_response();
         }
-        if fingerprint(&presented) != record.owner_fingerprint {
+        if fingerprint(&presented) != owner_fingerprint {
             return StatusCode::NOT_FOUND.into_response();
         }
-        let key = hosted.repository_signing_key(
-            &record.owner_fingerprint,
-            &format!("{namespace}/{repository}"),
-        );
+        let key =
+            hosted.repository_signing_key(&owner_fingerprint, &format!("{namespace}/{repository}"));
         request.headers_mut().insert(
             header::AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {key}")).unwrap(),
@@ -711,9 +771,18 @@ async fn dispatch_repository(
         .query()
         .map(|q| format!("?{q}"))
         .unwrap_or_default();
+    tracing::debug!(
+        repository = %repository_identity,
+        http_method = %request.method(),
+        request_path = %format!("/{rest}"),
+        "hosted request"
+    );
     *request.uri_mut() = format!("/{rest}{query}").parse::<Uri>().unwrap();
     crate::http::router(server)
         .oneshot(request.map(Body::new))
+        .instrument(
+            tracing::info_span!("hosted repository request", repository = %repository_identity),
+        )
         .await
         .unwrap_or_else(|never| match never {})
 }
@@ -840,7 +909,7 @@ mod tests {
             serde_json::from_slice(&to_bytes(minted.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         assert!(server.verifies_owner_token(&owner.token));
-        let created = router(server)
+        let created = router(server.clone())
             .oneshot(
                 Request::builder()
                     .method("PUT")
@@ -852,6 +921,52 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(created.status(), StatusCode::CREATED);
+        let reads_after_creation = server.catalog_reads.load(Ordering::Relaxed);
+        for _ in 0..2 {
+            let info = router(server.clone())
+                .oneshot(
+                    Request::builder()
+                        .uri("/public/repository/api/info")
+                        .header(header::AUTHORIZATION, format!("Bearer {}", owner.token))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(info.status(), StatusCode::OK);
+        }
+        assert_eq!(
+            server.catalog_reads.load(Ordering::Relaxed),
+            reads_after_creation,
+            "a durably validated warm repository must not reread its catalog per RPC"
+        );
+
+        let recovered = Arc::new(
+            HostedServer::new(
+                temporary.path().join("cold-cache"),
+                &bucket.to_string_lossy(),
+                "secret",
+            )
+            .unwrap(),
+        );
+        for expected_reads in [1, 1] {
+            let info = router(recovered.clone())
+                .oneshot(
+                    Request::builder()
+                        .uri("/public/repository/api/info")
+                        .header(header::AUTHORIZATION, format!("Bearer {}", owner.token))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(info.status(), StatusCode::OK);
+            assert_eq!(
+                recovered.catalog_reads.load(Ordering::Relaxed),
+                expected_reads,
+                "cold recovery validates durable catalog once, then serves warm"
+            );
+        }
     }
 
     #[test]

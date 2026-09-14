@@ -76,9 +76,12 @@ impl TandemBackend {
         let token = repo_link::read_token(store_path)?;
         let client =
             TandemClient::connect(&server_addr, &token).map_err(|e| BackendLoadError(e.into()))?;
-        let info = client.repo_info().clone();
+        Ok(Self::from_client(client))
+    }
 
-        Ok(Self {
+    pub(crate) fn from_client(client: Arc<TandemClient>) -> Self {
+        let info = client.repo_info().clone();
+        Self {
             client,
             commit_id_len: info.commit_id_length,
             change_id_len: info.change_id_length,
@@ -86,7 +89,7 @@ impl TandemBackend {
             root_change_id: ids::change(info.root_change_id),
             empty_tree_id: ids::tree(info.empty_tree_id),
             pending_files: Mutex::new(PendingFiles::default()),
-        })
+        }
     }
 
     fn flush_files(&self) -> BackendResult<()> {

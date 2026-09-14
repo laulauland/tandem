@@ -44,6 +44,7 @@ All other accepted commands are dispatched to embedded jj.
 | POST | `/api/objects:batch` |
 | GET, POST | `/api/ops` |
 | GET | `/api/ops/{id}` |
+| POST | `/api/ops:upload` |
 | POST | `/api/views` |
 | GET | `/api/views/{id}` |
 | GET, POST | `/api/heads` |
@@ -66,6 +67,7 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/client/src/op_store.rs`
 - `crates/client/src/pending_files.rs`
 - `crates/client/src/repo_link.rs`
+- `crates/client/src/sessions.rs`
 - `crates/jj-interop/src/ids.rs`
 - `crates/jj-interop/src/lib.rs`
 - `crates/jj-interop/src/placeholder.rs`
@@ -127,6 +129,8 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/cli/tests/integration/hosted_recovery.rs`
 - `crates/cli/tests/integration/http_api.rs`
 - `crates/cli/tests/integration/log_streaming.rs`
+- `crates/cli/tests/integration/operation_upload.rs`
+- `crates/cli/tests/integration/rest_probe.rs`
 - `crates/cli/tests/integration/up_down.rs`
 - `crates/cli/tests/integration/watch.rs`
 - `crates/cli/tests/integration/workspace_daemon.rs`

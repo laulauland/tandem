@@ -42,6 +42,10 @@ mod hosted_recovery;
 mod http_api;
 #[path = "integration/log_streaming.rs"]
 mod log_streaming;
+#[path = "integration/operation_upload.rs"]
+mod operation_upload;
+#[path = "integration/rest_probe.rs"]
+mod rest_probe;
 #[path = "integration/up_down.rs"]
 mod up_down;
 #[path = "integration/watch.rs"]

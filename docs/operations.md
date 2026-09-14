@@ -108,6 +108,11 @@ publication; this repository refactor does not perform one.
   logs and apply retention outside Tandem.
 - Run the server at normal verbosity and raise the streaming filter during an
   incident. Never enable ad-hoc token or request-body logging.
+- Debug events for catalog reads and WAL ancestry checks/writes report their
+  own bucket calls and transferred payload bytes. These fields measure those
+  named operations only; they are not totals for index commits, recovery, or
+  all object-store traffic. Hosted request events carry the repository name so
+  request counts can be separated on a shared host.
 - Alert on repeated publish failures, index conflicts that do not settle,
   writer-lease churn, restart loops, storage errors, disk pressure, and an
   unexpectedly large cold replay.

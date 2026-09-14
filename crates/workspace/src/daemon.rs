@@ -722,6 +722,11 @@ impl Daemon {
         match self.snapshot_once() {
             Ok(SnapshotOutcome::Published(published)) => {
                 self.pending = false;
+                // The published line is a readiness boundary for callers and
+                // tests. Persist the counter the snapshot already advanced
+                // before announcing it; otherwise a status read can observe
+                // the previous value after the durable acknowledgement.
+                self.write_status();
                 println!(
                     "published op={} commit={} snapshot_publish_ms={} since_change_ms={}",
                     published.operation_id,

@@ -802,6 +802,23 @@ impl Repository {
         Ok(id)
     }
 
+    /// Stage immutable metadata together; head publication still owns bucket durability.
+    pub fn put_operation_with_view_sync(
+        &self,
+        view: &[u8],
+        operation: &[u8],
+    ) -> Result<(Vec<u8>, Vec<u8>)> {
+        let (view_id, _) = decode_view_with_id(view)?;
+        let (_, operation_contents) = decode_operation_with_id(operation)?;
+        anyhow::ensure!(
+            operation_contents.view_id.as_bytes() == view_id,
+            "operation references another view"
+        );
+        self.put_view_sync(view)?;
+        let operation_id = self.put_operation_sync(operation)?;
+        Ok((view_id, operation_id))
+    }
+
     pub fn get_view_sync(&self, id: &[u8]) -> Result<Vec<u8>> {
         let hex = to_hex(id);
         let path = self.op_store_path.join("views").join(&hex);

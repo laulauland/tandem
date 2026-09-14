@@ -54,8 +54,17 @@ File writes compute their Git IDs through the upstream Git implementation and
 wait in a bounded client buffer. Reads can use those pending bytes. Before a
 tree or commit write, the backend uploads the pending files in one batch and
 validates the returned IDs and bytes. Trees and commits still use the server's
-normalization; there is no background uploader or shared transaction session
-between the three store traits.
+normalization; there is no background uploader. The three store traits loaded
+for one repository share an authenticated HTTP session. Session identity
+includes the canonical repository path, remote address, and bearer, while head
+versions and workspace state remain owned by each op-heads adapter.
+
+The operation store retains at most one view, capped at one MiB, until its
+operation is written. A matching view and operation upload together; pairs over
+the request-body limit fall back to two bounded uploads. Both semantic IDs are
+validated before cache insertion, and failed or uncertain uploads retain the
+pending view for an identical retry. Head publication still owns the bucket WAL
+and index commit and the durability acknowledgement.
 
 ### Workspace daemon
 
@@ -74,6 +83,10 @@ repository provisioning before opening an engine. It marks a repository ready
 only after its initial history is durable. Namespace ownership is bound to a
 signed owner credential. The protected host signing secret derives repository
 credentials and must survive replacement independently of the cache disk.
+After that durable catalog state has been validated, the host retains the
+immutable namespace owner with the live repository engine. Warm requests do
+not reread the catalog; a cold host validates the bucket record again before
+serving the repository.
 The manager retains one engine, its leases, and its event stream per repository
 identity for the host lifetime. Per-name loading slots keep slow bucket recovery
 from holding the manager registry lock; a bounded permit pool limits concurrent

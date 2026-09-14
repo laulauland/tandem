@@ -441,3 +441,66 @@ pub fn decode_batch_response(bytes: &[u8]) -> Result<Vec<BatchOutcome>, WireErro
     reader.finish()?;
     Ok(outcomes)
 }
+
+#[cfg(test)]
+mod operation_upload_tests {
+    #[test]
+    fn combined_upload_preserves_bytes_and_rejects_truncation() {
+        let encoded = super::encode_operation_upload(b"view", b"operation");
+        assert_eq!(
+            super::decode_operation_upload(&encoded).unwrap(),
+            (&b"view"[..], &b"operation"[..])
+        );
+        for length in 0..8 {
+            assert!(super::decode_operation_upload(&encoded[..length]).is_err());
+        }
+        assert!(super::decode_operation_upload(&[255; 4]).is_err());
+    }
+}
+
+/// HTTP bodies stay bounded on both sides of the transport.
+pub const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024 * 1024;
+
+/// Include framing and reject arithmetic overflow before allocating a pair.
+pub fn operation_upload_fits(view_bytes: usize, operation_bytes: usize) -> bool {
+    view_bytes
+        .checked_add(operation_bytes)
+        .and_then(|bytes| bytes.checked_add(4))
+        .is_some_and(|bytes| bytes <= MAX_REQUEST_BODY_BYTES)
+}
+
+/// A view length followed by the unchanged view and operation protobufs.
+pub fn encode_operation_upload(view: &[u8], operation: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(4 + view.len() + operation.len());
+    bytes.extend_from_slice(
+        &u32::try_from(view.len())
+            .expect("bounded view")
+            .to_be_bytes(),
+    );
+    bytes.extend_from_slice(view);
+    bytes.extend_from_slice(operation);
+    bytes
+}
+
+/// Borrow payloads only after checking the length against the received body.
+pub fn decode_operation_upload(bytes: &[u8]) -> Result<(&[u8], &[u8]), &'static str> {
+    let prefix = bytes.get(..4).ok_or("missing view length")?;
+    let length = u32::from_be_bytes(prefix.try_into().unwrap()) as usize;
+    let payload = &bytes[4..];
+    if length >= payload.len() {
+        return Err("truncated view or missing operation");
+    }
+    Ok(payload.split_at(length))
+}
+
+#[cfg(test)]
+mod operation_upload_limit_tests {
+    #[test]
+    fn paired_upload_accounts_for_framing_at_the_body_limit() {
+        use super::{operation_upload_fits, MAX_REQUEST_BODY_BYTES};
+        assert!(operation_upload_fits(1, MAX_REQUEST_BODY_BYTES - 5));
+        assert!(!operation_upload_fits(1, MAX_REQUEST_BODY_BYTES - 4));
+        assert!(!operation_upload_fits(usize::MAX, 1));
+        assert!(!operation_upload_fits(1, usize::MAX));
+    }
+}

@@ -88,6 +88,41 @@ The initial concurrent clones were stale and required an explicit
 workspace. The subsequent byte and recovery checks passed; the clone setup
 issue remains a separate finding, not a fix delivered by this work.
 
+### Native-host publish comparison (2026-09-15)
+
+The [Stage 5 paired report](stage5-paired-publish.json) compares the completed
+Stage 4 source with Stage 5's combined shared sessions, paired view-operation
+uploads, and reuse of validated hosted catalog ownership. Warm repository
+requests no longer read the catalog from R2 each time. Both binaries and both embedded benchmark
+executables were built in the same pinned `rust:1-bookworm` image. Each run
+used 3 warmups followed by 40 measured `snapshot_once` calls that rewrote 8
+files. The debounce window, clone/setup, writer acquisition, and later
+staleness refresh remain outside the timer.
+
+| Environment | Stage 4 p50 / p95 | Stage 5 p50 / p95 | Request depth |
+|---|---:|---:|---:|
+| Native host with R2 | 3876.619 / 4624.041 ms | 2238.556 / 2533.532 ms | 8 → 7 |
+| Filesystem + 50 ms/request | 406.710 / 407.650 ms | 356.862 / 357.466 ms | one round trip removed |
+
+On the native-host run, p50 fell 42.25% and p95 fell 45.21%. The injected
+profile reproduces the earlier 407-to-357 ms estimate. These numbers measure
+the combined Stage 5 change, so they do not assign separate latency shares to
+session reuse, paired uploads, and hosted catalog caching. The local frozen CLI probe gives the command
+shapes that explain the difference: startup uses 2 requests, publish 8, and
+catch-up 18. A warm daemon keeps its authenticated session and operation state
+alive; pairing its view and operation therefore takes the measured snapshot
+from 8 requests to 7.
+
+The native host was a provider-verified Dallas VM with 2 CPUs and 8 GiB RAM.
+The R2 bucket reported a WEUR location hint. The two distributed-smoke client
+VMs were also provider-verified Dallas, while the benchmark controller's
+physical location was not verified. RPC counts were service-wide during an
+exclusive validation-host window; final events also carried the named
+repository. WAL record and byte samples cover WAL writes only, excluding
+immutable objects, index traffic, recovery, and other bucket operations.
+This is one paired run per profile and does not establish a general capacity
+or latency promise.
+
 ### Running it
 
 One command per tier, and the tier is chosen by environment alone.

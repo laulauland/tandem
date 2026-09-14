@@ -3,7 +3,7 @@
 
 use std::fmt;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use async_trait::async_trait;
@@ -26,6 +26,7 @@ pub struct TandemOpStore {
     root_operation_id: OperationId,
     root_view_id: ViewId,
     root_commit_id: CommitId,
+    pending_view: Mutex<Option<(ViewId, Vec<u8>)>>,
 }
 
 impl fmt::Debug for TandemOpStore {
@@ -50,6 +51,7 @@ impl TandemOpStore {
 
         Ok(Self {
             client,
+            pending_view: Mutex::new(None),
             root_operation_id: ids::operation(info.root_operation_id),
             root_view_id: ids::root_view(VIEW_ID_LENGTH),
             root_commit_id: root_data.root_commit_id,
@@ -66,14 +68,18 @@ impl TandemOpStore {
         let token = repo_link::read_token(store_path)?;
         let client =
             TandemClient::connect(&server_addr, &token).map_err(|e| BackendLoadError(e.into()))?;
-        let info = client.repo_info().clone();
+        Ok(Self::from_client(client, root_data))
+    }
 
-        Ok(Self {
+    pub(crate) fn from_client(client: Arc<TandemClient>, root_data: RootOperationData) -> Self {
+        let info = client.repo_info().clone();
+        Self {
             client,
+            pending_view: Mutex::new(None),
             root_operation_id: ids::operation(info.root_operation_id),
             root_view_id: ids::root_view(VIEW_ID_LENGTH),
             root_commit_id: root_data.root_commit_id,
-        })
+        }
     }
 }
 
@@ -96,6 +102,13 @@ impl OpStore for TandemOpStore {
             return Ok(View::make_root(self.root_commit_id.clone()));
         }
 
+        if let Some((pending_id, data)) = &*self.pending_view.lock().unwrap() {
+            if pending_id == id {
+                let proto = jj_lib::protos::simple_op_store::View::decode(data.as_slice())
+                    .map_err(|e| to_op_err(e.into()))?;
+                return proto_convert::view_from_proto(proto).map_err(to_op_err);
+            }
+        }
         let data = self
             .client
             .get_view(id.as_bytes())
@@ -113,8 +126,26 @@ impl OpStore for TandemOpStore {
     async fn write_view(&self, contents: &View) -> OpStoreResult<ViewId> {
         let proto = proto_convert::view_to_proto(contents);
         let data = proto.encode_to_vec();
-        let id = self.client.put_view(&data).map_err(to_op_err)?;
-        Ok(ViewId::new(id))
+        let id = ViewId::new(jj_lib::content_hash::blake2b_hash(contents).to_vec());
+        let mut pending = self.pending_view.lock().unwrap();
+        if let Some((previous_id, previous)) = pending.as_ref() {
+            if *previous_id == id {
+                return Ok(id);
+            }
+            self.client
+                .put_view(previous, previous_id.as_bytes())
+                .map_err(to_op_err)?;
+            *pending = None;
+        }
+        // One pending view, capped at 1 MiB; overflow uses the ordinary upload.
+        if data.len() > 1024 * 1024 {
+            self.client
+                .put_view(&data, id.as_bytes())
+                .map_err(to_op_err)?;
+        } else {
+            *pending = Some((id.clone(), data));
+        }
+        Ok(id)
     }
 
     async fn read_operation(&self, id: &OperationId) -> OpStoreResult<Operation> {
@@ -147,8 +178,21 @@ impl OpStore for TandemOpStore {
         assert!(!contents.parents.is_empty());
         let proto = proto_convert::operation_to_proto(contents);
         let data = proto.encode_to_vec();
-        let id = self.client.put_operation(&data).map_err(to_op_err)?;
-        Ok(OperationId::new(id))
+        let id = OperationId::new(jj_lib::content_hash::blake2b_hash(contents).to_vec());
+        let mut pending = self.pending_view.lock().unwrap();
+        if let Some((view_id, view)) = pending.as_ref() {
+            if *view_id == contents.view_id {
+                self.client
+                    .put_operation_with_view(view, &data, id.as_bytes(), view_id.as_bytes())
+                    .map_err(to_op_err)?;
+                *pending = None;
+                return Ok(id);
+            }
+        }
+        self.client
+            .put_operation(&data, id.as_bytes())
+            .map_err(to_op_err)?;
+        Ok(id)
     }
 
     async fn resolve_operation_id_prefix(

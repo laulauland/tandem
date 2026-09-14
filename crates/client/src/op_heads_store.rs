@@ -119,9 +119,16 @@ impl TandemOpHeadsStore {
     pub fn load(_settings: &UserSettings, store_path: &Path) -> Result<Self, BackendLoadError> {
         let server_addr = repo_link::read_server_address(store_path)?;
         let token = repo_link::read_token(store_path)?;
-        let workspace_id = repo_link::read_workspace_id(store_path)?;
         let client =
             TandemClient::connect(&server_addr, &token).map_err(|e| BackendLoadError(e.into()))?;
+        Self::from_client(client, store_path)
+    }
+
+    pub(crate) fn from_client(
+        client: Arc<TandemClient>,
+        store_path: &Path,
+    ) -> Result<Self, BackendLoadError> {
+        let workspace_id = repo_link::read_workspace_id(store_path)?;
         let version_cache_path = store_path.join(VERSION_CACHE_FILE);
         let optimistic_version_cache = optimistic_version_cache_enabled();
         let cached_version = if optimistic_version_cache {

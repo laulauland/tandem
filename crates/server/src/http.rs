@@ -62,7 +62,6 @@ const SERVER_QUEUE_DEPTH: u32 = 0;
 // The batch endpoint is the one that will press against it — filling a cache
 // or cloning a repo means many blobs in one request. A batch that would not
 // fit is the caller's to split; the ceiling stays put.
-const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024 * 1024;
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
@@ -74,6 +73,7 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/objects:batch", post(put_objects_batch))
         .route("/api/ops", get(resolve_op_prefix).post(put_operation))
         .route("/api/ops/{id}", get(get_operation))
+        .route("/api/ops:upload", post(put_operation_with_view))
         .route("/api/views", post(put_view))
         .route("/api/views/{id}", get(get_view))
         .route("/api/heads", get(get_heads).post(update_heads))
@@ -87,7 +87,7 @@ pub fn router(server: Arc<Server>) -> Router {
             Arc::clone(&server),
             require_bearer,
         ))
-        .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
+        .layer(DefaultBodyLimit::max(wire::MAX_REQUEST_BODY_BYTES))
         .with_state(server)
 }
 
@@ -244,7 +244,7 @@ where
 // ─── Handlers: repo info ──────────────────────────────────────────────────────
 
 async fn get_info(State(server): State<Arc<Server>>) -> ApiResult<Json<wire::RepoInfoBody>> {
-    tracing::trace!(rpc_method = "getInfo", "rpc request");
+    tracing::debug!(rpc_method = "getInfo", "rpc request");
     let body = blocking(&server, |server| Ok(server.repo_info_body()))
         .await
         .map_err(ApiError::internal)?;
@@ -396,6 +396,34 @@ async fn put_operation(State(server): State<Arc<Server>>, body: Bytes) -> ApiRes
 
     tracing::info!(rpc_method = "putOperation", operation_id = %to_hex(&id), bytes = body.len(), "rpc response");
     Ok(id_and_bytes(wire::HEADER_OPERATION_ID, &id, Vec::new()))
+}
+
+async fn put_operation_with_view(
+    State(server): State<Arc<Server>>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    tracing::info!(
+        rpc_method = "putOperationWithView",
+        bytes = body.len(),
+        "rpc request"
+    );
+    let (view, operation) = wire::decode_operation_upload(&body).map_err(ApiError::bad_request)?;
+    let view = view.to_vec();
+    let operation = operation.to_vec();
+    let (view_id, id) = blocking(&server, move |server| {
+        server
+            .repository
+            .put_operation_with_view_sync(&view, &operation)
+    })
+    .await
+    .map_err(ApiError::from_write)?;
+    tracing::info!(rpc_method = "putOperationWithView", operation_id = %to_hex(&id), bytes = body.len(), "rpc response");
+    let mut response = id_and_bytes(wire::HEADER_OPERATION_ID, &id, Vec::new());
+    response.headers_mut().insert(
+        wire::HEADER_VIEW_ID,
+        HeaderValue::from_str(&to_hex(&view_id)).expect("hex ID"),
+    );
+    Ok(response)
 }
 
 async fn get_view(

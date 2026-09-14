@@ -28,6 +28,25 @@ fn batch_outcome() -> impl Strategy<Value = BatchOutcome> {
 
 proptest! {
     #[test]
+    fn operation_upload_round_trips_arbitrary_payloads(
+        view in proptest::collection::vec(any::<u8>(), 0..512),
+        operation in proptest::collection::vec(any::<u8>(), 1..512),
+    ) {
+        let encoded = encode_operation_upload(&view, &operation);
+        prop_assert_eq!(decode_operation_upload(&encoded).unwrap(), (&view[..], &operation[..]));
+    }
+
+    #[test]
+    fn operation_upload_decoder_survives_hostile_prefixes(
+        prefix in any::<u32>(),
+        tail in proptest::collection::vec(any::<u8>(), 0..512),
+    ) {
+        let mut encoded = prefix.to_be_bytes().to_vec();
+        encoded.extend_from_slice(&tail);
+        let _ = decode_operation_upload(&encoded);
+    }
+
+    #[test]
     fn batch_request_round_trips(items in proptest::collection::vec(batch_item(), 0..24)) {
         let encoded = encode_batch_request(&items);
         prop_assert_eq!(decode_batch_request(&encoded).unwrap(), items);

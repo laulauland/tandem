@@ -165,10 +165,8 @@ pub struct TandemClient {
     /// the second time. `None` when the cache is switched off or the machine
     /// has nowhere to put one.
     ///
-    /// The three jj store traits each build their own client, so nothing is
-    /// shared between them in memory — the sharing is the directory, which is
-    /// also what makes it survive the end of the process and reach the next
-    /// command and the next workspace.
+    /// Repository factories share this client across the three jj stores.
+    /// The directory also shares immutable data across processes and workspaces.
     cache: Option<Arc<DiskCache>>,
     /// How many requests have left this client. Tests assert on it: "served
     /// from cache" has to mean no request happened, not that one was fast.
@@ -218,6 +216,19 @@ pub fn bench_injected_rtt_delay() -> Duration {
 }
 
 impl TandemClient {
+    #[cfg(test)]
+    pub(crate) fn test_instance() -> Arc<Self> {
+        Arc::new(Self {
+            http: build_http_client(Some(REQUEST_TIMEOUT)).unwrap(),
+            target: ConnectorTarget::parse("example.test").unwrap(),
+            token: "test-token".to_string(),
+            repo_info: RepoInfoResponse::default(),
+            injected_rtt: Duration::ZERO,
+            cache: None,
+            requests_sent: AtomicU64::new(0),
+        })
+    }
+
     pub fn connect(addr: &str, token: &str) -> Result<Arc<Self>> {
         Self::connect_with_requirements(addr, token, &[])
     }
@@ -580,11 +591,54 @@ impl TandemClient {
         )
     }
 
-    pub fn put_operation(&self, data: &[u8]) -> Result<Vec<u8>> {
+    pub fn put_operation(&self, data: &[u8], expected_id: &[u8]) -> Result<()> {
         let response = self.post_octets("/api/ops", data, "put operation")?;
         let id = header_id(&response, wire::HEADER_OPERATION_ID)?;
+        anyhow::ensure!(
+            id == expected_id,
+            "operation upload returned an unexpected ID"
+        );
         self.store_in_cache(NAMESPACE_OPERATION, &id, data);
-        Ok(id)
+        Ok(())
+    }
+
+    pub fn put_operation_with_view(
+        &self,
+        view: &[u8],
+        operation: &[u8],
+        expected_id: &[u8],
+        expected_view_id: &[u8],
+    ) -> Result<()> {
+        let (response, view_id) = if wire::operation_upload_fits(view.len(), operation.len()) {
+            let body = wire::encode_operation_upload(view, operation);
+            let response = self.post_octets("/api/ops:upload", &body, "put operation with view")?;
+            let view_id = header_id(&response, wire::HEADER_VIEW_ID)?;
+            (response, view_id)
+        } else {
+            // Each object can fit when their pair does not. The caller retains
+            // its pending view until both responses have been verified, so a
+            // partial success retries the same content-addressed objects.
+            let response = self.post_octets("/api/views", view, "put view")?;
+            let view_id = header_id(&response, wire::HEADER_VIEW_ID)?;
+            anyhow::ensure!(
+                view_id == expected_view_id,
+                "view upload returned an unexpected ID"
+            );
+            let response = self.post_octets("/api/ops", operation, "put operation")?;
+            (response, view_id)
+        };
+        let id = header_id(&response, wire::HEADER_OPERATION_ID)?;
+        anyhow::ensure!(
+            id == expected_id,
+            "operation upload returned an unexpected ID"
+        );
+        anyhow::ensure!(
+            view_id == expected_view_id,
+            "view upload returned an unexpected ID"
+        );
+        self.store_in_cache(NAMESPACE_VIEW, &view_id, view);
+        self.store_in_cache(NAMESPACE_OPERATION, &id, operation);
+        Ok(())
     }
 
     pub fn get_view(&self, id: &[u8]) -> Result<Vec<u8>> {
@@ -596,11 +650,12 @@ impl TandemClient {
         )
     }
 
-    pub fn put_view(&self, data: &[u8]) -> Result<Vec<u8>> {
+    pub fn put_view(&self, data: &[u8], expected_id: &[u8]) -> Result<()> {
         let response = self.post_octets("/api/views", data, "put view")?;
         let id = header_id(&response, wire::HEADER_VIEW_ID)?;
+        anyhow::ensure!(id == expected_id, "view upload returned an unexpected ID");
         self.store_in_cache(NAMESPACE_VIEW, &id, data);
-        Ok(id)
+        Ok(())
     }
 
     pub fn get_heads_state(&self) -> Result<HeadsState> {
@@ -1028,6 +1083,10 @@ mod tests {
 
     impl CountingServer {
         fn start(objects: HashMap<String, Vec<u8>>) -> Self {
+            Self::start_with_headers(objects, String::new())
+        }
+
+        fn start_with_headers(objects: HashMap<String, Vec<u8>>, headers: String) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").expect("bind the counting server");
             let addr = listener.local_addr().expect("local addr").to_string();
             listener
@@ -1056,8 +1115,9 @@ mod tests {
                                 let requests = Arc::clone(&requests);
                                 let authorizations = Arc::clone(&authorizations);
                                 let objects = Arc::clone(&objects);
+                                let headers = headers.clone();
                                 std::thread::spawn(move || {
-                                    serve(stream, requests, authorizations, objects)
+                                    serve(stream, requests, authorizations, objects, headers)
                                 });
                             }
                             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
@@ -1105,6 +1165,7 @@ mod tests {
         requests: Arc<AtomicU64>,
         authorizations: Arc<Mutex<Vec<String>>>,
         objects: Arc<HashMap<String, Vec<u8>>>,
+        headers: String,
     ) {
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
@@ -1168,7 +1229,14 @@ mod tests {
                 let body = serde_json::to_vec(&repo_info_body()).expect("encode repo info");
                 http_response(200, "application/json", &body)
             } else if let Some(body) = objects.get(&path) {
-                http_response(200, wire::CONTENT_TYPE_OCTETS, body)
+                let mut response = http_response(200, wire::CONTENT_TYPE_OCTETS, body);
+                let position = response
+                    .windows(2)
+                    .position(|bytes| bytes == b"\r\n")
+                    .unwrap()
+                    + 2;
+                response.splice(position..position, headers.bytes());
+                response
             } else {
                 http_response(404, "application/json", br#"{"error":"not found"}"#)
             };
@@ -1227,6 +1295,102 @@ mod tests {
 
     fn cache_at(dir: &std::path::Path) -> Option<Arc<DiskCache>> {
         Some(Arc::new(DiskCache::open(dir)))
+    }
+
+    #[test]
+    fn incorrect_metadata_upload_ids_never_enter_the_cache() {
+        use jj_lib::backend::CommitId;
+        use jj_lib::op_store::{Operation, View, ViewId};
+        use jj_tandem_jj::proto_convert;
+        use prost::Message as _;
+        let wrong = vec![9; 64];
+        let server = CountingServer::start_with_headers(
+            HashMap::from([("/api/views".into(), vec![]), ("/api/ops".into(), vec![])]),
+            format!(
+                "{}: {}\r\n{}: {}\r\n",
+                wire::HEADER_VIEW_ID,
+                to_hex(&wrong),
+                wire::HEADER_OPERATION_ID,
+                to_hex(&wrong)
+            ),
+        );
+        let temp = tempfile::tempdir().unwrap();
+        let cache = Arc::new(DiskCache::open(temp.path()));
+        let client =
+            TandemClient::connect_with_cache(&server.addr, TEST_TOKEN, &[], Some(cache.clone()))
+                .unwrap();
+        let view = View::make_root(CommitId::from_bytes(&[37; 20]));
+        let view_id = jj_lib::content_hash::blake2b_hash(&view).to_vec();
+        let operation = Operation::make_root(ViewId::new(view_id.clone()));
+        let operation_id = jj_lib::content_hash::blake2b_hash(&operation).to_vec();
+        let view_result = client.put_view(
+            &proto_convert::view_to_proto(&view).encode_to_vec(),
+            &view_id,
+        );
+        let operation_result = client.put_operation(
+            &proto_convert::operation_to_proto(&operation).encode_to_vec(),
+            &operation_id,
+        );
+        for (namespace, correct) in [
+            (NAMESPACE_VIEW, &view_id),
+            (NAMESPACE_OPERATION, &operation_id),
+        ] {
+            assert!(
+                cache.get(namespace, &wrong).is_none(),
+                "wrong ID poisoned cache"
+            );
+            assert!(
+                cache.get(namespace, correct).is_none(),
+                "unverified upload populated correct ID"
+            );
+        }
+        assert!(view_result.is_err());
+        assert!(operation_result.is_err());
+    }
+
+    #[test]
+    fn malformed_metadata_responses_retain_displaced_pending_view() {
+        use jj_lib::backend::CommitId;
+        use jj_lib::op_store::{OpStore as _, Operation, RootOperationData, View, ViewId};
+        let server = CountingServer::start_with_headers(
+            HashMap::from([("/api/views".into(), vec![]), ("/api/ops".into(), vec![])]),
+            format!(
+                "{}: {}\r\n{}: {}\r\n",
+                wire::HEADER_VIEW_ID,
+                to_hex(&[9; 64]),
+                wire::HEADER_OPERATION_ID,
+                to_hex(&[9; 64])
+            ),
+        );
+        let temp = tempfile::tempdir().unwrap();
+        let store = crate::op_store::TandemOpStore::init(
+            temp.path(),
+            &server.addr,
+            TEST_TOKEN,
+            RootOperationData {
+                root_commit_id: CommitId::from_bytes(&[0; 20]),
+            },
+        )
+        .unwrap();
+        let first = View::make_root(CommitId::from_bytes(&[37; 20]));
+        let first_id = futures::executor::block_on(store.write_view(&first)).unwrap();
+        let second = View::make_root(CommitId::from_bytes(&[38; 20]));
+        assert!(futures::executor::block_on(store.write_view(&second)).is_err());
+        let before = server.requests();
+        assert_eq!(
+            futures::executor::block_on(store.read_view(&first_id)).unwrap(),
+            first
+        );
+        assert_eq!(server.requests(), before, "pending reads must stay local");
+        let mut operation = Operation::make_root(ViewId::from_bytes(&[2; 64]));
+        operation.parents.push(store.root_operation_id().clone());
+        assert!(futures::executor::block_on(store.write_operation(&operation)).is_err());
+        let before = server.requests();
+        assert_eq!(
+            futures::executor::block_on(store.read_view(&first_id)).unwrap(),
+            first
+        );
+        assert_eq!(server.requests(), before);
     }
 
     // ─── Cache behaviour at the client boundary ───────────────────────
