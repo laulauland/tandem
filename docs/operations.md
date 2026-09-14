@@ -9,6 +9,10 @@ This document owns operator procedures. Use `tandem --help` for current flags,
 Run one active native host under a service manager. Hosted mode stores namespace
 ownership, the repository catalog, and published history in the bucket. Each
 repository has a disposable colocated jj/Git cache beneath the host cache root.
+Repository engines load independently with bounded concurrent recovery and stay
+resident for the host lifetime so active leases and event streams retain one
+identity. Capacity budgets beyond this conservative lifetime policy belong to a
+later hosting stage.
 The current delivery and qualification status is recorded in the
 [hosting plan](hosting-on-exe.md); production deployment is a later stage.
 

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
 use anyhow::{bail, Context, Result};
 use axum::body::Body;
@@ -44,7 +44,8 @@ pub struct HostedServer {
     bucket_spec: String,
     bucket: Arc<dyn ObjectStore>,
     host_secret: String,
-    repositories: Mutex<HashMap<String, Arc<Server>>>,
+    repositories: LoadingSlots<Server>,
+    open_limit: OpenLimit,
     faults: Arc<jj_tandem_repository::FaultPoints>,
 }
 
@@ -73,7 +74,8 @@ impl HostedServer {
             bucket_spec: bucket_spec.to_string(),
             bucket,
             host_secret: host_secret.to_string(),
-            repositories: Mutex::new(HashMap::new()),
+            repositories: LoadingSlots::new(),
+            open_limit: OpenLimit::new(4),
             faults,
         })
     }
@@ -96,49 +98,44 @@ impl HostedServer {
         recover_incomplete: bool,
     ) -> Result<Arc<Server>> {
         let name_text = name.path();
-        let mut repositories = self
-            .repositories
-            .lock()
-            .map_err(|error| anyhow::anyhow!("repository registry lock: {error}"))?;
-        if let Some(server) = repositories.get(&name_text) {
-            return Ok(server.clone());
-        }
-        let signing_key = self.repository_signing_key(&record.owner_fingerprint, &name_text);
-        let cache = self
-            .cache_root
-            .join("repositories")
-            .join(name.namespace())
-            .join(name.repository());
-        if cache.exists() && recover_incomplete {
-            std::fs::remove_dir_all(&cache).context("discard incomplete repository cache")?;
-        }
-        let bucket = repository_bucket_spec(&self.bucket_spec, name.namespace(), name.repository());
-        let cache_existed = cache.exists();
-        let open = || -> Result<Arc<Server>> {
-            let server = Arc::new(Server::new_with_faults(
-                cache.clone(),
-                Some(&bucket),
-                &signing_key,
-                self.faults.clone(),
-            )?);
-            server.durably_initialize()?;
-            Ok(server)
-        };
-        let server = match open() {
-            Ok(server) => server,
-            Err(error) if cache_existed && !recover_incomplete => {
-                tracing::warn!(
-                    %error,
-                    repository = %name_text,
-                    "discarding unusable repository cache and reconstructing from bucket"
-                );
-                std::fs::remove_dir_all(&cache).context("discard unusable repository cache")?;
-                open().context("reconstruct repository cache from bucket")?
+        self.repositories.load(name_text.clone(), || {
+            let _permit = self.open_limit.acquire()?;
+            let signing_key = self.repository_signing_key(&record.owner_fingerprint, &name_text);
+            let cache = self
+                .cache_root
+                .join("repositories")
+                .join(name.namespace())
+                .join(name.repository());
+            if cache.exists() && recover_incomplete {
+                std::fs::remove_dir_all(&cache).context("discard incomplete repository cache")?;
             }
-            Err(error) => return Err(error),
-        };
-        repositories.insert(name_text, server.clone());
-        Ok(server)
+            let bucket =
+                repository_bucket_spec(&self.bucket_spec, name.namespace(), name.repository());
+            let cache_existed = cache.exists();
+            let open = || -> Result<Arc<Server>> {
+                let server = Arc::new(Server::new_with_faults(
+                    cache.clone(),
+                    Some(&bucket),
+                    &signing_key,
+                    self.faults.clone(),
+                )?);
+                server.durably_initialize()?;
+                Ok(server)
+            };
+            match open() {
+                Ok(server) => Ok(server),
+                Err(error) if cache_existed && !recover_incomplete => {
+                    tracing::warn!(
+                        %error,
+                        repository = %name_text,
+                        "discarding unusable repository cache and reconstructing from bucket"
+                    );
+                    std::fs::remove_dir_all(&cache).context("discard unusable repository cache")?;
+                    open().context("reconstruct repository cache from bucket")
+                }
+                Err(error) => Err(error),
+            }
+        })
     }
 
     fn repository_signing_key(&self, owner: &str, name: &str) -> String {
@@ -187,6 +184,175 @@ impl HostedServer {
     }
 }
 
+struct LoadingSlots<T> {
+    entries: Mutex<HashMap<String, Arc<LoadSlot<T>>>>,
+}
+
+struct LoadSlot<T> {
+    state: Mutex<LoadState<T>>,
+    changed: Condvar,
+}
+
+enum LoadState<T> {
+    Loading { waiters: usize },
+    Ready(Arc<T>),
+    Failed(Arc<str>),
+}
+
+impl<T> LoadingSlots<T> {
+    fn new() -> Self {
+        Self {
+            entries: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn load(&self, name: String, open: impl FnOnce() -> Result<Arc<T>>) -> Result<Arc<T>> {
+        let (slot, leader) = {
+            let mut entries = self
+                .entries
+                .lock()
+                .map_err(|error| anyhow::anyhow!("repository registry lock: {error}"))?;
+            match entries.get(&name) {
+                Some(slot) => (slot.clone(), false),
+                None => {
+                    let slot = Arc::new(LoadSlot {
+                        state: Mutex::new(LoadState::Loading { waiters: 0 }),
+                        changed: Condvar::new(),
+                    });
+                    entries.insert(name.clone(), slot.clone());
+                    (slot, true)
+                }
+            }
+        };
+        if leader {
+            let opened = std::panic::catch_unwind(std::panic::AssertUnwindSafe(open))
+                .map_err(|_| anyhow::anyhow!("repository loader panicked"))
+                .and_then(|result| result);
+            match opened {
+                Ok(value) => {
+                    *slot
+                        .state
+                        .lock()
+                        .map_err(|error| anyhow::anyhow!("repository load slot lock: {error}"))? =
+                        LoadState::Ready(value.clone());
+                    slot.changed.notify_all();
+                    Ok(value)
+                }
+                Err(error) => {
+                    let message: Arc<str> = error.to_string().into();
+                    *slot
+                        .state
+                        .lock()
+                        .map_err(|error| anyhow::anyhow!("repository load slot lock: {error}"))? =
+                        LoadState::Failed(message.clone());
+                    slot.changed.notify_all();
+                    let mut entries = self
+                        .entries
+                        .lock()
+                        .map_err(|error| anyhow::anyhow!("repository registry lock: {error}"))?;
+                    if entries
+                        .get(&name)
+                        .is_some_and(|current| Arc::ptr_eq(current, &slot))
+                    {
+                        entries.remove(&name);
+                    }
+                    Err(anyhow::anyhow!(message.to_string()))
+                }
+            }
+        } else {
+            let mut state = slot
+                .state
+                .lock()
+                .map_err(|error| anyhow::anyhow!("repository load slot lock: {error}"))?;
+            let mut registered = false;
+            loop {
+                match &mut *state {
+                    LoadState::Loading { waiters } => {
+                        if !registered {
+                            *waiters += 1;
+                            registered = true;
+                            slot.changed.notify_all();
+                        }
+                        state = slot.changed.wait(state).map_err(|error| {
+                            anyhow::anyhow!("repository load slot wait: {error}")
+                        })?;
+                    }
+                    LoadState::Ready(value) => return Ok(value.clone()),
+                    LoadState::Failed(message) => return Err(anyhow::anyhow!(message.to_string())),
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.entries.lock().unwrap().len()
+    }
+
+    #[cfg(test)]
+    fn wait_for_waiter(&self, name: &str) {
+        let slot = self.entries.lock().unwrap().get(name).unwrap().clone();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let mut state = slot.state.lock().unwrap();
+        loop {
+            if matches!(&*state, LoadState::Loading { waiters } if *waiters > 0) {
+                return;
+            }
+            let remaining = deadline
+                .checked_duration_since(std::time::Instant::now())
+                .expect("same-name caller did not enter the load wait set");
+            let (next, timeout) = slot.changed.wait_timeout(state, remaining).unwrap();
+            state = next;
+            assert!(
+                !timeout.timed_out(),
+                "same-name load waiter was not established"
+            );
+        }
+    }
+}
+
+struct OpenLimit {
+    available: Mutex<usize>,
+    changed: Condvar,
+}
+
+impl OpenLimit {
+    fn new(maximum: usize) -> Self {
+        Self {
+            available: Mutex::new(maximum),
+            changed: Condvar::new(),
+        }
+    }
+
+    fn acquire(&self) -> Result<OpenPermit<'_>> {
+        let mut available = self
+            .available
+            .lock()
+            .map_err(|error| anyhow::anyhow!("repository open limit lock: {error}"))?;
+        while *available == 0 {
+            available = self
+                .changed
+                .wait(available)
+                .map_err(|error| anyhow::anyhow!("repository open limit wait: {error}"))?;
+        }
+        *available -= 1;
+        Ok(OpenPermit { limit: self })
+    }
+}
+
+struct OpenPermit<'a> {
+    limit: &'a OpenLimit,
+}
+
+impl Drop for OpenPermit<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut available) = self.limit.available.lock() {
+            *available += 1;
+            self.limit.changed.notify_one();
+        }
+    }
+}
+
 pub fn router(server: Arc<HostedServer>) -> Router {
     Router::new()
         .route("/api/owners", post(create_owner))
@@ -217,9 +383,12 @@ async fn create_repository(
     Path((namespace, repository)): Path<(String, String)>,
     request: Request,
 ) -> Response {
-    let Ok(name) = RepositoryName::parse(&namespace, &repository) else {
+    let Ok(name) = RepositoryName::parse_hosted(&namespace, &repository) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
+    if request.uri().path() != format!("/{}", name.path()) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
     let Some(token) = bearer(&request).map(str::to_string) else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -250,7 +419,7 @@ fn create_repository_with_hook(
     token: String,
     after_provisioning: impl FnMut(),
 ) -> StatusCode {
-    let name = match RepositoryName::parse(&namespace, &repository) {
+    let name = match RepositoryName::parse_hosted(&namespace, &repository) {
         Ok(name) => name,
         Err(_) => return StatusCode::BAD_REQUEST,
     };
@@ -531,6 +700,69 @@ mod tests {
     }
 
     #[test]
+    fn corrupt_namespace_catalog_fails_closed() {
+        let (_temporary, host) = host();
+        host.bucket
+            .compare_and_put("_hosting/namespaces/namespace.json", b"{not-json", None)
+            .unwrap();
+        let token = host.owner_token(&[6; 32]);
+        assert_eq!(
+            create_repository_sync(&host, "namespace".into(), "repo".into(), token),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            host.bucket
+                .get("_hosting/namespaces/namespace.json")
+                .unwrap()
+                .unwrap(),
+            b"{not-json"
+        );
+    }
+
+    #[tokio::test]
+    async fn encoded_repository_aliases_are_rejected_before_catalog_access() {
+        let (_temporary, host) = host();
+        let token = host.owner_token(&[7; 32]);
+        for path in ["/namespace/repo%2ename", "/namespace%2frepo/name"] {
+            let response = router(host.clone())
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri(path)
+                        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert!(
+                response.status().is_client_error(),
+                "encoded alias {path:?} reached repository creation"
+            );
+        }
+        assert!(host.namespace("namespace").unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn hosted_content_policy_rejects_creation_before_catalog_access() {
+        let (_temporary, host) = host();
+        let token = host.owner_token(&[11; 32]);
+        let response = router(host.clone())
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/namespace/f-u-c-k")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(host.namespace("namespace").unwrap().is_none());
+    }
+
+    #[test]
     fn overlapping_same_owner_creates_open_one_engine() {
         let (_temporary, host) = host();
         let token = host.owner_token(&[8; 32]);
@@ -557,7 +789,107 @@ mod tests {
             .map(|handle| handle.join().unwrap())
             .collect();
         assert!(statuses.iter().all(StatusCode::is_success));
-        assert_eq!(host.repositories.lock().unwrap().len(), 1);
+        assert_eq!(host.repositories.len(), 1);
+    }
+
+    #[test]
+    fn a_slow_repository_load_does_not_block_another_name() {
+        let slots = Arc::new(LoadingSlots::new());
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let slow_slots = slots.clone();
+        let slow = std::thread::spawn(move || {
+            slow_slots
+                .load("slow/repo".into(), || {
+                    entered_tx.send("slow").unwrap();
+                    release_rx.recv().unwrap();
+                    Ok(Arc::new(1))
+                })
+                .unwrap()
+        });
+        assert_eq!(entered_rx.recv().unwrap(), "slow");
+        let fast_slots = slots.clone();
+        let (fast_tx, fast_rx) = std::sync::mpsc::channel();
+        let fast = std::thread::spawn(move || {
+            fast_slots
+                .load("fast/repo".into(), || {
+                    fast_tx.send(()).unwrap();
+                    Ok(Arc::new(2))
+                })
+                .unwrap()
+        });
+        fast_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("the independent repository should open while the first is blocked");
+        release_tx.send(()).unwrap();
+        assert_eq!(*slow.join().unwrap(), 1);
+        assert_eq!(*fast.join().unwrap(), 2);
+    }
+
+    #[test]
+    fn a_failed_load_wakes_an_existing_waiter_and_can_be_retried() {
+        assert_failed_attempt_wakes_waiter(false);
+    }
+
+    #[test]
+    fn repository_open_limit_is_bounded() {
+        let limit = Arc::new(OpenLimit::new(1));
+        let first = limit.acquire().unwrap();
+        let waiting_limit = limit.clone();
+        let (acquired_tx, acquired_rx) = std::sync::mpsc::channel();
+        let waiting = std::thread::spawn(move || {
+            let _permit = waiting_limit.acquire().unwrap();
+            acquired_tx.send(()).unwrap();
+        });
+        assert!(
+            acquired_rx
+                .recv_timeout(std::time::Duration::from_millis(100))
+                .is_err(),
+            "a second open exceeded the configured bound"
+        );
+        drop(first);
+        acquired_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("a released permit should wake a bounded open");
+        waiting.join().unwrap();
+    }
+
+    #[test]
+    fn a_panicking_load_wakes_an_existing_waiter_and_can_be_retried() {
+        assert_failed_attempt_wakes_waiter(true);
+    }
+
+    fn assert_failed_attempt_wakes_waiter(panics: bool) {
+        let slots = Arc::new(LoadingSlots::new());
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let leader_slots = slots.clone();
+        let leader = std::thread::spawn(move || {
+            leader_slots.load("same/repo".into(), || -> Result<Arc<u8>> {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                if panics {
+                    panic!("injected loader panic");
+                }
+                anyhow::bail!("injected open failure")
+            })
+        });
+        entered_rx.recv().unwrap();
+        let waiter_slots = slots.clone();
+        let waiter = std::thread::spawn(move || {
+            waiter_slots.load("same/repo".into(), || -> Result<Arc<u8>> {
+                panic!("waiter started a duplicate load")
+            })
+        });
+        slots.wait_for_waiter("same/repo");
+        release_tx.send(()).unwrap();
+        assert!(leader.join().unwrap().is_err());
+        assert!(waiter.join().unwrap().is_err());
+        assert_eq!(slots.len(), 0);
+        assert_eq!(
+            *slots.load("same/repo".into(), || Ok(Arc::new(4))).unwrap(),
+            4
+        );
     }
 
     #[test]

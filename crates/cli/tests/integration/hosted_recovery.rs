@@ -49,9 +49,13 @@ fn named_repository_recovers_exact_bytes_and_accepts_another_publish() {
         &home,
     );
     let mut server = ProcessGuard::with_lines(child, lines);
+    let serving_pid = server.child.id();
     let owner = create_owner_when_ready(&address, &host_secret, &mut server);
     let owner_token = owner["token"].as_str().unwrap();
+    let second_owner = create_owner(&address, &host_secret);
+    let second_owner_token = second_owner["token"].as_str().unwrap();
     let repository_address = format!("http://{address}/acme/stage-one");
+    let second_repository_address = format!("http://{address}/beta/stage-two");
     let first = temporary.path().join("first");
     let first_text = first.to_string_lossy().to_string();
     let token_environment = [("TANDEM_TOKEN", owner_token)];
@@ -70,6 +74,55 @@ fn named_repository_recovers_exact_bytes_and_accepts_another_publish() {
         ),
         "initial hosted clone",
     );
+    let second = temporary.path().join("second");
+    let second_text = second.to_string_lossy().to_string();
+    assert_ok(
+        &run_tandem_in_with_env(
+            temporary.path(),
+            &[
+                "clone",
+                &second_repository_address,
+                &second_text,
+                "--workspace",
+                "agent-two",
+            ],
+            &[("TANDEM_TOKEN", second_owner_token)],
+            &home,
+        ),
+        "second owner's hosted clone",
+    );
+    assert_eq!(
+        server.child.id(),
+        serving_pid,
+        "both repositories use one host"
+    );
+    let cross_owner = reqwest::blocking::Client::new()
+        .get(format!("{second_repository_address}/api/info"))
+        .bearer_auth(owner_token)
+        .send()
+        .unwrap();
+    assert_eq!(cross_owner.status(), reqwest::StatusCode::NOT_FOUND);
+
+    let uploaded = reqwest::blocking::Client::new()
+        .post(format!("{repository_address}/api/objects/file"))
+        .bearer_auth(owner_token)
+        .body(b"owner-one-private-object".to_vec())
+        .send()
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let object_id = uploaded
+        .headers()
+        .get("tandem-object-id")
+        .expect("object response id")
+        .to_str()
+        .unwrap();
+    let object_denied = reqwest::blocking::Client::new()
+        .get(format!("{repository_address}/api/objects/file/{object_id}"))
+        .bearer_auth(second_owner_token)
+        .send()
+        .unwrap();
+    assert_eq!(object_denied.status(), reqwest::StatusCode::NOT_FOUND);
     let mut forged_owner = owner_token.as_bytes().to_vec();
     let last = forged_owner.last_mut().unwrap();
     *last = if *last == b'a' { b'b' } else { b'a' };
@@ -96,6 +149,19 @@ fn named_repository_recovers_exact_bytes_and_accepts_another_publish() {
         .json()
         .unwrap();
     let scoped = workspace["token"].as_str().unwrap();
+    let repository_scope_denied = reqwest::blocking::Client::new()
+        .post(format!(
+            "{second_repository_address}/api/workspaces/agent-one/writer"
+        ))
+        .bearer_auth(scoped)
+        .json(&serde_json::json!({"holder":"agent-one","ttlSeconds":30}))
+        .send()
+        .unwrap();
+    assert_eq!(
+        repository_scope_denied.status(),
+        reqwest::StatusCode::UNAUTHORIZED,
+        "a workspace token was accepted by another repository"
+    );
     let scope_denied = reqwest::blocking::Client::new()
         .post(format!(
             "{repository_address}/api/workspaces/agent-two/writer"
@@ -111,8 +177,15 @@ fn named_repository_recovers_exact_bytes_and_accepts_another_publish() {
     );
 
     let expected = b"\0\x01\xffstage one\n";
+    let second_expected = b"\xff\0stage two belongs to beta\n";
     std::fs::write(first.join("payload.bin"), expected).unwrap();
-    publish_one_change(&first, &home);
+    std::fs::write(second.join("payload.bin"), second_expected).unwrap();
+    std::thread::scope(|scope| {
+        let first_publish = scope.spawn(|| publish_one_change(&first, &home));
+        let second_publish = scope.spawn(|| publish_one_change(&second, &home));
+        first_publish.join().unwrap();
+        second_publish.join().unwrap();
+    });
     server.stop();
     std::fs::rename(&cache, temporary.path().join("discarded-cache")).unwrap();
     let interrupted_recovery = cache.join("repositories/acme/stage-one/.jj");
@@ -161,6 +234,31 @@ fn named_repository_recovers_exact_bytes_and_accepts_another_publish() {
     );
     assert_eq!(std::fs::read(fresh.join("payload.bin")).unwrap(), expected);
     assert!(!interrupted_recovery.join("partial").exists());
+    let second_fresh = temporary.path().join("second-fresh");
+    let second_fresh_text = second_fresh.to_string_lossy().to_string();
+    let second_fresh_environment = [
+        ("TANDEM_TOKEN", second_owner_token),
+        ("TANDEM_DISABLE_CACHE", "true"),
+    ];
+    assert_ok(
+        &run_tandem_in_with_env(
+            temporary.path(),
+            &[
+                "clone",
+                &second_repository_address,
+                &second_fresh_text,
+                "--workspace",
+                "agent-two",
+            ],
+            &second_fresh_environment,
+            &home,
+        ),
+        "second owner clone after total host cache loss",
+    );
+    assert_eq!(
+        std::fs::read(second_fresh.join("payload.bin")).unwrap(),
+        second_expected
+    );
 
     recovered.stop();
     let heads = cache.join("repositories/acme/stage-one/.jj/repo/tandem/heads.json");
@@ -314,6 +412,10 @@ fn create_owner_when_ready(
     host: &mut ProcessGuard,
 ) -> serde_json::Value {
     host.wait_for_listening(address);
+    create_owner(address, host_secret)
+}
+
+fn create_owner(address: &str, host_secret: &str) -> serde_json::Value {
     common::http_client()
         .post(format!("http://{address}/api/owners"))
         .bearer_auth(host_secret)

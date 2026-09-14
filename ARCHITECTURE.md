@@ -17,8 +17,7 @@ The native host supports named repositories. Its hosting layer authenticates
 namespace owners and provisions repository engines; each engine coordinates
 operation heads, persists publishes, emits wake-ups, and owns Git interop.
 Clients retain control of their working files. Hosted recovery is implemented;
-resource isolation and independent progress across repositories remain under
-qualification in the [hosting plan](docs/hosting-on-exe.md).
+repository identities are isolated and open independently within one host.
 
 ## State and authority
 
@@ -73,7 +72,11 @@ repository provisioning before opening an engine. It marks a repository ready
 only after its initial history is durable. Namespace ownership is bound to a
 signed owner credential. The protected host signing secret derives repository
 credentials and must survive replacement independently of the cache disk.
-The manager retains one engine per repository identity.
+The manager retains one engine, its leases, and its event stream per repository
+identity for the host lifetime. Per-name loading slots keep slow bucket recovery
+from holding the manager registry lock; a bounded permit pool limits concurrent
+opens without merging repository state. Hosted name creation applies the
+licensed content policy owned by the protocol boundary.
 
 The server embeds jj-lib over a normal colocated jj/Git repository. It exposes
 an authenticated HTTP API for immutable objects, operations, views, mutable
