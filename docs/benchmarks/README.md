@@ -18,6 +18,9 @@ investigation without behavior changes or optimization proposals.
 
 The follow-up [R2 attempt profile](r2-http-attempts.md) observes individual SDK
 HTTP attempts, ETags, retries and socket reuse, with Cloudflare API evidence.
+The [local preparation gate](local-publish-parity.md) records ordinary fingerprint
+parity and a native jj rewrite-metadata collision that stops the combined-publish
+experiment before an endpoint or performance comparison.
 
 ## Workspace build-cache isolation
 
