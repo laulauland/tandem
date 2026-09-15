@@ -7,12 +7,12 @@ ARG RUNTIME_IMAGE=debian:trixie-slim
 
 FROM ${RUST_IMAGE} AS builder
 WORKDIR /src
-COPY Cargo.toml README.md ./
+COPY Cargo.toml Cargo.lock README.md ./
 COPY crates ./crates
 COPY testing ./testing
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release -p jj-tandem --bin tandem \
+    cargo build --locked --release -p jj-tandem --bin tandem \
     && mkdir -p /out && cp target/release/tandem /out/tandem
 
 FROM ${RUNTIME_IMAGE} AS sandbox
