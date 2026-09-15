@@ -27,8 +27,8 @@ under the `production` prefix in R2 bucket `tandem-native`, located in Western
 Europe (`WEUR`). Cloudflare retains DNS and R2; both `tandem.land` and
 `www.tandem.land` have DNS-only CNAMEs and explicit exe.dev domain attachments
 to this host. The deployed source revision is
-`452db17d0201d322d793e5ca7c11c51982c9fb16`; its GNU/Linux binary SHA-256 is
-`0a65a9854de082bde3f59bebfe5fdec98d94a5704e65b526b0687d7abd610eaa`.
+`67fa558dea88717d7e0e3522d0451669d9722362`; its GNU/Linux binary SHA-256 is
+`c35ccb063623fa38702225dd825c9e7b60eef5897cf7ac6ddb2c5c1c91432b8a`.
 
 The Europe replacement recovered a previously published qualification file
 with its existing scoped credential, accepted a normal snapshot through the
