@@ -187,6 +187,16 @@ comparison.
 
 ## Routine upgrades and shutdown
 
+Before upgrading the embedded jj engine, test cold recovery from a copy of the
+existing bucket with the candidate binary. jj upgrades can change operation
+and view identities even when their serialized data remains readable.
+
+The jj 0.45.1 engine cannot replay WAL written by Tandem's former jj 0.38.0
+engine. There is no automatic history migration. Keep the existing host and
+matching clients until history has been migrated and verified, or deliberately
+start a separate empty bucket prefix. A successful start with a warm cache
+does not establish upgrade compatibility.
+
 Drain or pause workspace daemons, stop the server gracefully, retain the
 current binary and configuration for rollback, deploy the new binary, and
 watch startup replay before resuming writers. `tandem down` and service-manager
