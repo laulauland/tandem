@@ -18,6 +18,9 @@ investigation without behavior changes or optimization proposals.
 
 The follow-up [R2 attempt profile](r2-http-attempts.md) observes individual SDK
 HTTP attempts, ETags, retries and socket reuse, with Cloudflare API evidence.
+The matched [placement comparison](storage-placement.md) repeats that workload
+in Frankfurt and Dallas. The [Tigris comparison](tigris-comparison.md) uses one
+Frankfurt VM for both providers after checking conditional-write semantics.
 The [local preparation gate](local-publish-parity.md) records ordinary fingerprint
 parity and a native jj rewrite-metadata collision that stops the combined-publish
 experiment before an endpoint or performance comparison.
