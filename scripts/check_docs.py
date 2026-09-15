@@ -24,6 +24,7 @@ ACTIVE_DOCS = {
     ROOT / "docs/reliability.md",
     ROOT / "docs/testing.md",
     ROOT / "docs/operations.md",
+    ROOT / "docs/self-hosting.md",
     ROOT / "docs/benchmarks/README.md",
     ROOT / "docs/images/README.md",
     ROOT / ".agents/skills/release/SKILL.md",

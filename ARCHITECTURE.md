@@ -5,6 +5,25 @@ storage guarantees belong in [docs/reliability.md](docs/reliability.md), test
 placement in [docs/testing.md](docs/testing.md), and deployment behavior in
 [docs/operations.md](docs/operations.md).
 
+## Deployment shape
+
+```mermaid
+flowchart LR
+    A["Agent A<br/>Local jj workspace"] --> P["HTTPS proxy"]
+    B["Agent B<br/>Local jj workspace"] --> P
+    P --> H["One supervised Rust host<br/>Website · installer · repository API"]
+    H --- C["Host disk<br/>Disposable per-repository jj caches"]
+    H --> S["S3-compatible bucket<br/>Namespace/catalog · objects · WAL · head index"]
+    K["Protected configuration backup<br/>Signing keys · bucket credentials · deployment"] -.-> H
+```
+
+The proxy, machine, and object store are replaceable deployment choices.
+`tandem.land` uses an exe.dev host in Frankfurt and Cloudflare R2 in Western
+Europe. A self-hosted deployment uses the same Rust process with its own
+S3-compatible service; see the [self-hosting guide](docs/self-hosting.md).
+One active host serves a catalog. Replacement requires fencing the previous
+host and recovering from the bucket, with the same protected signing keys.
+
 ## Product boundary
 
 Tandem applies a server-client model to jj's store layer. A client is stock jj

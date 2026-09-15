@@ -3,6 +3,9 @@
 This document owns operator procedures. Use `tandem --help` for current flags,
 [ARCHITECTURE.md](../ARCHITECTURE.md) for boundaries, and
 [reliability.md](reliability.md) for why the recovery order is safe.
+For a new deployment, start with the [self-hosting guide](self-hosting.md): it
+covers your own S3 endpoint, a supervised Linux host, agent onboarding, and a
+local Docker storage example.
 
 ## Production shape
 

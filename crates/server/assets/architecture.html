@@ -12,7 +12,7 @@
     <header class="masthead">
       <p class="running-head">Tandem field notes</p>
       <h1>Architecture</h1>
-      <p class="deck">What moves between machines, what stays local, and how to provision a container safely.</p>
+      <p class="deck">Local files, durable shared history, and a server you can run yourself.</p>
       <div class="printer-rule" aria-hidden="true"><span></span></div>
     </header>
     <div class="sheet">
@@ -20,42 +20,32 @@
         <p class="back-link"><a href="/">← Back to Tandem</a></p>
         <section aria-labelledby="workspaces">
           <h2 id="workspaces">Local workspaces, shared history</h2>
-          <p>Each agent edits files in a normal local working copy. <code>td</code> embeds Jujutsu and publishes saved changes to the native server in the background. Published operation heads are preserved so concurrent work can converge through jj.</p>
-          <table class="state-table"><thead><tr><th>Agent</th><th>Stays local</th><th>Becomes shared</th></tr></thead><tbody><tr><td>agent-a</td><td>working-copy files</td><td>published jj history</td></tr><tr><td>agent-b</td><td>working-copy files</td><td>published jj history</td></tr></tbody></table>
-          <p>Use <code>td log</code> to inspect that history. Tandem does not move another workspace’s files. If your checked-out commit changes elsewhere, including through a descendant rebase, jj marks it stale. Run <code>td workspace update-stale</code> yourself, or set <code>td config set --workspace snapshot.auto-update-stale true</code> to let the next jj command update it. The background daemon never applies the update.</p>
+          <p>Each agent keeps its files, builds and tests on its own machine. <code>td</code> embeds Jujutsu; a running workspace daemon snapshots saved changes and publishes them to the host. Other agents read the published history through their own local workspaces.</p>
+          <figure class="system-diagram" aria-labelledby="system-caption">
+            <div class="diagram-row"><div class="diagram-node">Agent A<strong>Local jj workspace</strong><small>Files · builds · tests</small></div><div class="diagram-node">Agent B<strong>Local jj workspace</strong><small>Files · builds · tests</small></div></div>
+            <div class="diagram-arrow" aria-hidden="true">↓</div>
+            <div class="diagram-node">HTTPS proxy</div>
+            <div class="diagram-arrow" aria-hidden="true">↓</div>
+            <div class="diagram-node host-node"><strong>One supervised Rust Tandem host</strong><small>Website · installer · repository API</small></div>
+            <div class="diagram-row diagram-arrow" aria-hidden="true"><span>↙</span><span>↘</span></div>
+            <div class="diagram-row"><div class="diagram-node">Local disk<strong>Disposable jj caches</strong></div><div class="diagram-node">Your S3-compatible storage<strong>Durable data</strong><small>Namespace ownership · catalog<br>Objects in WAL · head index</small></div></div>
+            <figcaption id="system-caption">The host uses its local cache for active repositories and reconstructs it from the bucket after replacement.</figcaption>
+          </figure>
+          <p>The daemon prepares a snapshot through native jj and sends its objects, view, operation and head proposal in one combined mutation request. The host checks their identities, writes the WAL and conditionally commits the bucket index before applying the result locally and acknowledging it. Writer checks, head reads and jj reconciliation can make additional requests.</p>
+          <p>Concurrent history is preserved. Stacked rewrites can produce divergent jj versions; both remain available for you to inspect and resolve. If another operation moves your checked-out commit, the daemon marks the workspace stale and leaves your files untouched. You choose when to run <code>td workspace update-stale</code>; jj reports divergence and can select either version.</p>
         </section>
         <section aria-labelledby="access">
           <h2 id="access">Names and access</h2>
-          <p>Give every agent a distinct workspace name. The installer saves the host owner credential to <code>~/.config/td/credentials</code> with mode 0600, and <code>td clone</code> uses it to create or attach the named repository. Keep that file private; the server checks repository and workspace scope on every request.</p>
-          <p>For a container, mount the installer-managed credential file read-only. Use a separately scoped workspace name, volume, and container for every agent.</p>
+          <p>A namespace belongs to an owner credential. The installer saves one credential per exact host in the standard <code>td</code> credentials file with mode 0600. A named clone uses it to create a repository and obtains a workspace credential.</p>
+          <p>Give each active agent a distinct workspace name and a scoped credential for the same repository. Keep the owner credential with the person or service provisioning those agents. Installing independently creates another owner; it does not grant access to an existing namespace. The <a href="https://github.com/laulauland/tandem/blob/main/docs/self-hosting.md">self-hosting guide</a> includes credential provisioning for source-built clients and additional agents.</p>
         </section>
-        <section id="docker" aria-labelledby="docker-heading">
-          <h2 id="docker-heading">Docker provisioning</h2>
-          <h3>Build a binary-only image</h3>
-          <pre>cat &lt;&lt;'DOCKERFILE' | docker build --platform linux/amd64 -t tandem-agent -
-FROM debian:bookworm-slim
-RUN apt-get update \
- &amp;&amp; apt-get install -y --no-install-recommends ca-certificates curl \
- &amp;&amp; curl -fsSL @@TANDEM_PUBLIC_URL@@/dl/td-x86_64-unknown-linux-gnu -o /usr/local/bin/td \
- &amp;&amp; chmod 755 /usr/local/bin/td \
- &amp;&amp; rm -rf /var/lib/apt/lists/*
-WORKDIR /work
-ENTRYPOINT ["td"]
-DOCKERFILE</pre>
-          <p class="caption">The Dockerfile arrives on standard input, so no local credential file enters the build context.</p>
-          <h3>Create one workspace, then keep its daemon in the foreground</h3>
-          <pre><span class="prompt">$</span> docker volume create tandem-agent-a
-<span class="prompt">$</span> docker run --rm \
-  -v tandem-agent-a:/work \
-  -v "$HOME/.config/td/credentials:/root/.config/td/credentials:ro" \
-  tandem-agent clone @@TANDEM_PUBLIC_URL@@/you/my-project /work --workspace agent-a
-<span class="prompt">$</span> docker run -d --rm --name agent-a \
-  -v tandem-agent-a:/work \
-  -v "$HOME/.config/td/credentials:/root/.config/td/credentials:ro" \
-  tandem-agent daemon /work
-<span class="prompt">$</span> docker exec agent-a sh -lc \
-  "printf 'hello from Docker\\n' &gt; /work/hello.txt"</pre>
-          <p>Mount the owner credential only at runtime, and use a separate volume, container name, and <code>--workspace</code> value for every agent. Docker detaches the container, while the foreground daemon stays at PID 1 inside it and publishes file changes made in the mounted workspace.</p>
+        <section id="self-host" aria-labelledby="self-host-heading">
+          <h2 id="self-host-heading">Run your own host</h2>
+          <p>Run the native Rust binary as one supervised process, put HTTPS in front of it, and connect it to an existing S3-compatible bucket. Choose storage that supports the conditional writes and consistency Tandem requires. The bucket owns namespace records, the repository catalog, objects in the WAL and the durable head index.</p>
+          <p>Keep the host signing secret, retained keys and deployment configuration outside the disposable cache. Run one active host for the bucket prefix. To replace it, fence the old process, start with an empty cache and the same bucket and credentials, then verify published file bytes before admitting clients.</p>
+          <p><a href="https://github.com/laulauland/tandem/blob/main/docs/self-hosting.md">Follow the self-hosting guide →</a></p>
+          <p>The guide includes a source build, an example systemd service, configuration for your own S3 endpoint, and a local Docker S3 demo. A bucket container on the same machine is useful for trying the setup; it cannot protect data against losing that machine.</p>
+          <p class="caption">tandem.land uses exe.dev in Frankfurt and Cloudflare R2 in Western Europe. Cloudflare retains DNS and R2; the website and repository API run in the native host. Your deployment can use a different host and storage provider.</p>
         </section>
         <section aria-labelledby="deeper">
           <h2 id="deeper">Implementation detail</h2>

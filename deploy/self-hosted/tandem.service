@@ -1,0 +1,25 @@
+[Unit]
+Description=Tandem native repository host
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=tandem
+Group=tandem
+EnvironmentFile=/etc/tandem/host.env
+CacheDirectory=tandem
+CacheDirectoryMode=0700
+RuntimeDirectory=tandem
+RuntimeDirectoryMode=0700
+ExecStart=/usr/local/bin/tandem serve --hosted --listen 127.0.0.1:13013 --repo /var/cache/tandem --control-socket /run/tandem/control.sock --log-format json
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

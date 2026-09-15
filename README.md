@@ -1,83 +1,110 @@
 # Tandem
 
-Tandem gives agents on different machines real local working copies backed by
-one shared [Jujutsu](https://jj-vcs.github.io/jj/latest/) repository. The
-`tandem` binary embeds jj: ordinary commands remain ordinary jj commands, while
-the object, operation, and head stores live behind an authenticated HTTP
-server.
+Tandem gives coding agents **local jj workspaces with shared history**.
+Agents work on the same project from different machines. Each keeps its own
+files, builds and tests; published changes become visible to the others.
 
-Use Tandem when collaborators need to see one another's in-progress commits
-without sharing a filesystem. If every collaborator is on one machine, jj or
-Git worktrees are simpler.
+The `td` and `tandem` commands are the same binary. It embeds
+[Jujutsu](https://jj-vcs.github.io/jj/latest/), with remote stores for shared
+history. Ordinary jj commands remain ordinary jj commands.
 
-## Install
+Use [tandem.land](https://tandem.land), or [run your own native Rust host with
+an S3-compatible bucket](docs/self-hosting.md).
 
-```bash
-cargo install jj-tandem
-```
+## Get started on tandem.land
 
-A source build is just `cargo build --release -p jj-tandem --bin tandem`; no schema compiler or code
-generation is required.
-
-## Quick start
-
-On the server, start from a colocated jj/Git repository. A durable remote
-bucket is strongly recommended for anything that must survive the machine.
+The hosted installer supports GNU/Linux x86_64 and saves an owner credential
+for this host. Replace `you` with your namespace and `my-project` with your
+repository name; the first clone creates them when needed.
 
 ```bash
-tandem up --repo /srv/project --listen 0.0.0.0:13013 \
-  --bucket 's3://tandem-project?region=us-east-1'
+curl -fsSL https://tandem.land/install | sh
+export PATH="$HOME/.local/bin:$PATH"
+td clone https://tandem.land/you/my-project my-project --workspace agent-a
+cd my-project
+td daemon .
 ```
 
-`tandem up` prints the admin token when one was not supplied. Give each agent a
-distinct workspace name and a workspace-scoped token; see
-[operations](docs/operations.md#workspace-access) for token minting and network
-safety.
+Keep the daemon running. In another terminal in that workspace:
 
 ```bash
-tandem clone server:13013 ~/work/project \
-  --workspace agent-a --token "$TANDEM_TOKEN"
-cd ~/work/project
-tandem daemon .
+printf 'hello from agent-a\n' > hello.txt
+td diff
+td describe -m 'Add a greeting'
+td log
+td bookmark create agent-a/greeting -r @
 ```
 
-The daemon publishes file-change bursts after its debounce window. In another
-terminal, use jj through the same binary:
+Give each additional agent a distinct workspace and a scoped credential for
+this repository. An independently installed owner credential does not grant
+access to somebody else's namespace. The [access instructions](docs/self-hosting.md)
+show how the owner provisions agents without sharing its own credential.
+After receiving its credential through `TANDEM_TOKEN`, agent B can clone and
+read A's published file:
 
 ```bash
-tandem status
-tandem describe -m 'feat: add authentication'
-tandem log
-tandem bookmark create agent-a/auth -r @
+td clone https://tandem.land/you/my-project my-project --workspace agent-b
+cd my-project
+td file show --ignore-working-copy -r 'agent-a@' hello.txt
+td daemon .
 ```
 
-Run `tandem --help` and `tandem <command> --help` for the current command and
-environment-variable reference. Tandem-owned help works without a server.
+For other platforms or a source installation, build this checkout:
 
-## Mental model
+```bash
+cargo build --locked --release -p jj-tandem --bin tandem
+```
 
-- Each agent edits files on local disk and owns one workspace writer lease.
-- The server coordinates publishes and hosts a normal colocated jj/Git repo.
-- A bucket-backed write-ahead log is the durable source of truth; the server
-  repo can be rebuilt from it.
-- Concurrent operation heads are preserved and reconciled through jj rather
-  than overwritten.
-- Git remotes and credentials stay on the server. Agents use jj; the integrator
-  decides what reaches GitHub.
+Use `target/release/tandem` in place of `td`. Source-built clients can obtain
+an owner credential using the self-hosting guide; building a binary does not
+provision access. Run `tandem --help` for the current command reference.
 
-The exact boundaries are in [ARCHITECTURE.md](ARCHITECTURE.md), and the
-durability contract is in [docs/reliability.md](docs/reliability.md).
+## Architecture
 
-## Operations and safety
+```mermaid
+flowchart TB
+    A["Agent A · local jj workspace<br/>Files, builds and tests"] --> P["HTTPS proxy"]
+    B["Agent B · local jj workspace<br/>Files, builds and tests"] --> P
+    P --> H["One supervised Rust Tandem host<br/>Website, installer and repository API"]
+    H --- C["Local disk<br/>Disposable jj caches"]
+    H --> S["Your S3-compatible storage<br/>Namespace ownership and repository catalog<br/>Objects in WAL + durable head index"]
+```
 
-Tandem authenticates every repository request, but does not terminate TLS.
-Use a private network, tunnel, or TLS reverse proxy whenever the path is not
-trusted. A local filesystem bucket is convenient for development but does not
-survive loss of the server disk.
+The daemon prepares snapshots through jj and publishes each graph in one
+combined mutation request. The host validates it and persists the WAL and
+head index before acknowledging. Warm repositories reuse cached history;
+an empty host cache is reconstructed from the bucket.
 
-Deployment, backup, restore, observability, and incident procedures are in
-[docs/operations.md](docs/operations.md). Image-baking instructions live in
-[docs/images/README.md](docs/images/README.md).
+Concurrent history survives. Stacked rewrites can produce divergent jj
+versions, which you inspect and resolve with jj. The daemon marks a workspace
+stale when its checked-out commit moves elsewhere and leaves its files alone;
+you choose when to run `td workspace update-stale`.
+
+The complete state ownership and publish boundaries are in
+[ARCHITECTURE.md](ARCHITECTURE.md) and [the reliability contract](docs/reliability.md).
+
+## Host it yourself
+
+Run the same native host on your own machine with an independently durable
+S3-compatible bucket, a protected signing secret and an HTTPS reverse proxy.
+Cloudflare and exe.dev are choices for tandem.land, not requirements for
+self-hosting. The current hosted service runs in Frankfurt with R2 in Western
+Europe.
+
+The [self-hosting guide](docs/self-hosting.md) includes:
+
+- A source build and supervised systemd service.
+- Configuration for your own S3 endpoint and bucket.
+- A local Docker S3 example for trying the setup.
+- Owner and workspace credentials, exact-file verification and cold recovery.
+
+Run one active host. Preserve signing secrets and deployment configuration
+outside its disposable cache. A Docker bucket on the same machine is a local
+demo; it cannot protect data against losing that machine.
+
+[Operations](docs/operations.md) covers deployment, monitoring, backups and
+replacement. [Agent image instructions](docs/images/README.md) cover reusable
+client workspaces.
 
 ## Development
 
@@ -86,9 +113,7 @@ python3 scripts/check_docs.py
 cargo test --workspace
 ```
 
-Read [AGENTS.md](AGENTS.md) before changing the repository. It routes to the
-architecture, reliability, testing, operations, and decision records without
-duplicating them. Benchmark methods and retained measurements are in
-[docs/benchmarks/README.md](docs/benchmarks/README.md).
+Read [AGENTS.md](AGENTS.md) before changing the repository. Benchmark methods
+and retained measurements are in [docs/benchmarks/README.md](docs/benchmarks/README.md).
 
 License: MIT.

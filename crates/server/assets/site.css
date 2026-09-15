@@ -86,3 +86,13 @@ footer p { margin: .35rem 0; }
   .architecture h1 { font-size: 2.65rem; }
   .architecture h2 { white-space: normal; }
 }
+
+.system-diagram { margin: 1.5rem 0; text-align: center; }
+.diagram-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+.diagram-node { padding: .85rem .65rem; border: 1px solid var(--rule); background: var(--shade); font-size: .95rem; }
+.diagram-node strong, .diagram-node small { display: block; }
+.diagram-node strong { font-weight: 500; }
+.diagram-node small { margin-top: .25rem; color: var(--faint); font-size: .85rem; }
+.host-node { border-color: var(--ink); }
+.diagram-arrow { color: var(--faint); line-height: 1.5; font-size: 1.5rem; }
+.system-diagram figcaption { margin-top: .8rem; color: var(--faint); font-size: .95rem; font-style: italic; }

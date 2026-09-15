@@ -14,16 +14,17 @@
       <h1>Tandem</h1>
       <p class="deck">Coding agents work on the same project from different machines, each with local files and a shared version history.</p>
       <div class="printer-rule" aria-hidden="true"><span></span></div>
-      <nav class="top-nav" aria-label="Main navigation"><a href="#quick-start">Get started</a><a href="/architecture">How it works</a><a href="https://github.com/laulauland/tandem">Source</a></nav>
+      <nav class="top-nav" aria-label="Main navigation"><a href="#quick-start">Get started</a><a href="/architecture">How it works</a><a href="#self-host">Self-host</a><a href="https://github.com/laulauland/tandem">Source</a></nav>
     </header>
     <article class="home-sheet">
       <section id="quick-start" aria-labelledby="quick-start-heading">
         <h2 id="quick-start-heading">Quick start</h2>
         <pre class="sample" data-label="Install, clone, and start the workspace daemon"><span class="prompt">$</span> curl -fsSL @@TANDEM_PUBLIC_URL@@/install | sh
+<span class="prompt">$</span> export PATH="$HOME/.local/bin:$PATH"
 <span class="prompt">$</span> td clone @@TANDEM_PUBLIC_URL@@/you/my-project my-project --workspace agent-a
 <span class="prompt">$</span> cd my-project
 <span class="prompt">$</span> td daemon</pre>
-        <p class="caption">The installer keeps its owner credential in the standard <code>td</code> credentials file; on another platform, install with <code>cargo install jj-tandem</code>.</p>
+        <p class="caption">GNU/Linux x86_64. Replace <code>you</code> with your namespace; the first clone creates the repository. The installer saves an owner credential for this host. Other platforms can <a href="https://github.com/laulauland/tandem#readme">build from source</a>.</p>
       </section>
       <section aria-labelledby="visible-result">
         <h2 id="visible-result">What you see</h2>
@@ -39,17 +40,16 @@ index 0000000000..f5ccd1bacb
 <span class="prompt">$</span> td describe -m 'Add a greeting'
 <span class="prompt">$</span> td log --no-graph -r @ -T description
 Add a greeting</pre>
-        <pre class="output sample" data-label="Agent B reads the published history from its own workspace"><span class="prompt">$</span> td file show -r 'agent-a@' hello.txt
+        <p>Give agent B a distinct workspace and a scoped credential for this repository. Each agent keeps its own files, builds and tests. <a href="https://github.com/laulauland/tandem/blob/main/docs/self-hosting.md">Provision agent access →</a></p>
+        <pre class="output sample" data-label="Agent B reads the published history from its own workspace"><span class="prompt">$</span> td file show --ignore-working-copy -r 'agent-a@' hello.txt
 <span class="result">hello from agent-a</span></pre>
       </section>
-      <section aria-labelledby="docker-heading">
-        <h2 id="docker-heading">Run an agent in Docker</h2>
-        <pre class="sample" data-label="After placing td in the image and provisioning its volume"><span class="prompt">$</span> docker run -d --rm --name agent-a \
-  -v tandem-agent-a:/work \
-  -v "$HOME/.config/td/credentials:/root/.config/td/credentials:ro" \
-  tandem-agent daemon /work</pre>
-        <p class="caption">Credentials are mounted at runtime, never copied into the image. Each container uses its own workspace name and volume.</p>
-        <p><a href="/architecture#docker">Build the image and provision its workspace →</a></p>
+      <section id="self-host" aria-labelledby="self-host-heading">
+        <h2 id="self-host-heading">Run your own server</h2>
+        <p>Run the same native Rust host with your own S3-compatible bucket and HTTPS proxy. One supervised process serves the website, installer and repository API. Its local jj caches are disposable; the bucket keeps namespace ownership, the repository catalog and published history.</p>
+        <p>The <a href="https://github.com/laulauland/tandem/blob/main/docs/self-hosting.md">self-hosting guide</a> includes a source build, a systemd service, S3 configuration and a local Docker S3 example. Preserve your signing secret outside the cache and run one active host.</p>
+        <p><a href="/architecture">See the architecture →</a></p>
+        <p class="caption">tandem.land runs in Frankfurt with Cloudflare R2 in Western Europe. You can use your own host and storage provider.</p>
       </section>
     </article>
     <footer><p><a href="/architecture">Architecture</a> &nbsp;·&nbsp; <a href="https://github.com/laulauland/tandem#readme">Documentation</a> &nbsp;·&nbsp; <a href="https://github.com/laulauland/tandem">Source</a></p><p><i>Native Tandem host</i></p></footer>
