@@ -28,9 +28,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - name: Compile workspace tests on macOS
+        timeout-minutes: 20
+        run: cargo test --workspace --locked --no-run
       - name: Run workspace tests on macOS
+        timeout-minutes: 5
         run: cargo test --workspace --locked
       - name: Build the native installer artifact
+        timeout-minutes: 25
         run: |
           cargo build --release --locked -p jj-tandem --bin tandem
           mkdir -p artifacts

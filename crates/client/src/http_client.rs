@@ -1236,6 +1236,9 @@ mod tests {
                     while !stop.load(Ordering::Relaxed) {
                         match listener.accept() {
                             Ok((stream, _)) => {
+                                // macOS inherits the listener's nonblocking mode.
+                                // This fixture serves each connection with blocking I/O.
+                                stream.set_nonblocking(false).expect("blocking connection");
                                 connections
                                     .lock()
                                     .unwrap()
