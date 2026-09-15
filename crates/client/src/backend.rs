@@ -1,14 +1,15 @@
 //! TandemBackend — jj-lib Backend impl that routes all object I/O
 //! to a remote tandem server over HTTP.
 
+use futures::io::Cursor;
 use std::fmt;
-use std::io::Cursor;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use async_trait::async_trait;
+use futures::io::AsyncRead;
 use futures::stream::BoxStream;
 use jj_lib::backend::*;
 use jj_lib::index::Index;
@@ -16,7 +17,6 @@ use jj_lib::object_id::ObjectId as _;
 use jj_lib::repo_path::{RepoPath, RepoPathBuf};
 use jj_lib::settings::UserSettings;
 use prost::Message as _;
-use tokio::io::AsyncRead;
 
 use crate::http_client::TandemClient;
 use crate::pending_files::PendingFiles;
@@ -170,7 +170,7 @@ impl Backend for TandemBackend {
         contents: &mut (dyn AsyncRead + Send + Unpin),
     ) -> BackendResult<FileId> {
         let mut buf = Vec::new();
-        tokio::io::AsyncReadExt::read_to_end(contents, &mut buf)
+        futures::io::AsyncReadExt::read_to_end(contents, &mut buf)
             .await
             .map_err(|e| to_backend_err(e.into()))?;
         let id = ids::git_file(&buf).map_err(to_backend_err)?;
@@ -228,7 +228,10 @@ impl Backend for TandemBackend {
         ))
     }
 
-    async fn get_related_copies(&self, copy_id: &CopyId) -> BackendResult<Vec<CopyHistory>> {
+    async fn get_related_copies(
+        &self,
+        copy_id: &CopyId,
+    ) -> BackendResult<Vec<jj_lib::backend::RelatedCopy>> {
         let maybe_wire_copies = self
             .client
             .get_related_copies(copy_id.as_bytes())

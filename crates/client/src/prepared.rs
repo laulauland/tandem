@@ -58,7 +58,8 @@ impl Preparation {
         if self.native.is_none() {
             let directory =
                 tempfile::tempdir().context("create disposable native preparation store")?;
-            let backend = GitBackend::init_internal(settings, directory.path())?;
+            let backend =
+                GitBackend::init_internal(settings, directory.path(), gix_hash::Kind::Sha1)?;
             self.native = Some(Native {
                 backend,
                 _directory: directory,
@@ -79,8 +80,10 @@ impl Preparation {
             .backend;
         let (id, normalized) = match kind {
             wire::KIND_FILE => (
-                block_on(backend.write_file(RepoPath::root(), &mut std::io::Cursor::new(data)))?
-                    .to_bytes(),
+                block_on(
+                    backend.write_file(RepoPath::root(), &mut futures::io::Cursor::new(data)),
+                )?
+                .to_bytes(),
                 data.to_vec(),
             ),
             wire::KIND_SYMLINK => (

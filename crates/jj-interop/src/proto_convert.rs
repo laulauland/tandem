@@ -229,7 +229,12 @@ fn operation_metadata_to_proto(
         hostname: metadata.hostname.clone(),
         username: metadata.username.clone(),
         is_snapshot: metadata.is_snapshot,
-        tags: metadata.tags.clone(),
+        workspace_name: metadata.workspace_name.clone().map(Into::into),
+        attributes: metadata
+            .attributes
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
     }
 }
 
@@ -246,7 +251,8 @@ fn operation_metadata_from_proto(
         hostname: proto.hostname,
         username: proto.username,
         is_snapshot: proto.is_snapshot,
-        tags: proto.tags,
+        workspace_name: proto.workspace_name.map(Into::into),
+        attributes: proto.attributes.into_iter().collect(),
     }
 }
 
@@ -318,7 +324,18 @@ pub fn view_to_proto(view: &View) -> jj_lib::protos::simple_op_store::View {
         })
         .collect();
 
-    let git_head = ref_target_to_proto(&view.git_head);
+    let git_head = view
+        .git_heads
+        .get(WorkspaceName::DEFAULT)
+        .and_then(ref_target_to_proto);
+    let git_heads = view
+        .git_heads
+        .iter()
+        .map(|(name, target)| jj_lib::protos::simple_op_store::GitHead {
+            name: name.as_str().to_owned(),
+            target: ref_target_to_proto(target),
+        })
+        .collect();
 
     #[allow(deprecated)]
     jj_lib::protos::simple_op_store::View {
@@ -331,6 +348,7 @@ pub fn view_to_proto(view: &View) -> jj_lib::protos::simple_op_store::View {
         git_refs,
         git_head_legacy: Default::default(),
         git_head,
+        git_heads,
         has_git_refs_migrated_to_remote_tags: true,
     }
 }
@@ -380,14 +398,29 @@ pub fn view_from_proto(proto: jj_lib::protos::simple_op_store::View) -> anyhow::
         remote_views = remote_views_from_proto(proto.remote_views)?;
     }
 
+    let mut git_heads: BTreeMap<WorkspaceNameBuf, RefTarget> = proto
+        .git_heads
+        .into_iter()
+        .map(|entry| {
+            Ok((
+                WorkspaceNameBuf::from(entry.name),
+                ref_target_from_proto(entry.target)?,
+            ))
+        })
+        .collect::<anyhow::Result<_>>()?;
     #[allow(deprecated)]
-    let git_head = if proto.git_head.is_some() {
-        ref_target_from_proto(proto.git_head)?
-    } else if !proto.git_head_legacy.is_empty() {
-        RefTarget::normal(CommitId::new(proto.git_head_legacy))
-    } else {
-        RefTarget::absent()
-    };
+    if git_heads.is_empty() {
+        let git_head = if proto.git_head.is_some() {
+            ref_target_from_proto(proto.git_head)?
+        } else if !proto.git_head_legacy.is_empty() {
+            RefTarget::normal(CommitId::new(proto.git_head_legacy))
+        } else {
+            RefTarget::absent()
+        };
+        if git_head.is_present() {
+            git_heads.insert(WorkspaceName::DEFAULT.to_owned(), git_head);
+        }
+    }
 
     Ok(View {
         head_ids,
@@ -395,7 +428,7 @@ pub fn view_from_proto(proto: jj_lib::protos::simple_op_store::View) -> anyhow::
         local_tags,
         remote_views,
         git_refs,
-        git_head,
+        git_heads,
         wc_commit_ids,
     })
 }
@@ -649,6 +682,66 @@ mod tests {
     use super::*;
 
     #[test]
+    fn workspace_metadata_and_git_heads_match_native_storage() {
+        use jj_lib::content_hash::blake2b_hash;
+        use jj_lib::op_store::{OpStore as _, RootOperationData};
+        use jj_lib::simple_op_store::SimpleOpStore;
+        use pollster::FutureExt as _;
+
+        let directory = tempfile::tempdir().unwrap();
+        let root = CommitId::new(vec![0; 20]);
+        let store = SimpleOpStore::init(
+            directory.path(),
+            RootOperationData {
+                root_commit_id: root.clone(),
+            },
+        )
+        .unwrap();
+        let mut view = View::make_root(root);
+        for (name, byte) in [("default", 1), ("agent-b", 2)] {
+            view.git_heads.insert(
+                name.into(),
+                RefTarget::normal(CommitId::new(vec![byte; 20])),
+            );
+        }
+        let view_id = store.write_view(&view).block_on().unwrap();
+        let encoded_view = view_to_proto(&view).encode_to_vec();
+        let native_view =
+            std::fs::read(directory.path().join("views").join(view_id.hex())).unwrap();
+        assert_eq!(
+            view_from_proto(
+                jj_lib::protos::simple_op_store::View::decode(native_view.as_slice()).unwrap()
+            )
+            .unwrap(),
+            view
+        );
+        assert_eq!(encoded_view, native_view);
+        assert_eq!(view_id.as_bytes(), blake2b_hash(&view).as_slice());
+
+        let mut operation = Operation::make_root(view_id);
+        operation.parents.push(store.root_operation_id().clone());
+        operation.metadata.workspace_name = Some("agent-b".into());
+        operation
+            .metadata
+            .attributes
+            .insert("command".into(), "snapshot".into());
+        let operation_id = store.write_operation(&operation).block_on().unwrap();
+        let native_operation =
+            std::fs::read(directory.path().join("operations").join(operation_id.hex())).unwrap();
+        let decoded = operation_from_proto(
+            jj_lib::protos::simple_op_store::Operation::decode(native_operation.as_slice())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(decoded, operation);
+        assert_eq!(
+            operation_to_proto(&operation).encode_to_vec(),
+            native_operation
+        );
+        assert_eq!(operation_id.as_bytes(), blake2b_hash(&decoded).as_slice());
+    }
+
+    #[test]
     fn malformed_ref_targets_are_errors_instead_of_panics() {
         use jj_lib::protos::simple_op_store::{
             ref_target, RefTarget as ProtoRefTarget, View as ProtoView,
@@ -679,7 +772,8 @@ mod tests {
                 hostname: String::new(),
                 username: String::new(),
                 is_snapshot: false,
-                tags: Default::default(),
+                workspace_name: None,
+                attributes: Default::default(),
             }),
             commit_predecessors: Vec::new(),
             stores_commit_predecessors: false,

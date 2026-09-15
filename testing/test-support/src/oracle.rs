@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::{bail, Context, Result};
 use jj_lib::object_id::ObjectId as _;
 use jj_lib::op_store::OperationId;
-use jj_lib::repo::{RepoLoader, StoreFactories};
+use jj_lib::repo::RepoLoader;
 use jj_tandem_protocol::hex::{from_hex, to_hex};
 use jj_tandem_wal as wal;
 use pollster::FutureExt as _;
@@ -209,9 +209,12 @@ fn check_inner(cluster: &Cluster, agents: &[Agent]) -> Result<()> {
     let settings = super::test_settings()?;
     let repo_dir = dunce::canonicalize(cluster.repo.join(".jj/repo"))
         .context("canonicalize the server's .jj/repo")?;
-    let loader =
-        RepoLoader::init_from_file_system(&settings, &repo_dir, &StoreFactories::default())
-            .context("load the server's repo")?;
+    let loader = RepoLoader::init_from_file_system(
+        &settings,
+        &repo_dir,
+        &jj_lib::default_backend_factories::default_backend_factories(),
+    )
+    .context("load the server's repo")?;
     let jj_heads: BTreeSet<String> = loader
         .op_heads_store()
         .get_op_heads()

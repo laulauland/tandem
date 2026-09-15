@@ -27,6 +27,7 @@ harness = false
 
 [dev-dependencies]
 jj-tandem-protocol.workspace = true
+futures.workspace = true
 jj-lib.workspace = true
 jj-tandem-client.workspace = true
 pollster.workspace = true

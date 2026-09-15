@@ -6,6 +6,8 @@ publish = false
 
 [dev-dependencies]
 anyhow.workspace = true
+pollster.workspace = true
+gix-hash.workspace = true
 jj-lib.workspace = true
 proptest.workspace = true
 jj-tandem-test-support.workspace = true

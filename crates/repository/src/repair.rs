@@ -11,7 +11,7 @@
 //! return, after a publish is durable and acknowledged, so a head it cannot
 //! read or repair is served exactly as it would have been without this.
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use jj_lib::backend::CommitId;
 use jj_lib::object_id::ObjectId as _;
 use jj_lib::op_store::OperationId;
@@ -82,12 +82,11 @@ impl Repository {
         // sides sit one step further back; without this the wrapper would be
         // examined against a set of views that no longer holds the answer.
         let mut parent_views = Vec::new();
-        for parent in settled.parents() {
-            let parent = parent.map_err(|e| anyhow!("read a parent operation: {e}"))?;
+        for parent in pollster::block_on(settled.parents()).context("read parent operations")? {
             if parent.view_id() == settled.view_id() {
-                for grandparent in parent.parents() {
-                    let grandparent =
-                        grandparent.map_err(|e| anyhow!("read a parent operation: {e}"))?;
+                for grandparent in
+                    pollster::block_on(parent.parents()).context("read grandparent operations")?
+                {
                     let view = read_view(&grandparent)?;
                     parent_views.push((grandparent, view));
                 }
@@ -152,7 +151,8 @@ impl Repository {
                 hostname: settled.metadata().hostname.clone(),
                 username: settled.metadata().username.clone(),
                 is_snapshot: false,
-                tags: std::collections::HashMap::new(),
+                workspace_name: None,
+                attributes: Default::default(),
             },
             commit_predecessors: None,
         };
@@ -188,7 +188,7 @@ impl Repository {
             || !view.local_tags.is_empty()
             || !view.remote_views.is_empty()
             || !view.git_refs.is_empty()
-            || view.git_head.is_present()
+            || view.git_heads.values().any(|target| target.is_present())
             || view.wc_commit_ids.len() != 1
             || view.head_ids.len() != 1
         {

@@ -36,8 +36,12 @@ pub struct PreparedChange {
 impl LocalPreparation {
     pub fn import(client: &TandemClient, name: &str) -> Result<Self> {
         let directory = tempfile::tempdir()?;
-        let (workspace, repo) =
-            Workspace::init_colocated_git(&super::test_settings()?, directory.path())?;
+        let (workspace, repo) = Workspace::init_colocated_git(
+            &super::test_settings()?,
+            directory.path(),
+            gix_hash::Kind::Sha1,
+        )
+        .block_on()?;
         let heads = client.get_heads_state()?;
         ensure!(
             heads.heads.len() == 1,
@@ -47,8 +51,9 @@ impl LocalPreparation {
         import_operation(client, &repo, &heads.heads[0], &mut seen)?;
         let operation = workspace
             .repo_loader()
-            .load_operation(&OperationId::new(heads.heads[0].clone()))?;
-        let repo = workspace.repo_loader().load_at(&operation)?;
+            .load_operation(&OperationId::new(heads.heads[0].clone()))
+            .block_on()?;
+        let repo = workspace.repo_loader().load_at(&operation).block_on()?;
         Ok(Self {
             _directory: directory,
             workspace,
@@ -67,7 +72,7 @@ impl LocalPreparation {
         let parent = store.get_commit(parent_id)?;
         let path = RepoPathBuf::from_internal_string("dir/edited.txt")?;
         let id = store
-            .write_file(&path, &mut std::io::Cursor::new(bytes))
+            .write_file(&path, &mut futures::io::Cursor::new(bytes))
             .block_on()?;
         let mut objects = vec![wire::PreparedObject {
             kind: wire::KIND_FILE,
@@ -83,26 +88,27 @@ impl LocalPreparation {
                 copy_id: CopyId::placeholder(),
             }),
         );
-        let tree = builder.write_tree()?;
+        let tree = builder.write_tree().block_on()?;
         collect_trees(store, tree.tree_ids().as_resolved().unwrap(), &mut objects)?;
         let mut tx = self.repo.start_transaction();
         let commit = tx
             .repo_mut()
             .new_commit(vec![parent.id().clone()], tree)
             .set_description("prepared file edit")
-            .write()?;
+            .write()
+            .block_on()?;
         objects.push(wire::PreparedObject {
             kind: wire::KIND_COMMIT,
             id: commit.id().to_bytes(),
             data: jj_lib::simple_backend::commit_to_proto(commit.store_commit()).encode_to_vec(),
         });
-        tx.repo_mut().edit(self.name.clone(), &commit)?;
-        tx.repo_mut().rebase_descendants()?;
-        let operation = tx.write("prepare edited file")?;
+        tx.repo_mut().edit(self.name.clone(), &commit).block_on()?;
+        tx.repo_mut().rebase_descendants().block_on()?;
+        let operation = tx.write("prepare edited file").block_on()?;
         let op = operation.operation();
         let request = wire::PreparedPublish {
             objects,
-            view: proto_convert::view_to_proto(op.view()?.store_view()).encode_to_vec(),
+            view: proto_convert::view_to_proto(op.view().block_on()?.store_view()).encode_to_vec(),
             operation: proto_convert::operation_to_proto(op.store_operation()).encode_to_vec(),
             heads: wire::UpdateHeadsBody {
                 old_ids: op.parent_ids().iter().map(|id| id.hex()).collect(),
@@ -121,7 +127,8 @@ impl LocalPreparation {
         self.repo = self
             .workspace
             .repo_loader()
-            .load_at(change.operation.operation())?;
+            .load_at(change.operation.operation())
+            .block_on()?;
         Ok(())
     }
 }
@@ -162,7 +169,7 @@ fn import_object(
     let backend = repo.store().backend();
     let stored = match kind {
         wire::KIND_FILE => backend
-            .write_file(RepoPath::root(), &mut std::io::Cursor::new(&data))
+            .write_file(RepoPath::root(), &mut futures::io::Cursor::new(&data))
             .block_on()?
             .to_bytes(),
         wire::KIND_TREE => {

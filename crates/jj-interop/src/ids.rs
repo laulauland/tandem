@@ -50,7 +50,8 @@ mod tests {
 
         let settings = UserSettings::from_config(StackedConfig::with_defaults()).unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let backend = GitBackend::init_internal(&settings, dir.path()).unwrap();
+        let backend =
+            GitBackend::init_internal(&settings, dir.path(), gix_hash::Kind::Sha1).unwrap();
         let payloads = [
             Vec::new(),
             b"hello\n".to_vec(),
@@ -58,7 +59,7 @@ mod tests {
             vec![42; 65537],
         ];
         for bytes in payloads {
-            let mut input = std::io::Cursor::new(&bytes);
+            let mut input = bytes.as_slice();
             let actual =
                 pollster::block_on(backend.write_file(RepoPath::root(), &mut input)).unwrap();
             assert_eq!(git_file(&bytes).unwrap(), actual);

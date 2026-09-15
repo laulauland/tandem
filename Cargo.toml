@@ -15,15 +15,15 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 proptest = "1"
 blake2 = "0.10"
-gix-hash = "0.22"
-gix-object = "0.55"
+gix-hash = "0.26"
+gix-object = "0.64"
 dunce = "1"
 libc = "0.2"
 hyper-util = { version = "0.1", features = ["client-legacy"] }
 object_store = { version = "0.14.1", features = ["aws"] }
 tempfile = "3"
 tokio = { version = "1", features = ["full"] }
-jj-lib = { version = "0.38.0", features = ["git"] }
+jj-lib = { version = "0.45.1", features = ["git"] }
 prost = "0.14"
 smallvec = "1"
 async-trait = "0.1"
@@ -33,7 +33,7 @@ tracing = "0.1"
 axum = "0.8"
 tower = "0.5"
 clap = { version = "4", features = ["derive", "env"] }
-jj-cli = { version = "0.38.0", default-features = false, features = ["git"] }
+jj-cli = { version = "0.45.1", default-features = false, features = ["git"] }
 notify = "8"
 pollster = "0.4"
 rand = "0.9"

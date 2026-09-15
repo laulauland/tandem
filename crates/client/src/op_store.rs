@@ -237,7 +237,7 @@ impl OpStore for TandemOpStore {
         }
     }
 
-    fn gc(&self, _head_ids: &[OperationId], _keep_newer: SystemTime) -> OpStoreResult<()> {
+    async fn gc(&self, _head_ids: &[OperationId], _keep_newer: SystemTime) -> OpStoreResult<()> {
         Ok(())
     }
 }

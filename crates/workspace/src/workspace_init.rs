@@ -10,16 +10,18 @@
 //! has. Attaching is what makes a workspace outlive the machine it was on: the
 //! files come back from the last published snapshot, not from a fresh start.
 
+use pollster::FutureExt as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use jj_lib::backend::CommitId;
+use jj_lib::default_backend_factories::default_working_copy_factory;
 use jj_lib::object_id::ObjectId as _;
 use jj_lib::ref_name::{WorkspaceName, WorkspaceNameBuf};
 use jj_lib::repo::{ReadonlyRepo, Repo as _};
 use jj_lib::settings::UserSettings;
 use jj_lib::signing::Signer;
-use jj_lib::workspace::{default_working_copy_factory, Workspace};
+use jj_lib::workspace::Workspace;
 use prost::Message as _;
 
 use jj_tandem_client::{backend, op_heads_store, op_store, TandemClient};
@@ -45,6 +47,7 @@ type OpStoreInit<'a> =
 type OpHeadsInit<'a> = &'a dyn Fn(
     &UserSettings,
     &Path,
+    &jj_lib::op_store::OperationId,
 ) -> Result<
     Box<dyn jj_lib::op_heads_store::OpHeadsStore>,
     jj_lib::backend::BackendInitError,
@@ -299,7 +302,7 @@ pub fn clone_tandem_workspace(
         )?))
     };
 
-    let op_heads_init: OpHeadsInit = &|_settings, store_path| {
+    let op_heads_init: OpHeadsInit = &|_settings, store_path, _root_id| {
         Ok(Box::new(op_heads_store::TandemOpHeadsStore::init(
             store_path,
             &op_heads_addr,
@@ -320,6 +323,7 @@ pub fn clone_tandem_workspace(
         &*default_working_copy_factory(),
         WorkspaceNameBuf::from(workspace_name.to_string()),
     )
+    .block_on()
     .context("workspace init failed")?;
 
     // The fault injector for the window between this clone's two operations.
@@ -366,16 +370,20 @@ pub fn clone_tandem_workspace(
                 WorkspaceNameBuf::from(workspace_name.to_string()),
                 &existing_commit,
             )
+            .block_on()
             .context("workspace attach failed: cannot point the workspace at its last snapshot")?;
         tx.repo_mut()
             .rebase_descendants()
+            .block_on()
             .context("workspace attach failed: cannot rebase rewritten descendants")?;
         let updated_repo = tx
             .commit(format!("attach workspace {workspace_name}"))
+            .block_on()
             .context("workspace attach failed: cannot publish the attach operation")?;
 
         workspace
             .check_out(updated_repo.op_id().clone(), None, &existing_commit)
+            .block_on()
             .context("workspace attach failed: cannot materialize the working copy")?;
 
         return Ok((workspace_path, WorkspaceOrigin::Attached));
@@ -388,6 +396,7 @@ pub fn clone_tandem_workspace(
     let head_repo = repo
         .loader()
         .load_at_head()
+        .block_on()
         .context("workspace init failed: cannot load repository head")?;
 
     let source_parent_commits = match head_repo.view().get_wc_commit_id(WorkspaceName::DEFAULT) {
@@ -430,6 +439,7 @@ pub fn clone_tandem_workspace(
         .new_commit(parent_ids, merged_tree)
         .detach()
         .write(tx.repo_mut())
+        .block_on()
         .context("workspace init failed: cannot create initial working-copy commit")?;
 
     tx.repo_mut()
@@ -437,19 +447,23 @@ pub fn clone_tandem_workspace(
             WorkspaceNameBuf::from(workspace_name.to_string()),
             &new_wc_commit,
         )
+        .block_on()
         .context("workspace init failed: cannot move workspace to source context")?;
     tx.repo_mut()
         .rebase_descendants()
+        .block_on()
         .context("workspace init failed: cannot rebase rewritten descendants")?;
 
     let updated_repo = tx
         .commit(format!(
             "create initial working-copy commit in workspace {workspace_name}"
         ))
+        .block_on()
         .context("workspace init failed: cannot publish initial operation")?;
 
     workspace
         .check_out(updated_repo.op_id().clone(), None, &new_wc_commit)
+        .block_on()
         .context("workspace init failed: cannot update working copy checkout")?;
 
     Ok((workspace_path, WorkspaceOrigin::Created))

@@ -8,7 +8,9 @@ description = "Headless durable repository authority for Tandem"
 
 [dependencies]
 anyhow.workspace = true
+futures.workspace = true
 dunce.workspace = true
+gix-hash.workspace = true
 jj-lib.workspace = true
 jj-tandem-jj.workspace = true
 jj-tandem-protocol.workspace = true

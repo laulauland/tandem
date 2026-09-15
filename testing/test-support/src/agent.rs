@@ -83,6 +83,7 @@ impl Agent {
     pub fn head(&self) -> Result<std::sync::Arc<ReadonlyRepo>> {
         self.loader()?
             .load_at_head()
+            .block_on()
             .with_context(|| format!("{}: load at head", self.name))
     }
 
@@ -112,6 +113,7 @@ impl Agent {
         let (operation, written, commit_id) = self.prepare_files(files, description)?;
         operation
             .publish()
+            .block_on()
             .with_context(|| format!("{}: publish the operation", self.name))?;
         self.written.extend(written);
         Ok(commit_id)
@@ -133,7 +135,7 @@ impl Agent {
         for (path, bytes) in files {
             let repo_path = RepoPathBuf::from_internal_string(path.clone())
                 .map_err(|err| anyhow!("{}: bad repo path {path}: {err}", self.name))?;
-            let mut contents = std::io::Cursor::new(bytes.clone());
+            let mut contents = futures::io::Cursor::new(bytes.clone());
             let id = store
                 .write_file(&repo_path, &mut contents)
                 .block_on()
@@ -150,6 +152,7 @@ impl Agent {
         }
         let tree = builder
             .write_tree()
+            .block_on()
             .with_context(|| format!("{}: write the tree", self.name))?;
 
         let mut tx = repo.start_transaction();
@@ -158,14 +161,17 @@ impl Agent {
             .new_commit(vec![parent.id().clone()], tree)
             .set_description(description)
             .write()
+            .block_on()
             .with_context(|| format!("{}: write the commit", self.name))?;
         let commit_id = commit.id().clone();
         tx.repo_mut()
             .edit(self.workspace_name.clone(), &commit)
+            .block_on()
             .with_context(|| format!("{}: move the working copy", self.name))?;
-        tx.repo_mut().rebase_descendants()?;
+        tx.repo_mut().rebase_descendants().block_on()?;
         let operation = tx
             .write(format!("{} commits {description}", self.name))
+            .block_on()
             .with_context(|| format!("{}: write the operation", self.name))?;
 
         let written = staged
@@ -214,10 +220,12 @@ impl Agent {
             .rewrite_commit(&target)
             .set_description(description)
             .write()
+            .block_on()
             .with_context(|| format!("{}: rewrite the commit", self.name))?;
-        tx.repo_mut().rebase_descendants()?;
+        tx.repo_mut().rebase_descendants().block_on()?;
         let new_id = rewritten.id().clone();
         tx.commit(format!("{} describes {description}", self.name))
+            .block_on()
             .with_context(|| format!("{}: publish the operation", self.name))?;
 
         // The bytes travel with the rewrite: same tree, new commit id.
@@ -241,6 +249,7 @@ impl Agent {
         // anything is asserted about it.
         let repo = loader
             .load_at_head()
+            .block_on()
             .with_context(|| format!("{}: load at head", self.name))?;
         let op_heads: BTreeSet<String> = loader
             .op_heads_store()
@@ -369,6 +378,7 @@ fn file_at(
     let value = commit
         .tree()
         .path_value(&repo_path)
+        .block_on()
         .with_context(|| format!("{who}: look up {path}"))?;
     let Some(TreeValue::File { id, .. }) = value.as_normal() else {
         return Err(anyhow!(
@@ -390,7 +400,7 @@ fn read_file_at(repo: &ReadonlyRepo, who: &str, commit: &CommitId, path: &str) -
         .with_context(|| format!("{who}: read {path}"))?;
     let mut bytes = Vec::new();
     {
-        use tokio::io::AsyncReadExt as _;
+        use futures::io::AsyncReadExt as _;
         reader
             .read_to_end(&mut bytes)
             .block_on()

@@ -22,6 +22,7 @@
 //! them one after another only makes the suite slower.
 
 use jj_tandem_test_support as support;
+use pollster::FutureExt as _;
 
 use support::schedule;
 
@@ -133,7 +134,12 @@ fn interrupted_cold_recovery_does_not_publish_its_initializer() -> anyhow::Resul
     cluster.stop();
     std::fs::remove_dir_all(&cluster.repo)?;
     std::fs::create_dir_all(&cluster.repo)?;
-    jj_lib::workspace::Workspace::init_colocated_git(&support::test_settings()?, &cluster.repo)?;
+    jj_lib::workspace::Workspace::init_colocated_git(
+        &support::test_settings()?,
+        &cluster.repo,
+        gix_hash::Kind::Sha1,
+    )
+    .block_on()?;
     std::fs::write(cluster.repo.join(".tandem-initializing"), b"initializing\n")?;
     cluster.restart()?;
     assert!(

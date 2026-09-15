@@ -118,9 +118,10 @@ fn rest_probe_request_counts_and_bytes() {
             "score": startup + publish + catchup,
         })
     );
+    // jj 0.45.1 reads the same exact file bytes with 16 catch-up requests.
     assert_eq!(
         (startup, publish, catchup),
-        (2, 8, 18),
+        (2, 8, 16),
         "the frozen CLI workload request shape regressed"
     );
 }

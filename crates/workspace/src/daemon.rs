@@ -28,6 +28,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
+use jj_lib::default_backend_factories::default_working_copy_factories;
 use jj_lib::gitignore::GitIgnoreFile;
 use jj_lib::matchers::{EverythingMatcher, NothingMatcher};
 use jj_lib::object_id::ObjectId as _;
@@ -35,7 +36,7 @@ use jj_lib::ref_name::WorkspaceNameBuf;
 use jj_lib::repo::{ReadonlyRepo, Repo as _};
 use jj_lib::settings::UserSettings;
 use jj_lib::working_copy::{SnapshotOptions, WorkingCopyFreshness};
-use jj_lib::workspace::{default_working_copy_factories, Workspace};
+use jj_lib::workspace::Workspace;
 use pollster::FutureExt as _;
 use serde::{Deserialize, Serialize};
 
@@ -278,8 +279,8 @@ fn unchanged_tree_ancestor(
         if !seen.insert(operation.id().clone()) {
             continue;
         }
-        for parent in operation.parents() {
-            frontier.push_back(parent?);
+        for parent in operation.parents().block_on()? {
+            frontier.push_back(parent);
         }
     }
     Ok(false)
@@ -311,6 +312,7 @@ impl Daemon {
         let repo = workspace
             .repo_loader()
             .load_at_head()
+            .block_on()
             .context("cannot load the repository at its head")?;
 
         // The three facts a store on disk already knows. Read from the
@@ -512,11 +514,13 @@ impl Daemon {
         let mut repo = self
             .repo
             .reload_at_head()
+            .block_on()
             .context("cannot reload the repository at its head")?;
 
         let mut locked_ws = self
             .workspace
             .start_working_copy_mutation()
+            .block_on()
             .context("cannot lock the working copy")?;
 
         let Some(wc_commit_id) = repo.view().get_wc_commit_id(&self.workspace_name).cloned() else {
@@ -534,6 +538,7 @@ impl Daemon {
 
         let mut freshness =
             WorkingCopyFreshness::check_stale(locked_ws.locked_wc(), &wc_commit, &repo)
+                .block_on()
                 .context("cannot tell whether the working copy is up to date")?;
         if matches!(freshness, WorkingCopyFreshness::SiblingOperation) {
             let locked_wc = locked_ws.locked_wc();
@@ -555,6 +560,7 @@ impl Daemon {
                 // load the repo where the working copy already is.
                 repo = repo
                     .reload_at(&wc_operation)
+                    .block_on()
                     .context("cannot reload the repository at the working copy's operation")?;
                 let Some(id) = repo.view().get_wc_commit_id(&self.workspace_name).cloned() else {
                     drop(locked_ws);
@@ -618,6 +624,7 @@ impl Daemon {
         if new_tree.tree_ids_and_labels() == wc_commit.tree().tree_ids_and_labels() {
             locked_ws
                 .finish(repo.op_id().clone())
+                .block_on()
                 .context("cannot release the working copy")?;
             self.repo = repo;
             return Ok(SnapshotOutcome::Unchanged);
@@ -644,12 +651,14 @@ impl Daemon {
             .rewrite_commit(&wc_commit)
             .set_tree(new_tree)
             .write()
+            .block_on()
             .context("cannot write the snapshotted commit")?;
         tx.repo_mut()
             .set_wc_commit(self.workspace_name.clone(), commit.id().clone())
             .context("cannot move the workspace to the snapshotted commit")?;
         tx.repo_mut()
             .rebase_descendants()
+            .block_on()
             .context("cannot rebase rewritten descendants")?;
 
         if !renewal.is_held() {
@@ -672,11 +681,13 @@ impl Daemon {
         // this server means it is in the bucket.
         let updated_repo = tx
             .commit(SNAPSHOT_OPERATION_DESCRIPTION)
+            .block_on()
             .context("cannot publish the snapshot operation")?;
 
         profile_phase!("transaction_publish");
         locked_ws
             .finish(updated_repo.op_id().clone())
+            .block_on()
             .context("cannot release the working copy")?;
 
         profile_phase!("working_copy_finish");
@@ -1013,7 +1024,9 @@ fn watch_files(root: &Path, wakes: Arc<WakeQueue>) -> Result<notify::Recommended
     use notify::{EventKind, RecursiveMode, Watcher as _};
 
     let root_owned = root.to_path_buf();
-    let ignores = match GitIgnoreFile::empty().chain_with_file("", root.join(".gitignore")) {
+    let ignores = match GitIgnoreFile::empty()
+        .chain_with_file(jj_lib::repo_path::RepoPath::root(), root.join(".gitignore"))
+    {
         Ok(ignores) => ignores,
         Err(err) => {
             eprintln!("warning: ignoring this workspace's .gitignore, which cannot be read: {err}");
@@ -1069,18 +1082,26 @@ fn classify_change(root: &Path, ignores: &GitIgnoreFile, path: &Path) -> Change 
     let Ok(relative) = path.strip_prefix(root) else {
         return Change::NotOurs;
     };
-    let mut name = relative.to_string_lossy().replace('\\', "/");
+    let name = relative.to_string_lossy().replace('\\', "/");
     if name.is_empty() {
         return Change::NotOurs;
     }
-    // `matches` reads a trailing slash as "this is a directory", which is what
-    // makes a rule like `target/` match the directory itself. It also matches
-    // on any parent, so a file deep inside an ignored directory is ignored
-    // whether or not the directory is still there to be looked at.
-    if path.is_dir() {
-        name.push('/');
-    }
-    if ignores.matches(&name) {
+    let Ok(repo_path) = jj_lib::repo_path::RepoPathBuf::from_internal_string(&name) else {
+        return Change::Watched;
+    };
+    // jj's matcher checks one path at a time; ignored parents also exclude
+    // children, including paths whose directories have since been removed.
+    let ignored_parent = name.match_indices('/').any(|(end, _)| {
+        jj_lib::repo_path::RepoPath::from_internal_string(&name[..end])
+            .is_ok_and(|parent| ignores.matches_dir(parent))
+    });
+    if ignored_parent
+        || if path.is_dir() {
+            ignores.matches_dir(&repo_path)
+        } else {
+            ignores.matches_file(&repo_path)
+        }
+    {
         Change::Ignored
     } else {
         Change::Watched
@@ -1576,7 +1597,7 @@ mod tests {
         let root = Path::new("/w");
         let ignores = GitIgnoreFile::empty()
             .chain(
-                "",
+                jj_lib::repo_path::RepoPath::root(),
                 Path::new("/w/.gitignore"),
                 b"target/\nnode_modules/\n*.log\n",
             )

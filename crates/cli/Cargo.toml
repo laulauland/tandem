@@ -21,6 +21,8 @@ path = "src/td.rs"
 [dependencies]
 clap.workspace = true
 jj-cli.workspace = true
+gix-hash.workspace = true
+futures.workspace = true
 jj-lib.workspace = true
 jj-tandem-client.workspace = true
 jj-tandem-protocol.workspace = true

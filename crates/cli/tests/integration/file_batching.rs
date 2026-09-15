@@ -42,12 +42,12 @@ fn a_snapshot_uploads_eight_files_in_one_batch() {
 
 #[test]
 fn pending_files_are_readable_and_flush_before_trees_and_commits() {
+    use futures::io::AsyncReadExt as _;
     use jj_lib::backend::{Backend as _, CopyId, Tree, TreeValue};
     use jj_lib::object_id::ObjectId as _;
     use jj_lib::repo_path::{RepoPath, RepoPathComponentBuf};
     use jj_tandem_client::backend::TandemBackend;
     use pollster::FutureExt as _;
-    use tokio::io::AsyncReadExt as _;
 
     let fx = ServerFixture::builder().log_to_file().start();
     let backend = TandemBackend::init(&fx.dir("store"), &fx.addr, fx.token()).unwrap();
@@ -60,7 +60,7 @@ fn pending_files_are_readable_and_flush_before_trees_and_commits() {
         .to_vec();
     payload.extend_from_slice(b"pending\0\xff\n");
     let id = backend
-        .write_file(RepoPath::root(), &mut std::io::Cursor::new(&payload))
+        .write_file(RepoPath::root(), &mut futures::io::Cursor::new(&payload))
         .block_on()
         .unwrap();
     assert_eq!(fx.rpc_request_count("putObjectsBatch"), 0);
@@ -103,7 +103,7 @@ fn pending_files_are_readable_and_flush_before_trees_and_commits() {
 
     let later = b"also flush before commit";
     let later_id = backend
-        .write_file(RepoPath::root(), &mut std::io::Cursor::new(later))
+        .write_file(RepoPath::root(), &mut futures::io::Cursor::new(later))
         .block_on()
         .unwrap();
     let mut commit = backend
@@ -138,12 +138,12 @@ fn a_file_larger_than_the_batch_budget_uploads_without_being_buffered() {
     let backend = TandemBackend::init(&fx.dir("store"), &fx.addr, fx.token()).unwrap();
     let first = b"queued first";
     backend
-        .write_file(RepoPath::root(), &mut std::io::Cursor::new(first))
+        .write_file(RepoPath::root(), &mut futures::io::Cursor::new(first))
         .block_on()
         .unwrap();
     let large = vec![0xa5; 8 * 1024 * 1024];
     let id = backend
-        .write_file(RepoPath::root(), &mut std::io::Cursor::new(&large))
+        .write_file(RepoPath::root(), &mut futures::io::Cursor::new(&large))
         .block_on()
         .unwrap();
     assert_eq!(

@@ -53,7 +53,7 @@ pub fn tandem_factories() -> StoreFactories {
 }
 
 pub fn tandem_factories_with_defaults() -> StoreFactories {
-    let mut factories = StoreFactories::default();
+    let mut factories = jj_lib::default_backend_factories::default_backend_factories();
     factories.merge(tandem_factories());
     factories
 }

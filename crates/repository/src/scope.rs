@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use jj_lib::backend::CommitId;
 use jj_lib::object_id::ObjectId as _;
-use jj_lib::op_store::{RefTarget, View};
+use jj_lib::op_store::View;
 
 fn namespace_prefix(workspace_id: &str) -> String {
     format!("{workspace_id}/")
@@ -50,12 +50,6 @@ impl std::error::Error for ScopeDenied {}
 
 fn denied(message: impl Into<String>) -> ScopeDenied {
     ScopeDenied(message.into())
-}
-
-/// A ref target as an optional value: an absent target is no value at all,
-/// which is how the rest of this module reads a name that is not there.
-fn present(target: &RefTarget) -> Option<&RefTarget> {
-    target.is_present().then_some(target)
 }
 
 /// The two kinds of base a publish is measured against.
@@ -184,12 +178,13 @@ pub fn check_publish(
         |base| &base.git_refs,
         |_| false,
     )?;
-    // The git HEAD is one value rather than a map, so it is checked as a value:
-    // an absent HEAD is an absence like any other, and a first operation that
-    // inherited nothing did not unset anybody's.
-    check_value("git HEAD", bases, present(&new.git_head), |base| {
-        present(&base.git_head)
-    })?;
+    check_map(
+        "git HEAD",
+        bases,
+        &new.git_heads,
+        |base| &base.git_heads,
+        |_| false,
+    )?;
 
     // ── The head set ──
     //
@@ -344,27 +339,6 @@ where
         )));
     }
     Ok(())
-}
-
-/// The same test for a single value rather than a map of them.
-///
-/// The git HEAD is the only one, and it gets the same three-grounds treatment
-/// as a name in a map: an absent HEAD is an absence like any other.
-fn check_value<'a, V: PartialEq + 'a>(
-    what: &str,
-    bases: &Bases<'a>,
-    published: Option<&V>,
-    project: impl Fn(&'a View) -> Option<&'a V>,
-) -> Result<(), ScopeDenied> {
-    if unchanged(
-        published,
-        bases.inherited.iter().map(&project),
-        bases.merge_base.and_then(&project),
-        bases.served.iter().map(&project),
-    ) {
-        return Ok(());
-    }
-    Err(denied(format!("this token may not move the {what}")))
 }
 
 /// Whether publishing `published` for one name changes anything.
@@ -638,7 +612,10 @@ mod tests {
         assert!(check("agent-a", std::slice::from_ref(&base), &with_git_ref).is_err());
 
         let mut with_git_head = base.clone();
-        with_git_head.git_head = RefTarget::normal(commit(1));
+        with_git_head.git_heads.insert(
+            jj_lib::ref_name::WorkspaceName::DEFAULT.to_owned(),
+            RefTarget::normal(commit(1)),
+        );
         assert!(check("agent-a", std::slice::from_ref(&base), &with_git_head).is_err());
 
         let mut with_remote = base.clone();

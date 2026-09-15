@@ -348,7 +348,7 @@ fn fabricate(
         ..Default::default()
     };
     metadata
-        .tags
+        .attributes
         .insert("test".to_string(), "forged".to_string());
 
     let op_proto = jj_lib::protos::simple_op_store::Operation {

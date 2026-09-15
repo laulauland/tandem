@@ -2,6 +2,7 @@
 //! See docs/testing.md for benchmark usage.
 mod bench_support;
 
+use pollster::FutureExt as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -864,14 +865,14 @@ fn measure_active(
     Ok(reports)
 }
 fn read_bytes(repo: &jj_lib::repo::ReadonlyRepo, commit: &str, path: &str) -> Result<Vec<u8>> {
+    use futures::io::AsyncReadExt as _;
     use jj_lib::repo::Repo as _;
     use pollster::FutureExt as _;
-    use tokio::io::AsyncReadExt as _;
     let commit = repo.store().get_commit(
         &jj_lib::backend::CommitId::try_from_hex(commit).context("invalid commit id")?,
     )?;
     let path = jj_lib::repo_path::RepoPathBuf::from_internal_string(path.to_string())?;
-    let value = commit.tree().path_value(&path)?;
+    let value = commit.tree().path_value(&path).block_on()?;
     let Some(jj_lib::backend::TreeValue::File { id, .. }) = value.as_normal() else {
         bail!("expected file in published tree");
     };
@@ -901,13 +902,13 @@ fn validate_writer(mut writer: WriterResult, smoke: bool) -> Result<Value> {
         &writer.workspace.join(".jj/repo"),
         &jj_tandem_client::tandem_factories_with_defaults(),
     )?;
-    let repo = loader.load_at_head()?;
+    let repo = loader.load_at_head().block_on()?;
     let mut seen = std::collections::BTreeSet::new();
     let mut frontier = vec![repo.operation().clone()];
     while let Some(operation) = frontier.pop() {
         if seen.insert(operation.id().hex()) {
-            for parent in operation.parents() {
-                frontier.push(parent?);
+            for parent in operation.parents().block_on()? {
+                frontier.push(parent);
             }
         }
     }

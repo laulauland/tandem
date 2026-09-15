@@ -25,6 +25,7 @@ pub use faults::{CrashWindow, FaultPoints};
 pub use scope::ScopeDenied;
 
 use anyhow::{anyhow, bail, Context, Result};
+use futures::io::Cursor;
 use jj_lib::backend::{CommitId, TreeId};
 use jj_lib::object_id::ObjectId as _;
 use jj_lib::op_store::OperationId;
@@ -33,7 +34,6 @@ use prost::Message as _;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
@@ -395,7 +395,7 @@ impl Repository {
             .with_context(|| format!("cannot canonicalize .jj/repo at {}", repo.display()))?;
         let op_store_path = repo_dir.join("op_store");
 
-        let factories = jj_lib::repo::StoreFactories::default();
+        let factories = jj_lib::default_backend_factories::default_backend_factories();
         let loader =
             jj_lib::repo::RepoLoader::init_from_file_system(settings, &repo_dir, &factories)
                 .context("load jj repo state")?;
@@ -511,8 +511,12 @@ impl Repository {
 
     /// Initialize a new jj+git colocated repo.
     fn init_jj_git_repo(settings: &jj_lib::settings::UserSettings, repo_path: &Path) -> Result<()> {
-        jj_lib::workspace::Workspace::init_colocated_git(&settings, repo_path)
-            .context("init colocated git repo")?;
+        pollster::block_on(jj_lib::workspace::Workspace::init_colocated_git(
+            &settings,
+            repo_path,
+            gix_hash::Kind::Sha1,
+        ))
+        .context("init colocated git repo")?;
         Ok(())
     }
 
@@ -563,7 +567,7 @@ impl Repository {
                     continue;
                 }
             };
-            match self.repo_loader.load_operation(&op_id) {
+            match pollster::block_on(self.repo_loader.load_operation(&op_id)) {
                 Ok(op) => operations.push(op),
                 Err(err) => {
                     tracing::warn!(op_id = %op_id.hex(), error = %err, "skipping missing workspace head operation");
@@ -631,11 +635,13 @@ impl Repository {
             // nothing to merge, but there may still be stale ids to retire.
             ordered.into_iter().next().expect("one head")
         } else {
-            match self
-                .repo_loader
-                .merge_operations(ordered, Some("reconcile divergent operations"))
-            {
-                Ok(op) => op,
+            match pollster::block_on(self.repo_loader.merge_operations(
+                ordered,
+                None,
+                Some("reconcile divergent operations"),
+                [],
+            )) {
+                Ok((repo, _)) => repo.operation().clone(),
                 // Merging views is a convenience, not a correctness requirement:
                 // multiple op heads are a state every jj client already resolves on
                 // its own. Some head pairs cannot be merged at all — a workspace
@@ -779,7 +785,8 @@ impl Repository {
             hostname: settled.metadata().hostname.clone(),
             username: settled.metadata().username.clone(),
             is_snapshot: false,
-            tags: std::collections::HashMap::new(),
+            workspace_name: None,
+            attributes: Default::default(),
         };
         let data = jj_lib::op_store::Operation {
             view_id: settled.view_id().clone(),
@@ -805,8 +812,11 @@ impl Repository {
                 let mut reader = pollster::block_on(backend.read_file(RepoPath::root(), &file_id))
                     .map_err(|e| backend_read_error(e, "file", id))?;
                 let mut buf = Vec::new();
-                pollster::block_on(tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut buf))
-                    .map_err(|e| anyhow!("read file bytes: {e}"))?;
+                pollster::block_on(futures::io::AsyncReadExt::read_to_end(
+                    &mut reader,
+                    &mut buf,
+                ))
+                .map_err(|e| anyhow!("read file bytes: {e}"))?;
                 Ok(buf)
             }
             "tree" => {
@@ -1350,7 +1360,10 @@ fn order_op_heads(
     let heads = jj_lib::dag_walk::heads_ok(
         operations.into_iter().map(Ok),
         |op: &jj_lib::operation::Operation| op.id().clone(),
-        |op: &jj_lib::operation::Operation| op.parents().collect::<Vec<_>>(),
+        |op: &jj_lib::operation::Operation| match pollster::block_on(op.parents()) {
+            Ok(parents) => parents.into_iter().map(Ok).collect(),
+            Err(err) => vec![Err(err)],
+        },
     )
     .map_err(|e: jj_lib::op_store::OpStoreError| anyhow!("walk operation parents: {e}"))?;
 
@@ -1433,7 +1446,8 @@ mod tests {
                 hostname: String::new(),
                 username: String::new(),
                 is_snapshot: false,
-                tags: Default::default(),
+                workspace_name: None,
+                attributes: Default::default(),
             },
             commit_predecessors: None,
         }

@@ -35,7 +35,9 @@ fn independent_rewrite_predecessors_can_change_server_commit_identity(
         .enumerate()
     {
         let local_dir = tempfile::tempdir()?;
-        let (_workspace, repo) = Workspace::init_colocated_git(&settings, local_dir.path())?;
+        let (_workspace, repo) =
+            Workspace::init_colocated_git(&settings, local_dir.path(), gix_hash::Kind::Sha1)
+                .block_on()?;
         let store = repo.store();
         let root = store.get_commit(store.root_commit_id())?;
         let mut tx = repo.start_transaction();
@@ -44,7 +46,7 @@ fn independent_rewrite_predecessors_can_change_server_commit_identity(
         for text in [previous_text, b"identical edited file\n".as_slice()] {
             let path = RepoPathBuf::from_internal_string("edited.txt")?;
             let file_id = store
-                .write_file(&path, &mut std::io::Cursor::new(text))
+                .write_file(&path, &mut futures::io::Cursor::new(text))
                 .block_on()?;
             assert_eq!(server.put_object_sync("file", text)?.0, file_id.to_bytes());
             client.put_object(jj_tandem_protocol::wire::KIND_FILE, text)?;
@@ -62,7 +64,7 @@ fn independent_rewrite_predecessors_can_change_server_commit_identity(
                     copy_id: CopyId::placeholder(),
                 }),
             );
-            let tree = tree.write_tree()?;
+            let tree = tree.write_tree().block_on()?;
             let tree_id = tree.tree_ids().as_resolved().unwrap();
             let contents = store
                 .backend()
@@ -91,7 +93,8 @@ fn independent_rewrite_predecessors_can_change_server_commit_identity(
                 .set_description("same shared change")
                 .set_author(signature.clone())
                 .set_committer(signature.clone())
-                .write()?;
+                .write()
+                .block_on()?;
             let data =
                 jj_lib::simple_backend::commit_to_proto(commit.store_commit()).encode_to_vec();
             objects.push(jj_tandem_protocol::wire::PreparedObject {
@@ -153,13 +156,15 @@ fn independent_rewrite_predecessors_can_change_server_commit_identity(
         }
         if writer == 1 {
             tx.repo_mut()
-                .edit(WorkspaceNameBuf::from("writer"), commits.last().unwrap())?;
-            tx.repo_mut().rebase_descendants()?;
-            let unpublished = tx.write("prepare colliding rewrite")?;
+                .edit(WorkspaceNameBuf::from("writer"), commits.last().unwrap())
+                .block_on()?;
+            tx.repo_mut().rebase_descendants().block_on()?;
+            let unpublished = tx.write("prepare colliding rewrite").block_on()?;
             let operation = unpublished.operation();
             let request = jj_tandem_protocol::wire::PreparedPublish {
                 objects,
-                view: proto_convert::view_to_proto(operation.view()?.store_view()).encode_to_vec(),
+                view: proto_convert::view_to_proto(operation.view().block_on()?.store_view())
+                    .encode_to_vec(),
                 operation: proto_convert::operation_to_proto(operation.store_operation())
                     .encode_to_vec(),
                 heads: jj_tandem_protocol::wire::UpdateHeadsBody {
@@ -201,14 +206,16 @@ fn locally_prepared_file_tree_commit_view_and_operation_match_server(
     let settings = jj_tandem_test_support::test_settings()?;
     let local_dir = tempfile::tempdir()?;
     let server_dir = tempfile::tempdir()?;
-    let (_workspace, repo) = Workspace::init_colocated_git(&settings, local_dir.path())?;
+    let (_workspace, repo) =
+        Workspace::init_colocated_git(&settings, local_dir.path(), gix_hash::Kind::Sha1)
+            .block_on()?;
     let server = Repository::new(&settings, server_dir.path().to_owned(), None)?;
     let store = repo.store();
     let parent = store.get_commit(store.root_commit_id())?;
     let path = RepoPathBuf::from_internal_string("edited.txt")?;
     let bytes = b"one edited file\nexact bytes\0\xff";
     let file_id = store
-        .write_file(&path, &mut std::io::Cursor::new(bytes))
+        .write_file(&path, &mut futures::io::Cursor::new(bytes))
         .block_on()?;
     let (remote_file, returned) = server.put_object_sync("file", bytes)?;
     assert_eq!(remote_file, file_id.to_bytes());
@@ -222,7 +229,7 @@ fn locally_prepared_file_tree_commit_view_and_operation_match_server(
             copy_id: CopyId::placeholder(),
         }),
     );
-    let tree = tree.write_tree()?;
+    let tree = tree.write_tree().block_on()?;
     let tree_ids = tree.tree_ids();
     let tree_id = tree_ids.as_resolved().unwrap();
     let contents = store
@@ -238,18 +245,21 @@ fn locally_prepared_file_tree_commit_view_and_operation_match_server(
         .repo_mut()
         .new_commit(vec![parent.id().clone()], tree)
         .set_description("locally prepared edited file")
-        .write()?;
+        .write()
+        .block_on()?;
     let commit_bytes =
         jj_lib::simple_backend::commit_to_proto(commit.store_commit()).encode_to_vec();
     let (remote_commit, returned) = server.put_object_sync("commit", &commit_bytes)?;
     assert_eq!(remote_commit, commit.id().to_bytes());
     assert_eq!(returned, commit_bytes);
     tx.repo_mut()
-        .edit(WorkspaceNameBuf::from("default"), &commit)?;
-    tx.repo_mut().rebase_descendants()?;
-    let unpublished = tx.write("prepare one edited file locally")?;
+        .edit(WorkspaceNameBuf::from("default"), &commit)
+        .block_on()?;
+    tx.repo_mut().rebase_descendants().block_on()?;
+    let unpublished = tx.write("prepare one edited file locally").block_on()?;
     let operation = unpublished.operation();
-    let view_bytes = proto_convert::view_to_proto(operation.view()?.store_view()).encode_to_vec();
+    let view_bytes =
+        proto_convert::view_to_proto(operation.view().block_on()?.store_view()).encode_to_vec();
     let operation_bytes =
         proto_convert::operation_to_proto(operation.store_operation()).encode_to_vec();
     let (view_id, operation_id) =
