@@ -1,20 +1,16 @@
-# Repository knowledge
+# Tandem documentation
 
-Current documents have one owner per topic:
+Start with [the README](../README.md) to install Tandem and connect a workspace.
 
-- [Product and usage](../README.md)
-- [Architecture and boundaries](../ARCHITECTURE.md)
-- [WAL and reliability](reliability.md)
-- [Testing strategy](testing.md)
-- [Self-hosting with your own S3 storage](self-hosting.md)
-- [Deployment and recovery](operations.md)
-- [Decision and evidence ledger](decision-ledger.md)
-- [Benchmarks](benchmarks/README.md)
-- [Sandbox image building](images/README.md)
-- [Generated implementation inventory](generated/implementation.md)
-- [Release procedure](../.agents/skills/release/SKILL.md)
-- [Distributed smoke procedure](../.agents/skills/distributed-smoke/SKILL.md)
+- [Self-hosting](self-hosting.md): run a native host with your own S3 storage,
+  configure HTTPS, and give agents access.
+- [Architecture](../ARCHITECTURE.md): components, state ownership, and how
+  work moves between local workspaces and durable storage.
+- [Reliability](reliability.md): publish ordering, concurrent writers, and
+  recovery guarantees.
+- [Operations](operations.md): monitor, back up, upgrade, and replace a host.
+- [Agent images](images/README.md): build a container with a prepared workspace.
+- [Testing](testing.md): run correctness tests and measure performance.
 
-The decision ledger is historical evidence, not a source for current behavior.
-Current CLI details come from `tandem --help`; implementation surfaces come
-from code and the generated inventory.
+Use `tandem --help` for current commands and options. Contributors should also
+read [AGENTS.md](../AGENTS.md).

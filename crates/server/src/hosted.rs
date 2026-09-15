@@ -637,7 +637,10 @@ async fn download(
     State(server): State<Arc<HostedServer>>,
     Path(artifact): Path<String>,
 ) -> Response {
-    if artifact != "td-x86_64-unknown-linux-gnu" {
+    if !matches!(
+        artifact.as_str(),
+        "td-x86_64-unknown-linux-gnu" | "td-aarch64-apple-darwin"
+    ) {
         return StatusCode::NOT_FOUND.into_response();
     }
     match tokio::fs::read(server.distribution_dir.join(&artifact)).await {
@@ -1068,6 +1071,27 @@ mod tests {
         assert_eq!(
             to_bytes(download.into_body(), usize::MAX).await.unwrap(),
             artifact
+        );
+
+        let mac_artifact: &[u8] = b"native-apple-silicon-binary\0\xff";
+        std::fs::write(
+            server.distribution_dir.join("td-aarch64-apple-darwin"),
+            mac_artifact,
+        )
+        .unwrap();
+        let download = router(server.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/dl/td-aarch64-apple-darwin")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(download.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(download.into_body(), usize::MAX).await.unwrap(),
+            mac_artifact
         );
 
         let install = router(server.clone())

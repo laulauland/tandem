@@ -57,14 +57,12 @@ scope at HTTP/CLI boundaries, clone and daemon lifecycle, cache and baked-image
 behavior, process contention, control sockets, Git shipping, API cache/CAS
 semantics, unclean process death, and filesystem/S3 replay.
 
-The exact modules and test names are implementation detail. Regenerate
-[the implementation inventory](generated/implementation.md) when navigation is
-needed.
+Use `cargo test --workspace -- --list` to find current test names.
 
 ## Commands
 
 ```bash
-# Documentation and inventory drift
+# Documentation and workspace boundaries
 python3 scripts/check_docs.py
 python3 scripts/check_workspace.py
 python3 -m unittest discover -s scripts -p 'test_*.py'
@@ -84,5 +82,43 @@ cargo test --workspace
 ```
 
 Set `TANDEM_TEST_S3_BUCKET` to an existing test bucket to run the S3-backed
-integration tier. Never point tests at a production prefix. Benchmark methods
-and recording controls are owned by [benchmarks/README.md](benchmarks/README.md).
+integration tier. Never point tests at a production prefix.
+
+
+## Measure performance
+
+Run measurements against a disposable repository and storage prefix. Retain
+raw reports outside the documentation tree. Record source revisions, binary
+hashes, host placement, provider, file sizes, writer counts, and cache state
+with each comparison. Use separate client benchmark and server binaries for
+each revision: changing the server alone does not change the client code
+embedded in a benchmark.
+
+```bash
+# Filesystem storage, with no external service.
+cargo bench -p jj-tandem-benchmarks --bench snapshot_publish_latency
+
+# A separately provisioned S3 test prefix; credentials stay in the environment.
+TANDEM_TEST_S3_BUCKET='s3://your-test-bucket/snapshot-bench' \
+  cargo bench -p jj-tandem-benchmarks --bench snapshot_publish_latency
+
+# An existing disposable host. Set TANDEM_BENCH_TOKEN in a protected environment.
+TANDEM_BENCH_SERVER=https://your-benchmark-host.example \
+  cargo bench -p jj-tandem-benchmarks --bench snapshot_publish_latency
+
+# Check which packages rebuild after client and server source changes.
+python3 scripts/check_build_cache.py
+```
+
+The snapshot timer covers the daemon's scan through durable acknowledgement.
+It excludes clone setup, debounce, writer acquisition, and later staleness
+refresh. Do not present it as end-to-end edit latency without measuring those
+other phases. Fixed request delay models added latency; it does not measure
+network transit or object-store processing.
+
+The default reports stay beneath the Cargo target directory. Set
+`TANDEM_BENCH_OUTPUT_DIR` to an absolute evidence directory to retain a run.
+`TANDEM_BENCH_BIN` selects an existing matching CLI binary; a copied standalone
+benchmark needs both paths. Never capture bearer values in reports or command
+arguments. Require exact-byte reads after restart when a benchmark also claims
+recovery correctness.

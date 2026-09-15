@@ -11,14 +11,11 @@ Tandem is jj workspaces over the network. Read only as far as the task needs:
   and integration test placement.
 - [docs/operations.md](docs/operations.md) — deployment, monitoring, backup,
   restore, and incident recovery.
-- [docs/decision-ledger.md](docs/decision-ledger.md) — historical decisions,
-  evidence, rejected directions, and unresolved work.
-- [docs/benchmarks/README.md](docs/benchmarks/README.md) and
-  [docs/images/README.md](docs/images/README.md) — specialized procedures.
+- [docs/self-hosting.md](docs/self-hosting.md) — host setup and workspace access.
+- [docs/images/README.md](docs/images/README.md) — prepared agent containers.
 
 Use code and generated help for implementation-derived detail. Run
-`tandem --help`, inspect the relevant module, or regenerate
-[the implementation inventory](docs/generated/implementation.md); do not copy
+`tandem --help` or inspect the relevant module; do not copy
 CLI flags, routes, traits, source trees, or test lists into prose.
 
 ## Non-negotiable engineering rules
@@ -57,8 +54,7 @@ CLI flags, routes, traits, source trees, or test lists into prose.
 - Keep each durable fact under one documentation owner. Historical documents
   do not become current references.
 - Run `python3 scripts/check_docs.py` after documentation changes. It checks
-  local links, repo-path references, retired terminology in active docs, and
-  the generated implementation inventory.
+  local links, repo-path references, and retired terminology in active docs.
 - Run focused package tests while iterating and `cargo test --workspace` before handoff. For storage
   or concurrency changes, include the relevant property and DST targets.
 

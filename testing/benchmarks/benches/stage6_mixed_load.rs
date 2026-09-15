@@ -1,5 +1,5 @@
 //! One native hosted process, ten named repositories, and an explicit load mix.
-//! See docs/benchmarks/stage6-workload.md for the frozen measurement contract.
+//! See docs/testing.md for benchmark usage.
 mod bench_support;
 
 use std::fs;
@@ -463,7 +463,7 @@ fn main() -> Result<()> {
         measure_active(&mut host, &tokens, root.path(), &home)?
     };
     let report = json!({"generated_at_epoch_secs":bench_support::now_epoch_secs(),"host":host.origin,"namespace":host.namespace,"idle":idle,"active":active,"limitations":["Filesystem event generation is open-loop; snapshot scheduling uses the declared one-second benchmark policy.","Stage 5 bucket trace coverage is scoped, not total traffic."]});
-    let artifact = write_json_artifact("docs/benchmarks/stage6-mixed-load.json", &report)?;
+    let artifact = write_json_artifact("stage6-mixed-load.json", &report)?;
     println!("wrote {}", artifact.display());
     if idle
         .iter()
@@ -814,7 +814,7 @@ fn measure_active(
                     .as_f64()
                     .is_some_and(|v| v <= 2000.0));
         let checkpoint = json!({"profile":profile,"namespace":host.namespace,"state":"drained_before_restart","writers":writers.iter().map(|w|json!({"writer":w.writer,"large":w.large,"attempts":w.attempts,"edits":w.edits,"final_generation":w.final_generation})).collect::<Vec<_>>()});
-        write_json_artifact("docs/benchmarks/stage6-active.partial", &checkpoint)?;
+        write_json_artifact("stage6-active.partial", &checkpoint)?;
         host.restart(home)?;
         let mut results = Vec::new();
         let oracles: Vec<_> = writers

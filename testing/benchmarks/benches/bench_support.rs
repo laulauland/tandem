@@ -125,33 +125,12 @@ pub fn now_epoch_secs() -> u64 {
         .as_secs()
 }
 
-/// Set to record a bench's number into the committed artifact rather than
-/// under `target/`. See [`write_json_artifact`].
-pub const BENCH_RECORD_ENV: &str = "TANDEM_BENCH_RECORD";
-
-/// Write a bench report, by default where a working copy does not notice.
-///
-/// `relative_path` names the committed artifact — `docs/benchmarks/…` — and
-/// that is where the report goes when [`BENCH_RECORD_ENV`] is set. Every other
-/// run puts the same file under `target/benchmarks/` instead.
-///
-/// The default is the way round it is because of what a bench is for. A person
-/// runs one to see whether a change they are making is slower, and runs it
-/// repeatedly while making it. Under jj there is no staging area: a modified
-/// file is already part of the revision, so a bench that rewrote a committed
-/// artifact would put a number nobody looked at into the change under review,
-/// every time, and `jj diff` would carry it. Recording a number is a separate,
-/// deliberate act, and it should read as one.
+/// Write a benchmark report under `target/benchmarks/`, or the absolute
+/// directory selected with `TANDEM_BENCH_OUTPUT_DIR`. Reports are runtime
+/// artifacts and never update the checked-in documentation.
 pub fn write_json_artifact<T: Serialize>(relative_path: &str, value: &T) -> Result<PathBuf> {
-    let recording = std::env::var(BENCH_RECORD_ENV)
-        .is_ok_and(|value| !matches!(value.trim(), "" | "0" | "false"));
     let output_dir = std::env::var_os("TANDEM_BENCH_OUTPUT_DIR").map(PathBuf::from);
-    let path = artifact_path(
-        relative_path,
-        recording,
-        output_dir.as_deref(),
-        workspace_root,
-    )?;
+    let path = artifact_path(relative_path, output_dir.as_deref(), workspace_root)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("create artifact dir {}", parent.display()))?;
@@ -163,7 +142,6 @@ pub fn write_json_artifact<T: Serialize>(relative_path: &str, value: &T) -> Resu
 
 fn artifact_path(
     relative_path: &str,
-    recording: bool,
     output_dir: Option<&Path>,
     checkout: impl FnOnce() -> PathBuf,
 ) -> Result<PathBuf> {
@@ -177,11 +155,7 @@ fn artifact_path(
         return Ok(dir.join(name));
     }
     let root = checkout();
-    Ok(if recording {
-        root.join(relative_path)
-    } else {
-        root.join("target").join("benchmarks").join(name)
-    })
+    Ok(root.join("target").join("benchmarks").join(name))
 }
 
 pub struct BenchHarness {
@@ -659,14 +633,11 @@ mod tests {
             resolve_binary_override(&binary, || panic!("checkout unavailable")),
             binary
         );
-        for recording in [false, true] {
+        {
             assert_eq!(
-                artifact_path(
-                    "docs/benchmarks/sample.json",
-                    recording,
-                    Some(temp.path()),
-                    || panic!("checkout unavailable")
-                )
+                artifact_path("sample.json", Some(temp.path()), || panic!(
+                    "checkout unavailable"
+                ))
                 .unwrap(),
                 temp.path().join("sample.json")
             );
@@ -681,23 +652,16 @@ mod tests {
             root.join("target/release/tandem")
         );
         assert_eq!(
-            artifact_path("docs/benchmarks/sample.json", false, None, || root.clone()).unwrap(),
+            artifact_path("sample.json", None, || root.clone()).unwrap(),
             root.join("target/benchmarks/sample.json")
-        );
-        assert_eq!(
-            artifact_path("docs/benchmarks/sample.json", true, None, || root.clone()).unwrap(),
-            root.join("docs/benchmarks/sample.json")
         );
     }
 
     #[test]
     fn a_relative_output_override_is_rejected_without_a_checkout_lookup() {
-        let error = artifact_path(
-            "docs/benchmarks/sample.json",
-            false,
-            Some(Path::new("relative")),
-            || panic!("checkout unavailable"),
-        )
+        let error = artifact_path("sample.json", Some(Path::new("relative")), || {
+            panic!("checkout unavailable")
+        })
         .unwrap_err();
         assert!(error.to_string().contains("absolute"));
     }

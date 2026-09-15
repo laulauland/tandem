@@ -37,10 +37,8 @@
 //! constant has none of the three. It is what to reach for when no far-away
 //! server is available, and it is never a substitute for the run above.
 //!
-//! Either way the report lands under `target/benchmarks/`. Add
-//! `TANDEM_BENCH_RECORD=1` to write it to `docs/benchmarks/` instead — that is
-//! how a number gets committed, and it is meant to be a decision rather than a
-//! side effect of having run the bench.
+//! Reports land under `target/benchmarks/`. Set `TANDEM_BENCH_OUTPUT_DIR`
+//! to an absolute directory to retain a measurement outside the checkout.
 
 mod bench_support;
 
@@ -284,7 +282,7 @@ fn main() -> Result<()> {
     // Under `target/` unless `TANDEM_BENCH_RECORD` says otherwise, so that
     // running the bench is not itself a change to the revision.
     let artifact = write_json_artifact(
-        &format!("docs/benchmarks/snapshot_publish_latency_{label}_latest.json"),
+        &format!("snapshot_publish_latency_{label}_latest.json"),
         &report,
     )?;
     println!("wrote {}", artifact.display());

@@ -16,7 +16,11 @@ fn named_repository_recovers_exact_bytes_and_accepts_another_publish() {
     std::fs::create_dir_all(&distribution).unwrap();
     std::fs::copy(
         common::tandem_bin(),
-        distribution.join("td-x86_64-unknown-linux-gnu"),
+        distribution.join(if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            "td-aarch64-apple-darwin"
+        } else {
+            "td-x86_64-unknown-linux-gnu"
+        }),
     )
     .unwrap();
     let address = free_addr();
@@ -637,7 +641,7 @@ fn install_from_host(
     isolate_env(&mut command, home);
     command.env("TANDEM_INSTALL_BASE", format!("http://{address}"));
     command.env("TANDEM_INSTALL_BIN_DIR", &bin);
-    command.env("TANDEM_INSTALL_TARGET", "x86_64-unknown-linux-gnu");
+    command.env_remove("TANDEM_INSTALL_TARGET");
     let output = command.output().unwrap();
     assert_ok(&output, "native installer");
     bin.join("td")

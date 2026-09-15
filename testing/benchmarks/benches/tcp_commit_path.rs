@@ -86,7 +86,7 @@ fn main() -> Result<()> {
         results,
     };
 
-    let artifact = write_json_artifact("docs/benchmarks/tcp_commit_path_latest.json", &report)?;
+    let artifact = write_json_artifact("tcp_commit_path_latest.json", &report)?;
     println!("wrote {}", artifact.display());
     Ok(())
 }

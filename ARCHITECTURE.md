@@ -141,9 +141,7 @@ boundary.
 
 The server embeds jj-lib over a normal colocated jj/Git repository. It exposes
 an authenticated HTTP API for immutable objects, operations, views, mutable
-heads, token minting, writer leases, and server-sent event wake-ups. See the
-[generated implementation inventory](docs/generated/implementation.md) for the
-current surface and source owners.
+heads, token minting, writer leases, and server-sent event wake-ups. The route definitions and generated CLI help describe the current API surface.
 
 The `jj-tandem-server` HTTP host parses and authenticates requests, manages
 writer leases and event streams, and owns control sockets and lifecycle. The headless
@@ -206,17 +204,14 @@ colocated, so upstream operations use jj's normal Git support. Git credentials
 and shipping decisions stay on the server. Agents do not run Git operations or
 push directly.
 
-## Deliberately parked
+## Current limits
 
-- Automatic server-side integration was removed: merging every file burst
-  operates on mid-edit states and adds a separate mutation path. Explicit
-  integration uses ordinary jj commands. A future conflict query should be
-  on-demand and read-only over explicitly ready work.
-- A cache-management command. Clone and workspace catch-up warm the cache;
-  image baking preserves it without another product surface.
-- Built-in TLS. The deployment proxy owns transport encryption.
-- WAL compaction and garbage collection. Reachability, retention, and safe
-  deletion need an explicit design before immutable history can be removed.
+One active host serves each catalog. Automatic failover and active-active
+hosting are not implemented. A reverse proxy supplies TLS. There is no WAL
+compaction or garbage collection; do not expire bucket objects.
+
+Integration and conflict resolution use ordinary jj commands. The server does
+not automatically merge each burst of edits.
 
 ## Derived implementation detail
 
@@ -241,9 +236,6 @@ Keep format and interoperability APIs narrow: changes there rebuild both
 branches. Client/server behavior changes should invalidate only their own
 branch and its consumers. “Low churn” describes build boundaries, not a stable
 public API promise. `python3 scripts/check_workspace.py` checks production
-dependency direction and lockstep package versions. The generated inventory
-lists actual packages and edges; do not maintain a second tree here.
-
-Do not add hand-maintained command, route, module, trait, or test inventories to
-prose. `python3 scripts/check_docs.py --update-inventory` regenerates the narrow
-inventory used for navigation; the default check fails if it has drifted.
+dependency direction and lockstep package versions. Use `cargo metadata --no-deps` to inspect current packages and dependencies.
+Use source and generated CLI help for commands, routes, modules, and tests;
+do not maintain duplicate inventories in prose.

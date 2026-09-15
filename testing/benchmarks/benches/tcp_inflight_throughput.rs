@@ -85,10 +85,7 @@ fn main() -> Result<()> {
         results,
     };
 
-    let artifact = write_json_artifact(
-        "docs/benchmarks/tcp_inflight_throughput_latest.json",
-        &report,
-    )?;
+    let artifact = write_json_artifact("tcp_inflight_throughput_latest.json", &report)?;
     println!("wrote {}", artifact.display());
     Ok(())
 }

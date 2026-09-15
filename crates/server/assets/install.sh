@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install the native GNU/Linux td binary and keep one owner credential per host.
+# Install the native td binary and keep one owner credential per host.
 set -eu
 
 base_url="${TANDEM_INSTALL_BASE:-@@TANDEM_PUBLIC_URL@@}"
@@ -18,6 +18,7 @@ host="${host%%/*}"
 if [ -z "$target" ]; then
   case "$(uname -s):$(uname -m)" in
     Linux:x86_64) target="x86_64-unknown-linux-gnu" ;;
+    Darwin:arm64) target="aarch64-apple-darwin" ;;
     *) die "no native release binary for $(uname -s) $(uname -m)" ;;
   esac
 fi

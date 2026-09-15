@@ -11,8 +11,8 @@ GitHub release, changelog generation, and the Homebrew tap update.
 
 ## Establish the release
 
-1. Read `.github/workflows/release.yml`, `Cargo.toml`, and the latest relevant
-   entries in `docs/decision-ledger.md`. Inspect `jj status`, `jj log`,
+1. Read `.github/workflows/release.yml`, `Cargo.toml`, and
+   `docs/operations.md`. Inspect `jj status`, `jj log`,
    bookmarks, tags, and conflicts.
 2. Require an explicit semantic version and clarify whether crates.io
    publication is included. Do not infer either from the latest tag.

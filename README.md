@@ -113,7 +113,7 @@ python3 scripts/check_docs.py
 cargo test --workspace
 ```
 
-Read [AGENTS.md](AGENTS.md) before changing the repository. Benchmark methods
-and retained measurements are in [docs/benchmarks/README.md](docs/benchmarks/README.md).
+Read [AGENTS.md](AGENTS.md) before changing the repository. Test and benchmark
+procedures are in [docs/testing.md](docs/testing.md).
 
 License: MIT.
