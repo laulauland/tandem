@@ -26,6 +26,7 @@ jj-lib.workspace = true
 jj-tandem-client.workspace = true
 pollster.workspace = true
 tokio.workspace = true
+tracing-subscriber.workspace = true
 anyhow.workspace = true
 jj-tandem-server.workspace = true
 jj-tandem-workspace.workspace = true

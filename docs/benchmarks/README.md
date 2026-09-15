@@ -6,6 +6,16 @@ write under `target/benchmarks/` by default, and only put a number here when
 `TANDEM_BENCH_RECORD=1` says so. Committing a measurement is meant to be a
 decision rather than a side effect of having run one.
 
+## Snapshot latency attribution (2026-09-15)
+
+The [measured profile](snapshot-latency-profile.md) compares one warm writer
+with the existing real-R2 mixed workload on an instrumented native exe.dev
+host. It separates nested phases from an additive wall-time budget, records
+request and payload counts, waits, retries and cross-repository overlap, and
+states what remains unlocalized. The [data artifact](snapshot-latency-profile.json)
+retains percentile tables and hashes of the raw evidence. This is an
+investigation without behavior changes or optimization proposals.
+
 ## Workspace build-cache isolation
 
 Run `python3 scripts/check_build_cache.py` from the checkout. It warms the named

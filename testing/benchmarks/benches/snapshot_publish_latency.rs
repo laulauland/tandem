@@ -189,6 +189,13 @@ fn server_under_test(root: &Path, home: &Path) -> Result<(String, String, Server
 }
 
 fn main() -> Result<()> {
+    // Observation only: no requests, file edits, or workload scheduling change.
+    tracing_subscriber::fmt()
+        .json()
+        .with_writer(std::io::stderr)
+        .with_env_filter("jj_tandem_workspace=debug,jj_tandem_client=debug")
+        .try_init()
+        .map_err(|error| anyhow::anyhow!("profile subscriber: {error}"))?;
     let root = TempDir::new().context("create the bench's temp directory")?;
     let home = isolated_home(root.path())?;
 
@@ -343,6 +350,8 @@ fn unique_prefix(base: &str) -> String {
     }
 }
 
+// This local mode collects client/workspace timings only. Full host attribution
+// uses an external host with debug/trace JSON logging captured independently.
 fn spawn_server(
     repo: &Path,
     addr: &str,

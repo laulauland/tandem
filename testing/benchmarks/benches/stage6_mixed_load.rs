@@ -433,6 +433,13 @@ fn measure_idle(
     Ok(report)
 }
 fn main() -> Result<()> {
+    // Observation only: no requests, file edits, or workload scheduling change.
+    tracing_subscriber::fmt()
+        .json()
+        .with_writer(std::io::stderr)
+        .with_env_filter("jj_tandem_workspace=debug,jj_tandem_client=debug")
+        .try_init()
+        .map_err(|error| anyhow::anyhow!("profile subscriber: {error}"))?;
     let root = TempDir::new()?;
     let home = isolated_home(root.path())?;
     let mut host = Host::start(root.path(), &home)?;

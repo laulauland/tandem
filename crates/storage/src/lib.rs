@@ -96,9 +96,18 @@ struct MeasuredObjectStore {
 }
 
 impl MeasuredObjectStore {
-    fn emit(&self, operation: &'static str, read_bytes: usize, write_bytes: usize) {
+    fn emit(
+        &self,
+        operation: &'static str,
+        read_bytes: usize,
+        write_bytes: usize,
+        key: &str,
+        started: std::time::Instant,
+    ) {
         tracing::debug!(
             bucket_operation = operation,
+            bucket_key_class = key.split('/').next().unwrap_or(""),
+            bucket_elapsed_us = started.elapsed().as_micros() as u64,
             bucket_calls = 1_u64,
             bucket_read_bytes = read_bytes as u64,
             bucket_write_bytes = write_bytes as u64,
@@ -117,16 +126,19 @@ impl ObjectStore for MeasuredObjectStore {
         self.inner.describe()
     }
     fn put_immutable(&self, key: &str, data: &[u8]) -> Result<bool> {
+        let started = std::time::Instant::now();
         let result = self.inner.put_immutable(key, data);
-        self.emit("put_immutable", 0, data.len());
+        self.emit("put_immutable", 0, data.len(), key, started);
         result
     }
     fn exists(&self, key: &str) -> Result<bool> {
+        let started = std::time::Instant::now();
         let result = self.inner.exists(key);
-        self.emit("exists", 0, 0);
+        self.emit("exists", 0, 0, key, started);
         result
     }
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        let started = std::time::Instant::now();
         let result = self.inner.get(key);
         self.emit(
             "get",
@@ -136,10 +148,13 @@ impl ObjectStore for MeasuredObjectStore {
                 .and_then(|v| v.as_ref())
                 .map_or(0, Vec::len),
             0,
+            key,
+            started,
         );
         result
     }
     fn get_with_etag(&self, key: &str) -> Result<Option<(Vec<u8>, String)>> {
+        let started = std::time::Instant::now();
         let result = self.inner.get_with_etag(key);
         self.emit(
             "get_with_etag",
@@ -149,12 +164,15 @@ impl ObjectStore for MeasuredObjectStore {
                 .and_then(|v| v.as_ref())
                 .map_or(0, |(v, _)| v.len()),
             0,
+            key,
+            started,
         );
         result
     }
     fn put_overwrite(&self, key: &str, data: &[u8]) -> Result<String> {
+        let started = std::time::Instant::now();
         let result = self.inner.put_overwrite(key, data);
-        self.emit("put_overwrite", 0, data.len());
+        self.emit("put_overwrite", 0, data.len(), key, started);
         result
     }
     fn compare_and_put(
@@ -163,8 +181,9 @@ impl ObjectStore for MeasuredObjectStore {
         data: &[u8],
         expected: Option<&str>,
     ) -> std::result::Result<String, CasError> {
+        let started = std::time::Instant::now();
         let result = self.inner.compare_and_put(key, data, expected);
-        self.emit("compare_and_put", 0, data.len());
+        self.emit("compare_and_put", 0, data.len(), key, started);
         result
     }
 }

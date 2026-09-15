@@ -472,6 +472,21 @@ impl Daemon {
         // This timer is the caller-visible snapshot-to-ack interval. Writer
         // validation is part of that hot path and must remain inside it.
         let started = Instant::now();
+        let _profile_span =
+            tracing::debug_span!("snapshot profile", workspace = %self.workspace_id).entered();
+        let mut profile_checkpoint = started;
+        macro_rules! profile_phase {
+            ($phase:literal) => {{
+                let now = Instant::now();
+                tracing::debug!(
+                    profile_phase = $phase,
+                    duration_us = now.duration_since(profile_checkpoint).as_micros() as u64,
+                    snapshot_offset_us = now.duration_since(started).as_micros() as u64,
+                    "snapshot phase"
+                );
+                profile_checkpoint = now;
+            }};
+        }
         // `snapshot_once()` is public for the benchmark and other bounded
         // drivers, so it cannot rely on `run()` having serviced the ticker.
         // Revalidate even when the cached status says this daemon was writer.
@@ -490,6 +505,7 @@ impl Daemon {
             self.writer_ttl,
         );
 
+        profile_phase!("writer_check");
         // Everything published since the last snapshot, merged into the view
         // this one builds on. This is where a concurrent publish from another
         // workspace is absorbed — jj merges divergent op heads on load.
@@ -569,6 +585,7 @@ impl Daemon {
             }
         }
 
+        profile_phase!("repo_prepare");
         let options = SnapshotOptions {
             base_ignores: GitIgnoreFile::empty(),
             progress: None,
@@ -588,6 +605,7 @@ impl Daemon {
             .block_on()
             .context("cannot snapshot the working copy")?;
 
+        profile_phase!("scan_and_tree");
         // The whole of "an idle workspace publishes nothing": no transaction,
         // no operation, no request.
         if new_tree.tree_ids_and_labels() == wc_commit.tree().tree_ids_and_labels() {
@@ -641,6 +659,7 @@ impl Daemon {
             });
         }
 
+        profile_phase!("commit_prepare");
         // The op-heads store does the CAS against the server here, retrying a
         // lost race itself. What comes back has been acknowledged, which for
         // this server means it is in the bucket.
@@ -648,10 +667,13 @@ impl Daemon {
             .commit(SNAPSHOT_OPERATION_DESCRIPTION)
             .context("cannot publish the snapshot operation")?;
 
+        profile_phase!("transaction_publish");
         locked_ws
             .finish(updated_repo.op_id().clone())
             .context("cannot release the working copy")?;
 
+        profile_phase!("working_copy_finish");
+        let _ = profile_checkpoint;
         let elapsed = started.elapsed();
         let operation_id = updated_repo.op_id().hex();
         let commit_id = commit.id().hex();

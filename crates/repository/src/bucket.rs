@@ -519,10 +519,16 @@ impl Repository {
     /// already held an entry for this operation — immutable, so the records
     /// just built are not in it.
     fn put_wal_entry(&self, op_hex: &str, entry: &wal::WalEntry) -> Result<bool> {
+        let profile_started = std::time::Instant::now();
         let encoded_len = checked_wal_size(entry)
             .with_context(|| format!("size WAL entry for operation {op_hex}"))?;
         let encoded = entry.encode()?;
         debug_assert_eq!(encoded.len(), encoded_len);
+        tracing::debug!(
+            profile_phase = "wal_encode",
+            duration_us = profile_started.elapsed().as_micros() as u64,
+            "WAL encoding"
+        );
         let key = wal::wal_key(op_hex);
         if self.faults.take_wal_write_failure() {
             bail!("injected bucket failure while writing WAL entry {key}");

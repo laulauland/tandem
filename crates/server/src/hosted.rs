@@ -812,6 +812,7 @@ async fn dispatch_repository(
     State(hosted): State<Arc<HostedServer>>,
     mut request: Request,
 ) -> Response {
+    let profile_host_started = std::time::Instant::now();
     let path = request.uri().path().trim_start_matches('/').to_string();
     let mut parts = path.splitn(3, '/');
     let (Some(namespace), Some(repository), Some(rest)) =
@@ -890,13 +891,28 @@ async fn dispatch_repository(
         "hosted request"
     );
     *request.uri_mut() = format!("/{rest}{query}").parse::<Uri>().unwrap();
-    crate::http::router(server)
+    let profile_dispatch_us = profile_host_started.elapsed().as_micros() as u64;
+    let profile_method = request.method().to_string();
+    let profile_request_bytes = request
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let response = crate::http::router(server)
         .oneshot(request.map(Body::new))
         .instrument(
             tracing::info_span!("hosted repository request", repository = %repository_identity),
         )
         .await
-        .unwrap_or_else(|never| match never {})
+        .unwrap_or_else(|never| match never {});
+    use axum::body::HttpBody as _;
+    tracing::debug!(repository = %repository_identity, request_path = %format!("/{rest}"),
+        http_method = %profile_method, request_bytes = profile_request_bytes,
+        response_bytes = response.body().size_hint().exact(), status = response.status().as_u16(),
+        profile_dispatch_us,
+        profile_host_request_us = profile_host_started.elapsed().as_micros() as u64, "host HTTP response ready");
+    response
 }
 
 fn bearer(request: &Request) -> Option<&str> {

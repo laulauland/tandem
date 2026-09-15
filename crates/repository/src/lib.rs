@@ -97,6 +97,7 @@ impl Drop for RepositoryLockGuard<'_> {
     fn drop(&mut self) {
         tracing::debug!(
             lock_hold_ms = self.acquired.elapsed().as_millis() as u64,
+            lock_hold_us = self.acquired.elapsed().as_micros() as u64,
             lock_operation = self.operation,
             "repository lock released"
         );
@@ -290,6 +291,7 @@ impl Repository {
         let guard = self.lock.lock().map_err(|e| anyhow!("lock: {e}"))?;
         tracing::debug!(
             lock_wait_ms = started.elapsed().as_millis() as u64,
+            lock_wait_us = started.elapsed().as_micros() as u64,
             lock_operation = operation,
             "repository lock acquired"
         );
@@ -1037,6 +1039,18 @@ impl Repository {
     ) -> Result<UpdateResult> {
         self.faults.refuse_if_halted()?;
         let _guard = self.acquire_lock("update_heads")?;
+        let mut profile_checkpoint = std::time::Instant::now();
+        macro_rules! profile_phase {
+            ($phase:literal) => {{
+                let now = std::time::Instant::now();
+                tracing::debug!(
+                    profile_phase = $phase,
+                    duration_us = now.duration_since(profile_checkpoint).as_micros() as u64,
+                    "host publish phase"
+                );
+                profile_checkpoint = now;
+            }};
+        }
         let metadata = self.read_heads_metadata()?;
 
         if metadata.version != expected_version {
@@ -1102,6 +1116,7 @@ impl Repository {
         //
         // 1. The WAL entry: this operation, its view, and every blob written
         //    since the last publish.
+        profile_phase!("validation");
         self.faults.crash(CrashWindow::BeforeWalWrite)?;
         let pending_publish = self
             .write_publish_wal_entry(&new_hex)
@@ -1110,6 +1125,7 @@ impl Repository {
         // 2. The index object, naming the head set this update produces. The
         //    set is computed before the local apply so the bucket commits
         //    first: a crash after this point is replayed at the next start.
+        profile_phase!("wal");
         self.faults.crash(CrashWindow::AfterWalWrite)?;
         let prospective_heads = self.prospective_op_heads(&old_op_ids, &new_op_id)?;
         if self.inject_index_conflict()
@@ -1122,6 +1138,7 @@ impl Repository {
             publish.mark_index_committed()?;
         }
 
+        profile_phase!("index_commit");
         self.faults.crash(CrashWindow::AfterIndexWrite)?;
 
         // ── Local apply ──
@@ -1137,6 +1154,7 @@ impl Repository {
         // A crash here is past the point of no return, which is exactly why it
         // is worth generating: the process cannot promise not to die, so the
         // next start has to make the same state converge anyway.
+        profile_phase!("local_apply");
         self.faults.crash(CrashWindow::AfterLocalApply)?;
 
         // ── Past the point of no return ──
@@ -1213,6 +1231,8 @@ impl Repository {
 
         self.notify_watchers(next_metadata.version);
 
+        profile_phase!("post_apply_ack_prepare");
+        let _ = profile_checkpoint;
         Ok(UpdateResult {
             ok: true,
             heads: heads_bytes,

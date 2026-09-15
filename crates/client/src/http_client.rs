@@ -329,6 +329,7 @@ impl TandemClient {
         &self,
         request: reqwest::blocking::RequestBuilder,
     ) -> Result<reqwest::blocking::Response> {
+        let profile_started = std::time::Instant::now();
         self.requests_sent.fetch_add(1, Ordering::Relaxed);
         if !self.injected_rtt.is_zero() {
             std::thread::sleep(self.injected_rtt);
@@ -337,6 +338,13 @@ impl TandemClient {
             .bearer_auth(&self.token)
             .send()
             .with_context(|| format!("request to tandem server {} failed", self.server_addr()))?;
+        tracing::debug!(
+            profile_http_headers_us = profile_started.elapsed().as_micros() as u64,
+            request_path = response.url().path(),
+            response_bytes_hint = response.content_length(),
+            status = response.status().as_u16(),
+            "client HTTP response headers"
+        );
         Ok(response)
     }
 
