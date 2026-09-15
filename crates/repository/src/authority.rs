@@ -266,12 +266,47 @@ impl Repository {
             }
         };
 
+        // A parent stops being a graph head when another workspace stacks on
+        // it, but its history remains reachable. Walk only when the scope
+        // check needs that proof, sharing a bounded traversal across heads.
+        let reachable = std::cell::RefCell::new(BTreeSet::new());
+        let pending = std::cell::RefCell::new(
+            new_view
+                .head_ids
+                .iter()
+                .cloned()
+                .collect::<std::collections::VecDeque<_>>(),
+        );
+        let remains_reachable = |wanted: &jj_lib::backend::CommitId| {
+            let mut seen = reachable.borrow_mut();
+            let mut pending = pending.borrow_mut();
+            if seen.contains(wanted) {
+                return true;
+            }
+            while seen.len() < Self::MAX_HISTORY_WALK {
+                let Some(id) = pending.pop_front() else {
+                    break;
+                };
+                if !seen.insert(id.clone()) {
+                    continue;
+                }
+                if let Ok(commit) = pollster::block_on(self.store.get_commit_async(&id)) {
+                    pending.extend(commit.parent_ids().iter().cloned());
+                }
+                if &id == wanted {
+                    return true;
+                }
+            }
+            false
+        };
+
         scope::check_publish(
             workspace_id,
             &bases,
             &new_view,
             &root_commit_id,
             &is_rewrite_of,
+            &remains_reachable,
         )
         .map_err(|denied| {
             tracing::warn!(

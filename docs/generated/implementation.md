@@ -67,6 +67,7 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/client/src/op_heads_store.rs`
 - `crates/client/src/op_store.rs`
 - `crates/client/src/pending_files.rs`
+- `crates/client/src/prepared.rs`
 - `crates/client/src/repo_link.rs`
 - `crates/client/src/sessions.rs`
 - `crates/jj-interop/src/ids.rs`
@@ -136,7 +137,9 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/cli/tests/integration/http_api.rs`
 - `crates/cli/tests/integration/log_streaming.rs`
 - `crates/cli/tests/integration/operation_upload.rs`
+- `crates/cli/tests/integration/prepared_lease_loss.rs`
 - `crates/cli/tests/integration/rest_probe.rs`
+- `crates/cli/tests/integration/stacked_prepared.rs`
 - `crates/cli/tests/integration/up_down.rs`
 - `crates/cli/tests/integration/watch.rs`
 - `crates/cli/tests/integration/workspace_daemon.rs`

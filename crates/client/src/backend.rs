@@ -92,6 +92,10 @@ impl TandemBackend {
         }
     }
 
+    pub fn client(&self) -> &Arc<TandemClient> {
+        &self.client
+    }
+
     fn flush_files(&self) -> BackendResult<()> {
         self.pending_files
             .lock()

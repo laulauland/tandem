@@ -130,6 +130,7 @@ pub fn check_publish(
     new: &View,
     root_commit_id: &CommitId,
     is_rewrite_of: &dyn Fn(&CommitId, &CommitId) -> bool,
+    remains_reachable: &dyn Fn(&CommitId) -> bool,
 ) -> Result<(), ScopeDenied> {
     let namespace = namespace_prefix(workspace_id);
 
@@ -196,7 +197,8 @@ pub fn check_publish(
     // permission: a commit nobody else can see yet takes nothing away. Making
     // a head disappear does: the work behind it stops being reachable. A
     // workspace retires its own working-copy commit every time it commits on
-    // top of it, and that is the only head it may retire.
+    // top of it. Stacking on another workspace also removes an ancestor from
+    // the head set without removing its reachable history.
     //
     // A head is dropped on the same terms as a bookmark: only if no parent had
     // it, or a parent retired it after the merge base, or every head set the
@@ -228,6 +230,7 @@ pub fn check_publish(
         )
             || own_previous.contains(removed)
             || removed == root_commit_id
+            || remains_reachable(removed)
             // A rebase retires the commit it rewrote: the work is still
             // reachable, under a new commit id and the same change id.
             || new
@@ -457,7 +460,34 @@ mod tests {
             merge_base: None,
             served: &[],
         };
-        check_publish(workspace_id, &bases, new, &root(), &|_, _| false)
+        check_publish(workspace_id, &bases, new, &root(), &|_, _| false, &|_| {
+            false
+        })
+    }
+
+    #[test]
+    fn stacking_preserves_another_workspaces_head_as_an_ancestor() {
+        let base = base_view();
+        let mut new = base.clone();
+        new.head_ids = [commit(3)].into_iter().collect();
+        new.wc_commit_ids
+            .insert(WorkspaceNameBuf::from("agent-a".to_string()), commit(3));
+        let bases = Bases {
+            inherited: std::slice::from_ref(&base),
+            merge_base: None,
+            served: &[],
+        };
+        check_publish("agent-a", &bases, &new, &root(), &|_, _| false, &|id| {
+            id == &commit(2)
+        })
+        .unwrap();
+        assert!(
+            check_publish("agent-a", &bases, &new, &root(), &|_, _| false, &|_| false).is_err()
+        );
+        // Reachability never authorizes moving the other workspace pointer.
+        new.wc_commit_ids
+            .insert(WorkspaceNameBuf::from("agent-b".to_string()), commit(3));
+        assert!(check_publish("agent-a", &bases, &new, &root(), &|_, _| false, &|_| true).is_err());
     }
 
     #[test]
@@ -550,7 +580,7 @@ mod tests {
             merge_base: None,
             served: &[],
         };
-        check_publish("agent-a", &bases, &new, &root(), &rewritten)
+        check_publish("agent-a", &bases, &new, &root(), &rewritten, &|_| false)
             .expect("a rebase moves the pointer of the workspace it rebased");
 
         // The same publish, with nothing rewritten: then it is just agent-a
@@ -693,7 +723,7 @@ mod tests {
             merge_base: None,
             served: std::slice::from_ref(&served),
         };
-        check_publish("agent-a", &bases, &new, &root(), &|_, _| false)
+        check_publish("agent-a", &bases, &new, &root(), &|_, _| false, &|_| false)
             .expect("a value the server already serves");
     }
 
@@ -735,7 +765,7 @@ mod tests {
             merge_base: None,
             served: std::slice::from_ref(&lacks_it),
         };
-        check_publish("agent-a", &bases, &new, &root(), &|_, _| false)
+        check_publish("agent-a", &bases, &new, &root(), &|_, _| false, &|_| false)
             .expect("a bookmark the server has already stopped serving");
     }
 
@@ -760,7 +790,7 @@ mod tests {
             merge_base: None,
             served: std::slice::from_ref(&lacks_it),
         };
-        check_publish("agent-a", &bases, &new, &root(), &|_, _| false)
+        check_publish("agent-a", &bases, &new, &root(), &|_, _| false, &|_| false)
             .expect("a head the server has already stopped serving");
     }
 
@@ -796,7 +826,7 @@ mod tests {
             merge_base: None,
             served: &[lacks_it.clone(), has_it.clone()],
         };
-        let denied = check_publish("agent-a", &bases, &new, &root(), &|_, _| false)
+        let denied = check_publish("agent-a", &bases, &new, &root(), &|_, _| false, &|_| false)
             .expect_err("one served head lacking it is not evidence it is gone");
         assert!(denied.to_string().contains("agent-b/keep-me"), "{denied}");
 
@@ -807,7 +837,7 @@ mod tests {
             merge_base: None,
             served: std::slice::from_ref(&lacks_it),
         };
-        check_publish("agent-a", &bases, &new, &root(), &|_, _| false)
+        check_publish("agent-a", &bases, &new, &root(), &|_, _| false, &|_| false)
             .expect("a bookmark no served head carries any more");
     }
 
@@ -829,7 +859,7 @@ mod tests {
             merge_base: None,
             served: &[lacks_it.clone(), has_it.clone()],
         };
-        let denied = check_publish("agent-a", &bases, &new, &root(), &|_, _| false)
+        let denied = check_publish("agent-a", &bases, &new, &root(), &|_, _| false, &|_| false)
             .expect_err("one served head lacking it is not evidence it is gone");
         assert!(denied.to_string().contains(&commit(2).hex()), "{denied}");
 
@@ -838,7 +868,7 @@ mod tests {
             merge_base: None,
             served: std::slice::from_ref(&lacks_it),
         };
-        check_publish("agent-a", &bases, &new, &root(), &|_, _| false)
+        check_publish("agent-a", &bases, &new, &root(), &|_, _| false, &|_| false)
             .expect("a head no served head carries any more");
     }
 
@@ -871,7 +901,7 @@ mod tests {
             merge_base: Some(&merge_base),
             served: &[still_has_it, removed_it],
         };
-        check_publish("agent-a", &bases, &new, &root(), &|_, _| false)
+        check_publish("agent-a", &bases, &new, &root(), &|_, _| false, &|_| false)
             .expect("a merge that carries forward what another workspace retired");
     }
 
@@ -905,7 +935,7 @@ mod tests {
             merge_base: Some(&merge_base),
             served: &[predates_it, has_it],
         };
-        let denied = check_publish("agent-a", &bases, &new, &root(), &|_, _| false)
+        let denied = check_publish("agent-a", &bases, &new, &root(), &|_, _| false, &|_| false)
             .expect_err("a parent that never had it did not delete it");
         assert!(denied.to_string().contains("agent-b/keep-me"), "{denied}");
     }
@@ -932,7 +962,7 @@ mod tests {
             merge_base: Some(&merge_base),
             served: &[deleted_it, has_it],
         };
-        check_publish("agent-a", &bases, &new, &root(), &|_, _| false)
+        check_publish("agent-a", &bases, &new, &root(), &|_, _| false, &|_| false)
             .expect("a deletion one parent already made");
     }
 
@@ -949,7 +979,7 @@ mod tests {
             merge_base: None,
             served: std::slice::from_ref(&served),
         };
-        check_publish("agent-c", &bases, &new, &root(), &|_, _| false)
+        check_publish("agent-c", &bases, &new, &root(), &|_, _| false, &|_| false)
             .expect("a new repo's first operation");
     }
 }

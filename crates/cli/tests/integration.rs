@@ -54,3 +54,9 @@ mod watch;
 mod workspace_daemon;
 #[path = "integration/workspace_setup.rs"]
 mod workspace_setup;
+
+#[path = "integration/stacked_prepared.rs"]
+mod stacked_prepared;
+
+#[path = "integration/prepared_lease_loss.rs"]
+mod prepared_lease_loss;

@@ -27,6 +27,8 @@ experiment before an endpoint or performance comparison.
 The subsequent [combined-publish experiment](combined-publish.md) adds explicit
 identity rejection, exercises durability and scope, and compares six mutation
 requests with one on exe.dev and R2.
+The [normal snapshot integration](normal-prepared-snapshots.md) qualifies the
+daemon path, stacked rewrites, retry handling and Frankfurt/R2 deployment.
 
 ## Workspace build-cache isolation
 

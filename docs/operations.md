@@ -19,10 +19,19 @@ objects stop below 64 MiB per repository to reserve WAL framing and metadata,
 and at 512 MiB across the host. An encoded WAL entry is capped at 64 MiB before
 its output allocation.
 The production service runs this shape at `https://tandem.land` on the
-supervised exe.dev host `tandem-native`, with published history under the R2
-prefix `tandem-native/production`. The deployed source revision is
-`ddc772196466d11f136fbbc0552ad1bbdda35a13`; its GNU/Linux binary SHA-256 is
-`0e9165cdc5ab6a7b470d4a401f80e1b5905e4d66158abdebd5daa404b4ed64ab`.
+supervised exe.dev host `tandem-frankfurt` in Frankfurt, with published history
+under the `production` prefix in R2 bucket `tandem-native`, located in Western
+Europe (`WEUR`). Cloudflare retains DNS and R2; both `tandem.land` and
+`www.tandem.land` have DNS-only CNAMEs and explicit exe.dev domain attachments
+to this host. The deployed source revision is
+`452db17d0201d322d793e5ca7c11c51982c9fb16`; its GNU/Linux binary SHA-256 is
+`0a65a9854de082bde3f59bebfe5fdec98d94a5704e65b526b0687d7abd610eaa`.
+
+The Europe replacement recovered a previously published qualification file
+with its existing scoped credential, accepted a normal snapshot through the
+public domain, and recovered all recorded bytes after both an unclean process
+restart and an empty local cache. The active and retained signing configuration
+was preserved byte-for-byte. See the [qualification evidence](benchmarks/normal-prepared-snapshots.md).
 
 Keep the active host signing secret, retained signing keys and bucket
 credentials in protected configuration outside the VM as well as in its
@@ -38,7 +47,9 @@ fence the old process first.
 The controller recovery source is
 `$HOME/.config/tandem-native/host.env`. The reviewed service definition is
 archived at `$HOME/.local/state/tandem-native/production/tandem.service`, and
-the deployment manifest identifies the immutable binary. Restore all three;
+the current deployment manifest at
+`$HOME/.local/state/tandem-native/production/current.json` identifies the
+immutable binary. Restore all three;
 the environment file contains protected material and must not enter logs,
 evidence, images, or the repository.
 

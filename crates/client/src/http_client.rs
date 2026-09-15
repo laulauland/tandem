@@ -153,6 +153,7 @@ pub enum PrefixResult {
 // ─── TandemClient ─────────────────────────────────────────────────────────────
 
 pub struct TandemClient {
+    pub(crate) preparation: std::sync::Mutex<crate::prepared::Preparation>,
     http: reqwest::blocking::Client,
     target: ConnectorTarget,
     /// The bearer every request carries. A server refuses a request without
@@ -194,6 +195,7 @@ impl TandemClient {
             injected_rtt: self.injected_rtt,
             cache: self.cache.clone(),
             requests_sent: AtomicU64::new(0),
+            preparation: Default::default(),
         }
     }
 }
@@ -243,6 +245,7 @@ impl TandemClient {
             injected_rtt: Duration::ZERO,
             cache: None,
             requests_sent: AtomicU64::new(0),
+            preparation: Default::default(),
         })
     }
 
@@ -284,6 +287,7 @@ impl TandemClient {
             injected_rtt: bench_injected_rtt_delay(),
             cache,
             requests_sent: AtomicU64::new(0),
+            preparation: Default::default(),
         };
 
         let repo_info = client
@@ -378,6 +382,17 @@ impl TandemClient {
     /// "this object does not exist" and "this disk would not answer" apart,
     /// and a client that wrote either to disk would turn a fault into a fact.
     fn cached_get(&self, namespace: &str, id: &[u8], path: &str, what: &str) -> Result<Vec<u8>> {
+        if let Some(data) = self
+            .preparation
+            .lock()
+            .map_err(|_| anyhow!("preparation lock poisoned"))?
+            .active
+            .as_ref()
+            .and_then(|graph| graph.read(namespace, id))
+        {
+            return Ok(data);
+        }
+
         if let Some(cache) = &self.cache {
             if let Some(data) = cache.get(namespace, id) {
                 return Ok(data);
@@ -549,6 +564,15 @@ impl TandemClient {
     /// cache that answered with the pre-normalized form would be answering a
     /// different question than the reader asked.
     pub fn put_object(&self, kind: u16, data: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+        if let Some(result) = self
+            .preparation
+            .lock()
+            .map_err(|_| anyhow!("preparation lock poisoned"))?
+            .write(kind, data)?
+        {
+            return Ok(result);
+        }
+
         let kind_name =
             wire::kind_name(kind).ok_or_else(|| anyhow!("unknown object kind: {kind}"))?;
         let response =
@@ -561,6 +585,16 @@ impl TandemClient {
 
     /// Large files use the single-object endpoint to keep its full body limit.
     pub(crate) fn put_file(&self, expected_id: &[u8], data: &[u8]) -> Result<()> {
+        if let Some((id, normalized)) = self
+            .preparation
+            .lock()
+            .map_err(|_| anyhow!("preparation lock poisoned"))?
+            .write(wire::KIND_FILE, data)?
+        {
+            validate_file_response(expected_id, data, &id, &normalized)?;
+            return Ok(());
+        }
+
         let response = self.post_octets("/api/objects/file", data, "put file")?;
         let id = header_id(&response, wire::HEADER_OBJECT_ID)?;
         let normalized = response.bytes()?;
@@ -572,6 +606,21 @@ impl TandemClient {
     /// Upload buffered files, validating the entire response before making
     /// any of it available through the immutable read cache.
     pub(crate) fn put_files_batch(&self, files: &BTreeMap<Vec<u8>, Vec<u8>>) -> Result<()> {
+        {
+            let mut preparation = self
+                .preparation
+                .lock()
+                .map_err(|_| anyhow!("preparation lock poisoned"))?;
+            if preparation.active.is_some() {
+                for (expected, data) in files {
+                    let (id, normalized) = preparation
+                        .write(wire::KIND_FILE, data)?
+                        .context("snapshot preparation ended")?;
+                    validate_file_response(expected, data, &id, &normalized)?;
+                }
+                return Ok(());
+            }
+        }
         let items = files
             .values()
             .map(|data| wire::BatchItem {
@@ -617,6 +666,17 @@ impl TandemClient {
     }
 
     pub fn put_operation(&self, data: &[u8], expected_id: &[u8]) -> Result<()> {
+        if let Some(graph) = self
+            .preparation
+            .lock()
+            .map_err(|_| anyhow!("preparation lock poisoned"))?
+            .active
+            .as_mut()
+        {
+            graph.metadata(NAMESPACE_OPERATION, expected_id, data)?;
+            return Ok(());
+        }
+
         let response = self.post_octets("/api/ops", data, "put operation")?;
         let id = header_id(&response, wire::HEADER_OPERATION_ID)?;
         anyhow::ensure!(
@@ -634,6 +694,17 @@ impl TandemClient {
         expected_id: &[u8],
         expected_view_id: &[u8],
     ) -> Result<()> {
+        if let Some(graph) = self
+            .preparation
+            .lock()
+            .map_err(|_| anyhow!("preparation lock poisoned"))?
+            .active
+            .as_mut()
+        {
+            graph.metadata(NAMESPACE_VIEW, expected_view_id, view)?;
+            graph.metadata(NAMESPACE_OPERATION, expected_id, operation)?;
+            return Ok(());
+        }
         let body = wire::encode_operation_upload(view, operation);
         let response = self.post_octets("/api/ops:upload", &body, "put operation with view")?;
         let view_id = header_id(&response, wire::HEADER_VIEW_ID)?;
@@ -661,6 +732,17 @@ impl TandemClient {
     }
 
     pub fn put_view(&self, data: &[u8], expected_id: &[u8]) -> Result<()> {
+        if let Some(graph) = self
+            .preparation
+            .lock()
+            .map_err(|_| anyhow!("preparation lock poisoned"))?
+            .active
+            .as_mut()
+        {
+            graph.metadata(NAMESPACE_VIEW, expected_id, data)?;
+            return Ok(());
+        }
+
         let response = self.post_octets("/api/views", data, "put view")?;
         let id = header_id(&response, wire::HEADER_VIEW_ID)?;
         anyhow::ensure!(id == expected_id, "view upload returned an unexpected ID");
@@ -690,15 +772,31 @@ impl TandemClient {
             workspace_id: workspace_id.to_string(),
         };
 
-        let response = self.send(
+        let prepared = self
+            .preparation
+            .lock()
+            .map_err(|_| anyhow!("preparation lock poisoned"))?
+            .active
+            .as_ref()
+            .map(|graph| graph.request(body.clone()))
+            .transpose()?;
+        let request = if let Some(prepared) = prepared {
+            let bytes = wire::encode_prepared_publish(&prepared);
+            anyhow::ensure!(
+                bytes.len() <= wire::MAX_REQUEST_BODY_BYTES,
+                "snapshot exceeds prepared publish request limit"
+            );
             self.http
-                .post(self.url("/api/heads"))
-                .header(
-                    reqwest::header::IF_MATCH,
-                    etag_for_version(expected_version),
-                )
-                .json(&body),
-        )?;
+                .post(self.url("/api/publish"))
+                .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+                .body(bytes)
+        } else {
+            self.http.post(self.url("/api/heads")).json(&body)
+        };
+        let response = self.send(request.header(
+            reqwest::header::IF_MATCH,
+            etag_for_version(expected_version),
+        ))?;
 
         // A version mismatch is a 412 carrying the state the client lost the
         // race to, which is exactly what its retry loop needs to see. It is a
@@ -712,6 +810,26 @@ impl TandemClient {
 
         let heads: wire::HeadsBody = response.json().context("decode heads update result")?;
         let state = heads_state_from_body(heads)?;
+        if !conflicted {
+            if let Some(graph) = self
+                .preparation
+                .lock()
+                .map_err(|_| anyhow!("preparation lock poisoned"))?
+                .active
+                .as_ref()
+            {
+                for object in &graph.objects {
+                    self.store_in_cache(
+                        wire::kind_name(object.kind).context("invalid prepared kind")?,
+                        &object.id,
+                        &object.data,
+                    );
+                }
+                for ((namespace, id), data) in &graph.metadata {
+                    self.store_in_cache(namespace, id, data);
+                }
+            }
+        }
         Ok(UpdateHeadsResult {
             ok: !conflicted,
             heads: state.heads,

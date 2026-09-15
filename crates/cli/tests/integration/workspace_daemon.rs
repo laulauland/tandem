@@ -232,25 +232,26 @@ fn a_daemon_renews_while_its_snapshot_is_blocked_in_the_wal() {
     let (claims_tx, claims_rx) = std::sync::mpsc::channel();
     let reject_renewals = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let reject_in_middleware = reject_renewals.clone();
-    let gate_commit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let gate_commit_in_middleware = gate_commit.clone();
-    let (commit_entered_tx, commit_entered_rx) = std::sync::mpsc::channel();
-    let commit_release = std::sync::Arc::new(tokio::sync::Notify::new());
-    let commit_release_in_middleware = commit_release.clone();
+    let gate_heads = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let gate_heads_in_middleware = gate_heads.clone();
+    let (heads_entered_tx, heads_entered_rx) = std::sync::mpsc::channel();
+    let heads_release = std::sync::Arc::new(tokio::sync::Notify::new());
+    let heads_release_in_middleware = heads_release.clone();
     let app =
         jj_tandem_server::router(std::sync::Arc::new(server)).layer(axum::middleware::from_fn(
             move |request: axum::extract::Request, next: axum::middleware::Next| {
                 let claims_tx = claims_tx.clone();
                 let reject_in_middleware = reject_in_middleware.clone();
-                let gate_commit = gate_commit_in_middleware.clone();
-                let commit_entered_tx = commit_entered_tx.clone();
-                let commit_release = commit_release_in_middleware.clone();
+                let gate_heads = gate_heads_in_middleware.clone();
+                let heads_entered_tx = heads_entered_tx.clone();
+                let heads_release = heads_release_in_middleware.clone();
                 async move {
-                    if request.uri().path() == "/api/objects/commit"
-                        && gate_commit.load(std::sync::atomic::Ordering::Acquire)
+                    if request.method() == axum::http::Method::GET
+                        && request.uri().path() == "/api/heads"
+                        && gate_heads.swap(false, std::sync::atomic::Ordering::AcqRel)
                     {
-                        let released = commit_release.notified();
-                        let _ = commit_entered_tx.send(());
+                        let released = heads_release.notified();
+                        let _ = heads_entered_tx.send(());
                         released.await;
                     }
                     if request.uri().path().ends_with("/writer") {
@@ -380,29 +381,33 @@ fn a_daemon_renews_while_its_snapshot_is_blocked_in_the_wal() {
         .as_u64()
         .unwrap();
     while claims_rx.try_recv().is_ok() {}
-    gate_commit.store(true, std::sync::atomic::Ordering::Release);
-    struct ReleaseCommit(std::sync::Arc<tokio::sync::Notify>);
-    impl Drop for ReleaseCommit {
+    gate_heads.store(true, std::sync::atomic::Ordering::Release);
+    struct ReleaseHeads(std::sync::Arc<tokio::sync::Notify>);
+    impl Drop for ReleaseHeads {
         fn drop(&mut self) {
             self.0.notify_waiters();
         }
     }
-    let release_commit = ReleaseCommit(commit_release);
-    let second = std::thread::spawn(move || daemon.snapshot_once());
-    commit_entered_rx
+    let release_heads = ReleaseHeads(heads_release);
+    let second = std::thread::spawn(move || {
+        let outcome = daemon.snapshot_once();
+        (daemon, outcome)
+    });
+    heads_entered_rx
         .recv_timeout(LINE_TIMEOUT)
-        .expect("snapshot never reached the commit upload after its early role check");
+        .expect("snapshot never reached the head read after its early role check");
     while claims_rx.try_recv().is_ok() {}
     reject_renewals.store(1, std::sync::atomic::Ordering::Release);
     claims_rx
         .recv_timeout(LINE_TIMEOUT)
-        .expect("the daemon did not attempt renewal while its object write was blocked");
+        .expect("the daemon did not attempt renewal while its preparation head read was blocked");
     claims_rx
         .recv_timeout(LINE_TIMEOUT)
         .expect("the daemon did not retry renewal after a transient failure");
-    drop(release_commit);
+    drop(release_heads);
+    let (mut daemon, outcome) = second.join().unwrap();
     assert!(matches!(
-        second.join().unwrap().unwrap(),
+        outcome.unwrap(),
         jj_tandem_workspace::SnapshotOutcome::NotTheWriter { .. }
     ));
     let version_after = common::api_get(&address, "renewal-secret", "/api/heads")
@@ -411,6 +416,61 @@ fn a_daemon_renews_while_its_snapshot_is_blocked_in_the_wal() {
         .as_u64()
         .unwrap();
     assert_eq!(version_after, version_before, "a known-lost role published");
+    let jj_tandem_workspace::SnapshotOutcome::Published(published) =
+        daemon.snapshot_once().unwrap()
+    else {
+        panic!("same daemon must retry the same bytes")
+    };
+    let read = common::run_tandem_in_with_env(
+        &root,
+        &[
+            "file",
+            "show",
+            "--ignore-working-copy",
+            "-r",
+            &published.commit_id,
+            "blocked.txt",
+        ],
+        &[("TANDEM_DISABLE_CACHE", "1")],
+        &home,
+    );
+    common::assert_ok(&read, "read successful retry after lease loss");
+    assert_eq!(read.stdout, b"must remain unacknowledged\n");
+    for (index_failure, bytes) in [
+        (false, b"retry WAL failure\0".as_slice()),
+        (true, b"retry index failure\xff".as_slice()),
+    ] {
+        std::fs::write(root.join("blocked.txt"), bytes).unwrap();
+        if index_failure {
+            faults.fail_index_writes(1);
+        } else {
+            faults.fail_wal_writes(1);
+        }
+        assert!(
+            daemon.snapshot_once().is_err(),
+            "failed storage must not acknowledge"
+        );
+        let jj_tandem_workspace::SnapshotOutcome::Published(published) =
+            daemon.snapshot_once().unwrap()
+        else {
+            panic!("same daemon must retry failed storage")
+        };
+        let read = common::run_tandem_in_with_env(
+            &root,
+            &[
+                "file",
+                "show",
+                "--ignore-working-copy",
+                "-r",
+                &published.commit_id,
+                "blocked.txt",
+            ],
+            &[("TANDEM_DISABLE_CACHE", "1")],
+            &home,
+        );
+        common::assert_ok(&read, "read retry after failed durable write");
+        assert_eq!(read.stdout, bytes);
+    }
 }
 
 impl Drop for DaemonProcess {
@@ -902,4 +962,215 @@ fn a_daemon_that_starts_after_the_edit_still_publishes_it() {
         std::fs::read(second.join("written-while-down.txt")).expect("the file was published"),
         b"still mine\n"
     );
+}
+
+#[test]
+fn normal_snapshot_publishes_one_prepared_graph() {
+    let fx = ServerFixture::builder().log_to_file().start();
+    let (root, _) = clone_workspace(&fx, "combined-snapshot", "agent-a");
+    let settings =
+        jj_lib::settings::UserSettings::from_config(jj_lib::config::StackedConfig::with_defaults())
+            .unwrap();
+    let mut daemon = jj_tandem_workspace::Daemon::open(
+        &settings,
+        &jj_tandem_workspace::DaemonOptions::new(&root),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("dir/edited.txt", root.join("link")).unwrap();
+    let before = fx.rpc_request_count("publishPrepared");
+    let writes = fx.rpc_request_count("putObject")
+        + fx.rpc_request_count("putObjectsBatch")
+        + fx.rpc_request_count("putOperationWithView");
+    std::fs::create_dir(root.join("dir")).unwrap();
+    std::fs::write(
+        root.join("dir/edited.txt"),
+        b"ordinary snapshot exact\0\xff",
+    )
+    .unwrap();
+    let jj_tandem_workspace::SnapshotOutcome::Published(published) =
+        daemon.snapshot_once().unwrap()
+    else {
+        panic!("edited snapshot must publish")
+    };
+    assert_eq!(fx.rpc_request_count("publishPrepared") - before, 1);
+    assert_eq!(
+        fx.rpc_request_count("putObject")
+            + fx.rpc_request_count("putObjectsBatch")
+            + fx.rpc_request_count("putOperationWithView"),
+        writes
+    );
+    let fresh = fx.init_workspace("fresh-reader", Some("reader"));
+    let read = common::run_tandem_in_with_env(
+        &fresh,
+        &[
+            "file",
+            "show",
+            "--ignore-working-copy",
+            "-r",
+            &published.commit_id,
+            "dir/edited.txt",
+        ],
+        &[("TANDEM_DISABLE_CACHE", "1")],
+        &fx.home,
+    );
+    common::assert_ok(&read, "read normal snapshot from a fresh client");
+    assert_eq!(read.stdout, b"ordinary snapshot exact\0\xff");
+    #[cfg(unix)]
+    {
+        let (attached, _) = clone_workspace(&fx, "fresh-attached", "agent-a");
+        assert_eq!(
+            std::fs::read_link(attached.join("link")).unwrap(),
+            std::path::Path::new("dir/edited.txt")
+        );
+        assert_eq!(
+            std::fs::read(attached.join("link")).unwrap(),
+            b"ordinary snapshot exact\0\xff"
+        );
+    }
+}
+
+#[test]
+fn stacked_snapshot_rewrites_preserve_descendant_edits_and_leave_files_owned_by_b() {
+    let fx = ServerFixture::builder().log_to_file().start();
+    let a = fx.init_workspace("stack-a", Some("agent-a"));
+    let settings =
+        jj_lib::settings::UserSettings::from_config(jj_lib::config::StackedConfig::with_defaults())
+            .unwrap();
+    let mut daemon_a =
+        jj_tandem_workspace::Daemon::open(&settings, &jj_tandem_workspace::DaemonOptions::new(&a))
+            .unwrap();
+    std::fs::write(a.join("a.txt"), b"A first\n").unwrap();
+    let jj_tandem_workspace::SnapshotOutcome::Published(first) = daemon_a.snapshot_once().unwrap()
+    else {
+        panic!("A must publish")
+    };
+    let b = fx.init_workspace("stack-b", Some("agent-b"));
+    common::assert_ok(
+        &common::run_tandem_in(&b, &["new", &first.commit_id], &fx.home),
+        "stack B on A",
+    );
+    std::fs::write(b.join("b.txt"), b"B independent\0\xff").unwrap();
+    let mut daemon_b =
+        jj_tandem_workspace::Daemon::open(&settings, &jj_tandem_workspace::DaemonOptions::new(&b))
+            .unwrap();
+    assert!(matches!(
+        daemon_b.snapshot_once().unwrap(),
+        jj_tandem_workspace::SnapshotOutcome::Published(_)
+    ));
+    std::fs::write(a.join("a.txt"), b"A rewritten\n").unwrap();
+    assert!(matches!(
+        daemon_a.snapshot_once().unwrap(),
+        jj_tandem_workspace::SnapshotOutcome::Published(_)
+    ));
+    assert_eq!(std::fs::read(b.join("a.txt")).unwrap(), b"A first\n");
+    assert_eq!(
+        std::fs::read(b.join("b.txt")).unwrap(),
+        b"B independent\0\xff"
+    );
+    assert!(matches!(
+        daemon_b.snapshot_once().unwrap(),
+        jj_tandem_workspace::SnapshotOutcome::Stale
+    ));
+    common::assert_ok(
+        &common::run_tandem_in(&b, &["workspace", "update-stale"], &fx.home),
+        "B explicitly updates its stale directory",
+    );
+    assert_eq!(std::fs::read(b.join("a.txt")).unwrap(), b"A rewritten\n");
+    assert_eq!(
+        std::fs::read(b.join("b.txt")).unwrap(),
+        b"B independent\0\xff"
+    );
+    // An explicit jj rebase remains an ordinary jj command. The next daemon
+    // snapshot must use the resulting stacked history without losing B's bytes.
+    common::assert_ok(
+        &common::run_tandem_in(&b, &["rebase", "-r", "@", "-d", "root()"], &fx.home),
+        "B rebases independently",
+    );
+    std::fs::write(b.join("b.txt"), b"B after rebase\0\xff").unwrap();
+    let jj_tandem_workspace::SnapshotOutcome::Published(last) = daemon_b.snapshot_once().unwrap()
+    else {
+        panic!("B must publish after rebase")
+    };
+    let fresh = fx.init_workspace("stack-reader", Some("reader"));
+    let read = common::run_tandem_in_with_env(
+        &fresh,
+        &[
+            "file",
+            "show",
+            "--ignore-working-copy",
+            "-r",
+            &last.commit_id,
+            "b.txt",
+        ],
+        &[("TANDEM_DISABLE_CACHE", "1")],
+        &fx.home,
+    );
+    common::assert_ok(&read, "read B after stacked rewrites and rebase");
+    assert_eq!(read.stdout, b"B after rebase\0\xff");
+}
+
+#[test]
+fn a_prepared_snapshot_preserves_an_existing_jj_tree_conflict() {
+    let fx = ServerFixture::start();
+    let root = fx.init_workspace("conflicted-snapshot", Some("agent-a"));
+    std::fs::write(root.join("conflict.txt"), b"base\n").unwrap();
+    common::assert_ok(&fx.run(&root, &["status"]), "snapshot base");
+    let base = fx.run(&root, &["log", "--no-graph", "-r", "@", "-T", "commit_id"]);
+    common::assert_ok(&base, "read base identity");
+    let base = String::from_utf8(base.stdout).unwrap();
+    common::assert_ok(&fx.run(&root, &["new", &base]), "create left side");
+    std::fs::write(root.join("conflict.txt"), b"left\n").unwrap();
+    common::assert_ok(&fx.run(&root, &["status"]), "snapshot left side");
+    let left = fx.run(&root, &["log", "--no-graph", "-r", "@", "-T", "commit_id"]);
+    common::assert_ok(&left, "read left identity");
+    let left = String::from_utf8(left.stdout).unwrap();
+    common::assert_ok(&fx.run(&root, &["new", &base]), "create right side");
+    std::fs::write(root.join("conflict.txt"), b"right\n").unwrap();
+    common::assert_ok(&fx.run(&root, &["status"]), "snapshot right side");
+    common::assert_ok(
+        &fx.run(&root, &["new", &left, "@"]),
+        "create conflicted merge",
+    );
+    let conflict = fx.run(
+        &root,
+        &["file", "show", "--ignore-working-copy", "conflict.txt"],
+    );
+    common::assert_ok(&conflict, "read original conflict");
+    assert!(conflict.stdout.windows(5).any(|s| s == b"left\n"));
+    assert!(conflict.stdout.windows(6).any(|s| s == b"right\n"));
+    let settings =
+        jj_lib::settings::UserSettings::from_config(jj_lib::config::StackedConfig::with_defaults())
+            .unwrap();
+    let mut daemon = jj_tandem_workspace::Daemon::open(
+        &settings,
+        &jj_tandem_workspace::DaemonOptions::new(&root),
+    )
+    .unwrap();
+    std::fs::write(root.join("independent.txt"), b"unrelated edit\0\xff").unwrap();
+    let jj_tandem_workspace::SnapshotOutcome::Published(published) =
+        daemon.snapshot_once().unwrap()
+    else {
+        panic!("snapshot with conflict must publish")
+    };
+    for (file, expected) in [
+        ("conflict.txt", conflict.stdout.as_slice()),
+        ("independent.txt", b"unrelated edit\0\xff".as_slice()),
+    ] {
+        let read = common::run_tandem_in_with_env(
+            &root,
+            &[
+                "file",
+                "show",
+                "--ignore-working-copy",
+                "-r",
+                &published.commit_id,
+                file,
+            ],
+            &[("TANDEM_DISABLE_CACHE", "1")],
+            &fx.home,
+        );
+        common::assert_ok(&read, "read prepared conflicted tree");
+        assert_eq!(read.stdout, expected);
+    }
 }

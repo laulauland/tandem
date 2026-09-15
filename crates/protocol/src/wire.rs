@@ -245,6 +245,7 @@ pub const RESPONSE_MAGIC: &[u8; 4] = b"TBS1";
 /// cannot make the decoder reserve memory for records the frame is far too
 /// short to contain.
 const MAX_RECORDS: usize = 1 << 20;
+pub const MAX_PREPARED_OBJECTS: usize = MAX_RECORDS;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BatchItem {
@@ -296,9 +297,6 @@ pub fn decode_prepared_publish(bytes: &[u8]) -> Result<PreparedPublish, WireErro
     }
     let heads = serde_json::from_slice(&reader.blob()?).map_err(|_| err("invalid head request"))?;
     let count = reader.record_count(10)?;
-    if count > 64 {
-        return Err(err("prepared publish exceeds 64 objects"));
-    }
     let mut objects = Vec::with_capacity(count);
     for _ in 0..count {
         objects.push(PreparedObject {

@@ -1,4 +1,4 @@
-//! Experimental ingestion of a locally prepared graph. Heads remain unchanged
+//! Ingestion of a locally prepared graph. Heads remain unchanged
 //! until every supplied identity and normalized payload has been checked.
 use anyhow::{bail, Result};
 use jj_tandem_protocol::wire::{self, PreparedPublish};
@@ -45,7 +45,9 @@ impl Repository {
 }
 
 fn validate(request: &PreparedPublish) -> Result<()> {
-    if request.objects.len() > 64 || request.view.len() > super::MAX_VIEW_BYTES {
+    if request.objects.len() > wire::MAX_PREPARED_OBJECTS
+        || request.view.len() > super::MAX_VIEW_BYTES
+    {
         bail!("prepared graph exceeds bounds");
     }
     let (view_id, _) = decode_view_with_id(&request.view)?;
@@ -62,6 +64,9 @@ fn validate(request: &PreparedPublish) -> Result<()> {
         }
         match object.kind {
             wire::KIND_FILE => {}
+            wire::KIND_SYMLINK => {
+                std::str::from_utf8(&object.data)?;
+            }
             wire::KIND_TREE => {
                 let tree = jj_lib::protos::simple_store::Tree::decode(object.data.as_slice())?;
                 let mut previous = None;
@@ -73,7 +78,7 @@ fn validate(request: &PreparedPublish) -> Result<()> {
                     previous = Some(entry.name);
                     use jj_lib::protos::simple_store::tree_value::Value;
                     match entry.value.and_then(|value| value.value) {
-                        Some(Value::TreeId(id)) if id.len() == 20 => {}
+                        Some(Value::TreeId(id) | Value::SymlinkId(id)) if id.len() == 20 => {}
                         Some(Value::File(file)) if file.id.len() == 20 => {}
                         _ => bail!("unsupported prepared tree entry"),
                     }
@@ -85,9 +90,14 @@ fn validate(request: &PreparedPublish) -> Result<()> {
                     || commit.parents.iter().any(|id| id.len() != 20)
                     || commit.predecessors.iter().any(|id| id.len() != 20)
                     || commit.change_id.len() != 16
-                    || commit.root_tree.len() != 1
-                    || commit.root_tree[0].len() != 20
-                    || !commit.conflict_labels.is_empty()
+                    || commit.root_tree.is_empty()
+                    || commit.root_tree.len() % 2 == 0
+                    || commit.root_tree.iter().any(|id| id.len() != 20)
+                    || (!commit.conflict_labels.is_empty() && commit.conflict_labels.len() % 2 == 0)
+                    || commit
+                        .conflict_labels
+                        .iter()
+                        .any(|label| label.contains('\n'))
                     || commit.secure_sig.is_some()
                 {
                     bail!("unsupported prepared commit");

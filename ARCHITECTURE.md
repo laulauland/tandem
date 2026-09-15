@@ -66,6 +66,17 @@ validated before cache insertion, and failed or uncertain uploads retain the
 pending view for an identical retry. Head publication still owns the bucket WAL
 and index commit and the durability acknowledgement.
 
+Daemon snapshots scope those same jj stores to one locally prepared graph.
+A disposable native jj backend computes new object identities; reads reuse the
+ordinary verified history cache and can read pending graph objects. Stock jj
+still scans files, rewrites the working-copy commit and rebases descendants.
+The client sends the graph, view, operation and head proposal together. The
+server rejects identity or normalized-byte mismatches before publishing heads;
+only an acknowledged graph enters the immutable client cache. Failed scans do
+not advance working-copy state. The temporary preparation store is removed at
+the end of each snapshot, including failure. Ordinary embedded jj commands
+continue using the individual store writes described above.
+
 ### Workspace daemon
 
 The daemon turns a burst of relevant filesystem events into one jj snapshot and
@@ -78,6 +89,11 @@ Remote head
 events are wake-ups: the daemon coalesces them with filesystem and timer wakes
 in bounded state, then refreshes authoritative heads. It marks local state
 stale but never moves files under an active editor.
+Concurrent rewrites of a stacked change can produce jj divergence: the
+rebased descendant and the workspace's independent rewrite both remain in
+published history. The daemon leaves the local files intact. An explicit jj
+workspace update reports divergence and can select either version; resolving
+that divergence remains an ordinary jj operation.
 
 ### Server
 

@@ -11,6 +11,7 @@ pub mod http_client;
 pub mod op_heads_store;
 pub mod op_store;
 mod pending_files;
+pub mod prepared;
 pub mod repo_link;
 mod sessions;
 

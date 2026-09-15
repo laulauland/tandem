@@ -585,6 +585,13 @@ impl Daemon {
             }
         }
 
+        let backend = repo
+            .store()
+            .backend()
+            .downcast_ref::<jj_tandem_client::backend::TandemBackend>()
+            .context("snapshot requires a Tandem backend")?;
+        let _prepared = backend.client().prepare_snapshot(repo.settings())?;
+
         profile_phase!("repo_prepare");
         let options = SnapshotOptions {
             base_ignores: GitIgnoreFile::empty(),
@@ -617,9 +624,9 @@ impl Daemon {
         }
 
         if !renewal.is_held() {
-            locked_ws
-                .finish(repo.op_id().clone())
-                .context("cannot release the working copy after losing the writer role")?;
+            // The scan references a graph that was never acknowledged. Drop
+            // the mutation so a retry scans and prepares those objects again.
+            drop(locked_ws);
             self.repo = repo;
             self.status.writer = false;
             self.status.writer_detail = Some(
@@ -647,9 +654,9 @@ impl Daemon {
 
         if !renewal.is_held() {
             drop(tx);
-            locked_ws
-                .finish(repo.op_id().clone())
-                .context("cannot release the working copy after losing the writer role")?;
+            // The scan references a graph that was never acknowledged. Drop
+            // the mutation so a retry scans and prepares those objects again.
+            drop(locked_ws);
             self.repo = repo;
             self.status.writer = false;
             self.status.writer_detail =
