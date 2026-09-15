@@ -1,0 +1,3571 @@
+{
+  "schema_version": 1,
+  "snapshot_ms": {
+    "count": 40,
+    "mean": 2496.8306162500003,
+    "p50": 2436.078639,
+    "p95": 2899.9163230000004,
+    "p99": 3110.301302,
+    "min": 2287.721406,
+    "max": 3110.301302
+  },
+  "summary": {
+    "wal": {
+      "writes": 40,
+      "put_attempts": 40,
+      "attempt_headers_ms": {
+        "count": 40,
+        "mean": 521.9883,
+        "p50": 490.373,
+        "p95": 688.807,
+        "p99": 939.204,
+        "min": 441.789,
+        "max": 939.204
+      },
+      "retry_count": 0,
+      "followup_heads": 0,
+      "response_status_counts": {
+        "200": 40
+      },
+      "etag_present_count": 40,
+      "previously_observed_socket_count": 40,
+      "socket_information_missing": 0,
+      "retry_gap_ms": {
+        "count": 0
+      }
+    },
+    "index": {
+      "writes": 40,
+      "put_attempts": 40,
+      "attempt_headers_ms": {
+        "count": 40,
+        "mean": 574.931425,
+        "p50": 507.434,
+        "p95": 809.059,
+        "p99": 1230.518,
+        "min": 458.157,
+        "max": 1230.518
+      },
+      "retry_count": 0,
+      "followup_heads": 0,
+      "response_status_counts": {
+        "200": 40
+      },
+      "etag_present_count": 40,
+      "previously_observed_socket_count": 40,
+      "socket_information_missing": 0,
+      "retry_gap_ms": {
+        "count": 0
+      }
+    }
+  },
+  "samples": [
+    {
+      "host_publish_ms": 1548.57,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 37,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459393273280,
+              "end_epoch_us": 1789459393845041,
+              "elapsed_us": 571761,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:13.273280+00:00",
+              "end_utc": "2026-09-15T08:03:13.845041+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 38,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459393845356,
+              "end_epoch_us": 1789459394654415,
+              "elapsed_us": 809059,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:13.845356+00:00",
+              "end_utc": "2026-09-15T08:03:14.654415+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 36,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459393106804,
+          "end_epoch_us": 1789459393273012,
+          "elapsed_us": 166208,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1144.707,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 40,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459396033237,
+              "end_epoch_us": 1789459396524961,
+              "elapsed_us": 491724,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:16.033237+00:00",
+              "end_utc": "2026-09-15T08:03:16.524961+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 41,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459396525233,
+              "end_epoch_us": 1789459397012431,
+              "elapsed_us": 487199,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:16.525233+00:00",
+              "end_utc": "2026-09-15T08:03:17.012431+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 39,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459395868786,
+          "end_epoch_us": 1789459396032865,
+          "elapsed_us": 164079,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1249.957,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 43,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459398393278,
+              "end_epoch_us": 1789459398969240,
+              "elapsed_us": 575961,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:18.393278+00:00",
+              "end_utc": "2026-09-15T08:03:18.969240+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 44,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459398969576,
+              "end_epoch_us": 1789459399473106,
+              "elapsed_us": 503530,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:18.969576+00:00",
+              "end_utc": "2026-09-15T08:03:19.473106+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 42,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459398224244,
+          "end_epoch_us": 1789459398392292,
+          "elapsed_us": 168048,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1260.389,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 46,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459400842967,
+              "end_epoch_us": 1789459401312635,
+              "elapsed_us": 469668,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:20.842967+00:00",
+              "end_utc": "2026-09-15T08:03:21.312635+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 47,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459401313025,
+              "end_epoch_us": 1789459401945539,
+              "elapsed_us": 632514,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:21.313025+00:00",
+              "end_utc": "2026-09-15T08:03:21.945539+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 45,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459400686376,
+          "end_epoch_us": 1789459400842496,
+          "elapsed_us": 156120,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1161.111,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 49,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459403342742,
+              "end_epoch_us": 1789459403825159,
+              "elapsed_us": 482418,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:23.342742+00:00",
+              "end_utc": "2026-09-15T08:03:23.825159+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 50,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459403825464,
+              "end_epoch_us": 1789459404322668,
+              "elapsed_us": 497203,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:23.825464+00:00",
+              "end_utc": "2026-09-15T08:03:24.322668+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 48,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459403162786,
+          "end_epoch_us": 1789459403342251,
+          "elapsed_us": 179465,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1117.913,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 52,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459405705606,
+              "end_epoch_us": 1789459406184529,
+              "elapsed_us": 478923,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:25.705606+00:00",
+              "end_utc": "2026-09-15T08:03:26.184529+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 53,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459406185068,
+              "end_epoch_us": 1789459406653571,
+              "elapsed_us": 468503,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:26.185068+00:00",
+              "end_utc": "2026-09-15T08:03:26.653571+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 51,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459405536808,
+          "end_epoch_us": 1789459405704671,
+          "elapsed_us": 167863,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1269.352,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 55,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459408045859,
+              "end_epoch_us": 1789459408490370,
+              "elapsed_us": 444511,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:28.045859+00:00",
+              "end_utc": "2026-09-15T08:03:28.490370+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 56,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459408490697,
+              "end_epoch_us": 1789459409134565,
+              "elapsed_us": 643868,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:28.490697+00:00",
+              "end_utc": "2026-09-15T08:03:29.134565+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 54,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459407866090,
+          "end_epoch_us": 1789459408045541,
+          "elapsed_us": 179450,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1143.667,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 58,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459410522246,
+              "end_epoch_us": 1789459411002937,
+              "elapsed_us": 480691,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:30.522246+00:00",
+              "end_utc": "2026-09-15T08:03:31.002937+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 59,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459411003710,
+              "end_epoch_us": 1789459411494860,
+              "elapsed_us": 491150,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:31.003710+00:00",
+              "end_utc": "2026-09-15T08:03:31.494860+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 57,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459410353022,
+          "end_epoch_us": 1789459410521724,
+          "elapsed_us": 168702,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1114.121,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 61,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459412885541,
+              "end_epoch_us": 1789459413364590,
+              "elapsed_us": 479049,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:32.885541+00:00",
+              "end_utc": "2026-09-15T08:03:33.364590+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 62,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459413365197,
+              "end_epoch_us": 1789459413823353,
+              "elapsed_us": 458157,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:33.365197+00:00",
+              "end_utc": "2026-09-15T08:03:33.823353+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 60,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459412710569,
+          "end_epoch_us": 1789459412884671,
+          "elapsed_us": 174102,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1075.529,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 64,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459415197508,
+              "end_epoch_us": 1789459415639297,
+              "elapsed_us": 441789,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:35.197508+00:00",
+              "end_utc": "2026-09-15T08:03:35.639297+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 65,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459415639640,
+              "end_epoch_us": 1789459416109533,
+              "elapsed_us": 469893,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:35.639640+00:00",
+              "end_utc": "2026-09-15T08:03:36.109533+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 63,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459415035185,
+          "end_epoch_us": 1789459415196763,
+          "elapsed_us": 161578,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1183.444,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 67,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459417493623,
+              "end_epoch_us": 1789459417982162,
+              "elapsed_us": 488539,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:37.493623+00:00",
+              "end_utc": "2026-09-15T08:03:37.982162+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 68,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459417982414,
+              "end_epoch_us": 1789459418508745,
+              "elapsed_us": 526330,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:37.982414+00:00",
+              "end_utc": "2026-09-15T08:03:38.508745+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 66,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459417326473,
+          "end_epoch_us": 1789459417492991,
+          "elapsed_us": 166518,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1221.498,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 70,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459419905941,
+              "end_epoch_us": 1789459420469086,
+              "elapsed_us": 563145,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:39.905941+00:00",
+              "end_utc": "2026-09-15T08:03:40.469086+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 71,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459420469364,
+              "end_epoch_us": 1789459420944840,
+              "elapsed_us": 475476,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:40.469364+00:00",
+              "end_utc": "2026-09-15T08:03:40.944840+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 69,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459419724398,
+          "end_epoch_us": 1789459419905530,
+          "elapsed_us": 181132,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1122.153,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 73,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459422319951,
+              "end_epoch_us": 1789459422808321,
+              "elapsed_us": 488370,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:42.319951+00:00",
+              "end_utc": "2026-09-15T08:03:42.808321+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 74,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459422808677,
+              "end_epoch_us": 1789459423280260,
+              "elapsed_us": 471583,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:42.808677+00:00",
+              "end_utc": "2026-09-15T08:03:43.280260+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 72,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459422159031,
+          "end_epoch_us": 1789459422319636,
+          "elapsed_us": 160605,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1106.308,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 76,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459424649559,
+              "end_epoch_us": 1789459425109571,
+              "elapsed_us": 460012,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:44.649559+00:00",
+              "end_utc": "2026-09-15T08:03:45.109571+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 77,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459425109949,
+              "end_epoch_us": 1789459425599792,
+              "elapsed_us": 489843,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:45.109949+00:00",
+              "end_utc": "2026-09-15T08:03:45.599792+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 75,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459424495445,
+          "end_epoch_us": 1789459424649257,
+          "elapsed_us": 153812,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1181.428,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 79,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459426976615,
+              "end_epoch_us": 1789459427480657,
+              "elapsed_us": 504042,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:46.976615+00:00",
+              "end_utc": "2026-09-15T08:03:47.480657+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 80,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459427480907,
+              "end_epoch_us": 1789459427995961,
+              "elapsed_us": 515055,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:47.480907+00:00",
+              "end_utc": "2026-09-15T08:03:47.995961+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 78,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459426815977,
+          "end_epoch_us": 1789459426976279,
+          "elapsed_us": 160301,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1630.552,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 82,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459429782279,
+              "end_epoch_us": 1789459430355733,
+              "elapsed_us": 573454,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:49.782279+00:00",
+              "end_utc": "2026-09-15T08:03:50.355733+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 83,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459430356632,
+              "end_epoch_us": 1789459430844271,
+              "elapsed_us": 487639,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:50.356632+00:00",
+              "end_utc": "2026-09-15T08:03:50.844271+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 81,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459429214816,
+          "end_epoch_us": 1789459429781663,
+          "elapsed_us": 566847,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1686.355,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 85,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459432218096,
+              "end_epoch_us": 1789459432731394,
+              "elapsed_us": 513298,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:52.218096+00:00",
+              "end_utc": "2026-09-15T08:03:52.731394+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 86,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459432731646,
+              "end_epoch_us": 1789459433743547,
+              "elapsed_us": 1011900,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:52.731646+00:00",
+              "end_utc": "2026-09-15T08:03:53.743547+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 84,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459432058507,
+          "end_epoch_us": 1789459432217731,
+          "elapsed_us": 159224,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1137.997,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 88,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459435116709,
+              "end_epoch_us": 1789459435596370,
+              "elapsed_us": 479661,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:55.116709+00:00",
+              "end_utc": "2026-09-15T08:03:55.596370+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 89,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459435596869,
+              "end_epoch_us": 1789459436099450,
+              "elapsed_us": 502581,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:55.596869+00:00",
+              "end_utc": "2026-09-15T08:03:56.099450+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 87,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459434962800,
+          "end_epoch_us": 1789459435115906,
+          "elapsed_us": 153106,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1263.609,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 91,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459437477222,
+              "end_epoch_us": 1789459437971118,
+              "elapsed_us": 493895,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:57.477222+00:00",
+              "end_utc": "2026-09-15T08:03:57.971118+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 92,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459437971921,
+              "end_epoch_us": 1789459438575292,
+              "elapsed_us": 603371,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:57.971921+00:00",
+              "end_utc": "2026-09-15T08:03:58.575292+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 90,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459437313621,
+          "end_epoch_us": 1789459437476782,
+          "elapsed_us": 163161,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1326.462,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 94,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459439946243,
+              "end_epoch_us": 1789459440435887,
+              "elapsed_us": 489644,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:03:59.946243+00:00",
+              "end_utc": "2026-09-15T08:04:00.435887+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 95,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459440436390,
+              "end_epoch_us": 1789459441119114,
+              "elapsed_us": 682724,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:00.436390+00:00",
+              "end_utc": "2026-09-15T08:04:01.119114+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 93,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459439794043,
+          "end_epoch_us": 1789459439945699,
+          "elapsed_us": 151657,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1296.128,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 97,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459442504719,
+              "end_epoch_us": 1789459442992329,
+              "elapsed_us": 487609,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:02.504719+00:00",
+              "end_utc": "2026-09-15T08:04:02.992329+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 98,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459442992756,
+              "end_epoch_us": 1789459443624820,
+              "elapsed_us": 632064,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:02.992756+00:00",
+              "end_utc": "2026-09-15T08:04:03.624820+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 96,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459442330090,
+          "end_epoch_us": 1789459442504293,
+          "elapsed_us": 174203,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1291.859,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 100,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459445054034,
+              "end_epoch_us": 1789459445545124,
+              "elapsed_us": 491090,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:05.054034+00:00",
+              "end_utc": "2026-09-15T08:04:05.545124+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 101,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459445545438,
+              "end_epoch_us": 1789459446130573,
+              "elapsed_us": 585135,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:05.545438+00:00",
+              "end_utc": "2026-09-15T08:04:06.130573+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 99,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459444839796,
+          "end_epoch_us": 1789459445053501,
+          "elapsed_us": 213704,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1338.352,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 103,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459447509956,
+              "end_epoch_us": 1789459448198763,
+              "elapsed_us": 688807,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:07.509956+00:00",
+              "end_utc": "2026-09-15T08:04:08.198763+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 104,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459448199031,
+              "end_epoch_us": 1789459448682309,
+              "elapsed_us": 483278,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:08.199031+00:00",
+              "end_utc": "2026-09-15T08:04:08.682309+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 102,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459447345287,
+          "end_epoch_us": 1789459447509279,
+          "elapsed_us": 163992,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1175.656,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 106,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459450070679,
+              "end_epoch_us": 1789459450552163,
+              "elapsed_us": 481484,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:10.070679+00:00",
+              "end_utc": "2026-09-15T08:04:10.552163+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 107,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459450552567,
+              "end_epoch_us": 1789459451075161,
+              "elapsed_us": 522593,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:10.552567+00:00",
+              "end_utc": "2026-09-15T08:04:11.075161+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 105,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459449901466,
+          "end_epoch_us": 1789459450070239,
+          "elapsed_us": 168773,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1175.883,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 109,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459452484565,
+              "end_epoch_us": 1789459452964297,
+              "elapsed_us": 479732,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:12.484565+00:00",
+              "end_utc": "2026-09-15T08:04:12.964297+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 110,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459452964559,
+              "end_epoch_us": 1789459453462430,
+              "elapsed_us": 497871,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:12.964559+00:00",
+              "end_utc": "2026-09-15T08:04:13.462430+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 108,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459452287765,
+          "end_epoch_us": 1789459452484286,
+          "elapsed_us": 196521,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1239.197,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 112,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459454845015,
+              "end_epoch_us": 1789459455332901,
+              "elapsed_us": 487886,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:14.845015+00:00",
+              "end_utc": "2026-09-15T08:04:15.332901+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 113,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459455333248,
+              "end_epoch_us": 1789459455912330,
+              "elapsed_us": 579081,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:15.333248+00:00",
+              "end_utc": "2026-09-15T08:04:15.912330+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 111,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459454674212,
+          "end_epoch_us": 1789459454844658,
+          "elapsed_us": 170446,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1161.43,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 115,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459457317228,
+              "end_epoch_us": 1789459457807601,
+              "elapsed_us": 490373,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:17.317228+00:00",
+              "end_utc": "2026-09-15T08:04:17.807601+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 116,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459457808062,
+              "end_epoch_us": 1789459458292813,
+              "elapsed_us": 484752,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:17.808062+00:00",
+              "end_utc": "2026-09-15T08:04:18.292813+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 114,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459457132728,
+          "end_epoch_us": 1789459457316849,
+          "elapsed_us": 184121,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1161.329,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 118,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459459680173,
+              "end_epoch_us": 1789459460162363,
+              "elapsed_us": 482190,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:19.680173+00:00",
+              "end_utc": "2026-09-15T08:04:20.162363+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 119,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459460162632,
+              "end_epoch_us": 1789459460670066,
+              "elapsed_us": 507434,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:20.162632+00:00",
+              "end_utc": "2026-09-15T08:04:20.670066+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 117,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459459510386,
+          "end_epoch_us": 1789459459679685,
+          "elapsed_us": 169299,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1219.158,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 121,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459462068689,
+              "end_epoch_us": 1789459462620652,
+              "elapsed_us": 551963,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:22.068689+00:00",
+              "end_utc": "2026-09-15T08:04:22.620652+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 122,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459462620991,
+              "end_epoch_us": 1789459463102607,
+              "elapsed_us": 481615,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:22.620991+00:00",
+              "end_utc": "2026-09-15T08:04:23.102607+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 120,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459461884605,
+          "end_epoch_us": 1789459462067876,
+          "elapsed_us": 183271,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1131.794,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 124,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459464485288,
+              "end_epoch_us": 1789459464985684,
+              "elapsed_us": 500395,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:24.485288+00:00",
+              "end_utc": "2026-09-15T08:04:24.985684+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 125,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459464986234,
+              "end_epoch_us": 1789459465447646,
+              "elapsed_us": 461412,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:24.986234+00:00",
+              "end_utc": "2026-09-15T08:04:25.447646+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 123,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459464317059,
+          "end_epoch_us": 1789459464485012,
+          "elapsed_us": 167953,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1294.363,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 127,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459466814315,
+              "end_epoch_us": 1789459467389159,
+              "elapsed_us": 574844,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:26.814315+00:00",
+              "end_utc": "2026-09-15T08:04:27.389159+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 128,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459467389650,
+              "end_epoch_us": 1789459467956783,
+              "elapsed_us": 567133,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:27.389650+00:00",
+              "end_utc": "2026-09-15T08:04:27.956783+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 126,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459466663518,
+          "end_epoch_us": 1789459466814019,
+          "elapsed_us": 150500,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1145.621,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 130,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459469341318,
+              "end_epoch_us": 1789459469845819,
+              "elapsed_us": 504500,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:29.341318+00:00",
+              "end_utc": "2026-09-15T08:04:29.845819+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 131,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459469846443,
+              "end_epoch_us": 1789459470316043,
+              "elapsed_us": 469600,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:29.846443+00:00",
+              "end_utc": "2026-09-15T08:04:30.316043+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 129,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459469172207,
+          "end_epoch_us": 1789459469340602,
+          "elapsed_us": 168395,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1107.775,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 133,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459471676057,
+              "end_epoch_us": 1789459472162790,
+              "elapsed_us": 486732,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:31.676057+00:00",
+              "end_utc": "2026-09-15T08:04:32.162790+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 134,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459472163404,
+              "end_epoch_us": 1789459472634442,
+              "elapsed_us": 471037,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:32.163404+00:00",
+              "end_utc": "2026-09-15T08:04:32.634442+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 132,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459471528076,
+          "end_epoch_us": 1789459471675580,
+          "elapsed_us": 147505,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1893.628,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 136,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459474009183,
+              "end_epoch_us": 1789459474948388,
+              "elapsed_us": 939204,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:34.009183+00:00",
+              "end_utc": "2026-09-15T08:04:34.948388+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 137,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459474949250,
+              "end_epoch_us": 1789459475745483,
+              "elapsed_us": 796234,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:34.949250+00:00",
+              "end_utc": "2026-09-15T08:04:35.745483+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 135,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459473853668,
+          "end_epoch_us": 1789459474008339,
+          "elapsed_us": 154671,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1852.873,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 139,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459477130355,
+              "end_epoch_us": 1789459477579856,
+              "elapsed_us": 449501,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:37.130355+00:00",
+              "end_utc": "2026-09-15T08:04:37.579856+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 140,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459477580442,
+              "end_epoch_us": 1789459478810961,
+              "elapsed_us": 1230518,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:37.580442+00:00",
+              "end_utc": "2026-09-15T08:04:38.810961+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 138,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459476960347,
+          "end_epoch_us": 1789459477129908,
+          "elapsed_us": 169561,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1299.417,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 142,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459480207921,
+              "end_epoch_us": 1789459480719700,
+              "elapsed_us": 511779,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:40.207921+00:00",
+              "end_utc": "2026-09-15T08:04:40.719700+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 143,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459480719962,
+              "end_epoch_us": 1789459481320956,
+              "elapsed_us": 600994,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:40.719962+00:00",
+              "end_utc": "2026-09-15T08:04:41.320956+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 141,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459480023467,
+          "end_epoch_us": 1789459480206377,
+          "elapsed_us": 182910,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1367.105,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 145,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459482816884,
+              "end_epoch_us": 1789459483368818,
+              "elapsed_us": 551933,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:42.816884+00:00",
+              "end_utc": "2026-09-15T08:04:43.368818+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 146,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459483369298,
+              "end_epoch_us": 1789459483895948,
+              "elapsed_us": 526650,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:43.369298+00:00",
+              "end_utc": "2026-09-15T08:04:43.895948+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 144,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459482530889,
+          "end_epoch_us": 1789459482816292,
+          "elapsed_us": 285403,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1252.841,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 148,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459485287184,
+              "end_epoch_us": 1789459485805642,
+              "elapsed_us": 518458,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:45.287184+00:00",
+              "end_utc": "2026-09-15T08:04:45.805642+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 149,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459485806649,
+              "end_epoch_us": 1789459486360516,
+              "elapsed_us": 553866,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:45.806649+00:00",
+              "end_utc": "2026-09-15T08:04:46.360516+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 147,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459485109314,
+          "end_epoch_us": 1789459485286831,
+          "elapsed_us": 177517,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1503.384,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 151,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459487800293,
+              "end_epoch_us": 1789459488329106,
+              "elapsed_us": 528813,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:47.800293+00:00",
+              "end_utc": "2026-09-15T08:04:48.329106+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 152,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459488329667,
+              "end_epoch_us": 1789459489117479,
+              "elapsed_us": 787812,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:48.329667+00:00",
+              "end_utc": "2026-09-15T08:04:49.117479+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 150,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459487615786,
+          "end_epoch_us": 1789459487799785,
+          "elapsed_us": 183999,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    },
+    {
+      "host_publish_ms": 1424.935,
+      "writes": [
+        {
+          "key_class": "wal",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 154,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459490527179,
+              "end_epoch_us": 1789459491228863,
+              "elapsed_us": 701684,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:50.527179+00:00",
+              "end_utc": "2026-09-15T08:04:51.228863+00:00"
+            }
+          ]
+        },
+        {
+          "key_class": "index",
+          "retry_count": 0,
+          "followup_heads": 0,
+          "attempts": [
+            {
+              "call_id": 155,
+              "attempt": 1,
+              "method": "PUT",
+              "start_epoch_us": 1789459491229258,
+              "end_epoch_us": 1789459491759859,
+              "elapsed_us": 530600,
+              "status": 200,
+              "etag_present": true,
+              "inter_attempt_us": 0,
+              "previous_outcome": "",
+              "outcome": "http_200",
+              "local_socket": "10.42.0.42:44698",
+              "remote_socket": "172.64.66.1:443",
+              "end_boundary": "response_headers_or_transport_error",
+              "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+              "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+              "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+              "socket_previously_observed": true,
+              "start_utc": "2026-09-15T08:04:51.229258+00:00",
+              "end_utc": "2026-09-15T08:04:51.759859+00:00"
+            }
+          ]
+        }
+      ],
+      "other_http_attempts": [
+        {
+          "message": "S3 HTTP attempt finished",
+          "call_id": 153,
+          "attempt": 1,
+          "method": "HEAD",
+          "start_epoch_us": 1789459490336183,
+          "end_epoch_us": 1789459490526317,
+          "elapsed_us": 190134,
+          "status": 404,
+          "etag_present": false,
+          "inter_attempt_us": 0,
+          "previous_outcome": "",
+          "outcome": "http_404",
+          "local_socket": "10.42.0.42:44698",
+          "remote_socket": "172.64.66.1:443",
+          "end_boundary": "response_headers_or_transport_error",
+          "inter_attempt_scope": "SDK handling, signing, backoff and scheduling; not isolated sleep",
+          "retry_reason_coverage": "preceding response status or transport error kind; SDK decision not exposed",
+          "transport_timing_coverage": "socket addresses when exposed; DNS/TCP/TLS timings unavailable",
+          "socket_previously_observed": true
+        }
+      ]
+    }
+  ],
+  "coverage": [
+    "The connector observes SDK transport invocations, ending at response headers or transport error.",
+    "Inter-attempt gaps include SDK handling, signing, backoff and scheduling; the exact SDK sleep decision is not separately exposed.",
+    "Previous outcome is the preceding response status or transport-error kind, not a captured SDK retry decision.",
+    "Repeated local/remote socket pairs are evidence consistent with connection reuse. DNS/TCP/TLS durations and lower-transport transparent replays are not exposed.",
+    "Network transit versus R2 service execution remains unresolved for an individual attempt."
+  ],
+  "sources": [
+    {
+      "path": "/home/laurynas/.local/state/tandem-r2-combined-experiment/warm/server-events.jsonl",
+      "sha256": "9a5f5639dc9f47153bda6272949decde7f42c54cc8e80a1150122e4ed30b2dc8"
+    },
+    {
+      "path": "/home/laurynas/.local/state/tandem-r2-combined-experiment/warm/reports/snapshot_publish_latency_real_distance_latest.json",
+      "sha256": "5094971dc1fc43316ae616598f14faf6a67863b02f80ca47c4976d32c3faf176"
+    },
+    {
+      "path": "/home/laurynas/.local/state/tandem-r2-combined-experiment/build.json",
+      "sha256": "aa1ab44020a77f503c2af16e212adbcef5efcc88d7c4f8fecc8fc3f8780c11cf"
+    },
+    {
+      "path": "/home/laurynas/code/laulauland/tandem/scripts/profile_r2_attempts.py",
+      "sha256": "74804d76e6952421f11cce64b0ee561696f76257a57fb1bcf89157603d4dbedf"
+    },
+    {
+      "path": "/home/laurynas/.local/state/tandem-r2-combined-experiment/cloudflare-bucket.json",
+      "sha256": "57f020cee8336f0bceb2e923efa3c7aad98dcf42dbb07962a4a2575d334c660b"
+    },
+    {
+      "path": "/home/laurynas/.local/state/tandem-r2-combined-experiment/cloudflare-schema.json",
+      "sha256": "63401f69a547cacba0be8b67d9b97eade01dafa8ce4a022ed13b395fa7b029e6"
+    },
+    {
+      "path": "/home/laurynas/.local/state/tandem-r2-combined-experiment/cloudflare-fields.json",
+      "sha256": "8c769c6eb41daf45e6e5dc8cbde55258ec70a8b8ade553225a5808d1c5c47f90"
+    },
+    {
+      "path": "/home/laurynas/.local/state/tandem-r2-combined-experiment/cloudflare-operations.json",
+      "sha256": "aa67df549493c4f15af6b0e3afa50f6b4938a69a11c39745efec5c38a1b537ec"
+    },
+    {
+      "path": "/home/laurynas/.local/state/tandem-r2-combined-experiment/cleanup.json",
+      "sha256": "85cff299bcc737be08c96799a5037b95dd2736af3263d3de78304c5849fae4a7"
+    }
+  ],
+  "cloudflare_bucket": {
+    "name": "tandem-native",
+    "creation_date": "2026-09-14T21:01:35.895Z",
+    "location": "WEUR",
+    "storage_class": "Standard",
+    "jurisdiction": "default"
+  },
+  "build": {
+    "revision": "081b3761d350d2cc0a6edef20965ac19751b2055",
+    "base": "2a19329a",
+    "image": "sha256:e70e2eec3d495fd5c8e0be74adda86507dfac7f51a724fbf9813ff59b2b247c7",
+    "artifacts": {
+      "tandem": {
+        "path": "/home/laurynas/.local/state/tandem-r2-combined-experiment/artifacts/tandem",
+        "sha256": "7865377a3c7cb2c5cb9725613e22c1e2068fe48e5899245c9b108d8998a29b70"
+      },
+      "snapshot_publish_latency": {
+        "path": "/home/laurynas/.local/state/tandem-r2-combined-experiment/artifacts/snapshot_publish_latency",
+        "sha256": "0a88c6a7ac30e8528b061027c6fd6123f5e35b8b2c2a73162219560e97c50b4f"
+      }
+    }
+  }
+}

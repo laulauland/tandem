@@ -19,6 +19,7 @@ gix-hash = "0.22"
 gix-object = "0.55"
 dunce = "1"
 libc = "0.2"
+hyper-util = { version = "0.1", features = ["client-legacy"] }
 object_store = { version = "0.14.1", features = ["aws"] }
 tempfile = "3"
 tokio = { version = "1", features = ["full"] }

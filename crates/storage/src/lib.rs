@@ -13,6 +13,9 @@
 //! blocks the calling thread on it; blocking the caller's reactor is safe
 //! because the I/O runs on threads that reactor does not own.
 
+#[cfg(feature = "s3")]
+mod http_trace;
+
 use anyhow::{anyhow, bail, Context, Result};
 #[cfg(feature = "s3")]
 use object_store::ObjectStoreExt as _;
@@ -571,6 +574,7 @@ impl S3ObjectStore {
         let spec = parse_s3_spec(rest)?;
 
         let mut builder = object_store::aws::AmazonS3Builder::from_env()
+            .with_http_connector(http_trace::ObservedConnector)
             .with_bucket_name(&spec.bucket)
             .with_region(spec.region.clone().unwrap_or_else(|| "us-east-1".into()))
             .with_virtual_hosted_style_request(spec.virtual_hosted)
@@ -637,9 +641,14 @@ impl S3ObjectStore {
             .runtime
             .as_ref()
             .expect("bucket runtime is only taken while dropping the store");
-        runtime.spawn(async move {
-            let _ = tx.send(future.await);
-        });
+        use tracing::{instrument::WithSubscriber, Instrument};
+        runtime.spawn(
+            async move {
+                let _ = tx.send(http_trace::observe(future).await);
+            }
+            .instrument(tracing::Span::current())
+            .with_current_subscriber(),
+        );
         rx.recv().expect("bucket runtime stopped unexpectedly")
     }
 
@@ -665,6 +674,7 @@ impl S3ObjectStore {
     }
 
     fn etag_of(&self, key: &str) -> Result<String> {
+        tracing::debug!(key_fingerprint = %content_etag(key.as_bytes()), "S3 ETag follow-up HEAD");
         let location = self.location(key)?;
         let inner = self.inner.clone();
         let meta = self
@@ -686,6 +696,7 @@ impl ObjectStore for S3ObjectStore {
     }
 
     fn put_immutable(&self, key: &str, data: &[u8]) -> Result<bool> {
+        let _span = tracing::debug_span!("S3 adapter write", key_class = http_trace::key_class(key), key_fingerprint = %content_etag(key.as_bytes())).entered();
         match self.put_with_mode(key, data, object_store::PutMode::Create) {
             Ok(_) => Ok(true),
             // An earlier attempt, or another writer, got there first.
@@ -731,6 +742,7 @@ impl ObjectStore for S3ObjectStore {
     }
 
     fn put_overwrite(&self, key: &str, data: &[u8]) -> Result<String> {
+        let _span = tracing::debug_span!("S3 adapter write", key_class = http_trace::key_class(key), key_fingerprint = %content_etag(key.as_bytes())).entered();
         let result = self
             .put_with_mode(key, data, object_store::PutMode::Overwrite)
             .map_err(|err| anyhow!("put {key}: {err}"))?;
@@ -746,6 +758,7 @@ impl ObjectStore for S3ObjectStore {
         data: &[u8],
         expected: Option<&str>,
     ) -> std::result::Result<String, CasError> {
+        let _span = tracing::debug_span!("S3 adapter write", key_class = http_trace::key_class(key), key_fingerprint = %content_etag(key.as_bytes())).entered();
         let mode = match expected {
             Some(etag) => object_store::PutMode::Update(object_store::UpdateVersion {
                 e_tag: Some(etag.to_string()),
@@ -771,6 +784,84 @@ impl ObjectStore for S3ObjectStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "s3")]
+    #[test]
+    fn s3_attempt_trace_distinguishes_retry_and_missing_etag_rejection() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let mut methods = Vec::new();
+            for (status, etag) in [(503, None), (200, Some("first")), (200, None)] {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut byte = [0];
+                while !request.ends_with(b"\r\n\r\n") {
+                    socket.read_exact(&mut byte).unwrap();
+                    request.push(byte[0]);
+                }
+                let header = String::from_utf8(request).unwrap();
+                methods.push(header.split_whitespace().next().unwrap().to_string());
+                let length: usize = header
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .map(|v| v.trim().parse().unwrap())
+                    })
+                    .unwrap_or(0);
+                socket.read_exact(&mut vec![0; length]).unwrap();
+                let etag = etag
+                    .map(|v| format!("ETag: \"{v}\"\r\n"))
+                    .unwrap_or_default();
+                write!(socket, "HTTP/1.1 {status} test\r\nContent-Length: 0\r\nLast-Modified: Tue, 15 Sep 2026 00:00:00 GMT\r\n{etag}Connection: close\r\n\r\n").unwrap();
+            }
+            methods
+        });
+        let output = http_trace::test_capture();
+        let subscriber = tracing_subscriber::fmt()
+            .json()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(output.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            let store = S3ObjectStore::open(&format!(
+                "test/prefix?endpoint=http://{address}&anonymous=true"
+            ))
+            .unwrap();
+            assert_eq!(
+                store.compare_and_put("index/heads", b"one", None).unwrap(),
+                "\"first\""
+            );
+            let error = store
+                .compare_and_put("index/heads", b"two", Some("\"first\""))
+                .unwrap_err();
+            assert!(error.to_string().contains("ETag"));
+        });
+        assert_eq!(server.join().unwrap(), ["PUT", "PUT", "PUT"]);
+        let rows = output.events();
+        let attempts: Vec<_> = rows
+            .iter()
+            .filter(|e| e["fields"]["message"] == "S3 HTTP attempt finished")
+            .collect();
+        assert_eq!(attempts.len(), 3);
+        assert_eq!(attempts[0]["fields"]["status"], 503);
+        assert_eq!(attempts[1]["fields"]["attempt"], 2);
+        assert_eq!(attempts[1]["fields"]["previous_outcome"], "http_503");
+        assert!(attempts[1]["fields"]["inter_attempt_us"].as_u64().unwrap() > 0);
+        assert_eq!(attempts[1]["fields"]["etag_present"], true);
+        assert_eq!(attempts[2]["fields"]["etag_present"], false);
+        assert_eq!(
+            rows.iter()
+                .filter(|e| e["fields"]["message"] == "S3 ETag follow-up HEAD")
+                .count(),
+            0
+        );
+    }
 
     /// Every backend must behave the same way for the WAL and index writes.
     fn assert_bucket_contract(store: &dyn ObjectStore, salt: &str) {

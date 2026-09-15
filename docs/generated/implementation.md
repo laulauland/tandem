@@ -91,6 +91,7 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/server/src/logging.rs`
 - `crates/server/src/process.rs`
 - `crates/server/src/writer.rs`
+- `crates/storage/src/http_trace.rs`
 - `crates/storage/src/lib.rs`
 - `crates/wal/src/lib.rs`
 - `crates/workspace/src/daemon.rs`

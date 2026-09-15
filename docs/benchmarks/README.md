@@ -16,6 +16,9 @@ states what remains unlocalized. The [data artifact](snapshot-latency-profile.js
 retains percentile tables and hashes of the raw evidence. This is an
 investigation without behavior changes or optimization proposals.
 
+The follow-up [R2 attempt profile](r2-http-attempts.md) observes individual SDK
+HTTP attempts, ETags, retries and socket reuse, with Cloudflare API evidence.
+
 ## Workspace build-cache isolation
 
 Run `python3 scripts/check_build_cache.py` from the checkout. It warms the named
