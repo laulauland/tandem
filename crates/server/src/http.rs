@@ -77,6 +77,7 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/views", post(put_view))
         .route("/api/views/{id}", get(get_view))
         .route("/api/heads", get(get_heads).post(update_heads))
+        .route("/api/publish", post(publish_prepared))
         .route("/api/events", get(events))
         .route("/api/tokens", post(mint_token))
         .route("/api/workspaces/{id}/writer", post(claim_writer_role))
@@ -113,8 +114,8 @@ async fn require_bearer(
         ));
     };
     request.extensions_mut().insert(authority);
-    let is_publish =
-        request.method() == axum::http::Method::POST && request.uri().path() == "/api/heads";
+    let is_publish = request.method() == axum::http::Method::POST
+        && matches!(request.uri().path(), "/api/heads" | "/api/publish");
     if is_publish {
         let permit = server
             .acquire_publish()
@@ -597,6 +598,50 @@ async fn get_heads(State(server): State<Arc<Server>>) -> ApiResult<Response> {
             workspace_heads: state.workspace_heads,
         },
     ))
+}
+
+async fn publish_prepared(
+    State(server): State<Arc<Server>>,
+    headers: HeaderMap,
+    extensions: axum::http::Extensions,
+    body: Bytes,
+) -> ApiResult<Response> {
+    expected_version_from_if_match(&headers)?;
+    let request = wire::decode_prepared_publish(&body)
+        .map_err(|_| ApiError::bad_request("invalid prepared publish frame"))?;
+    let authority = authority_of(&extensions)?;
+    if !request.heads.workspace_id.is_empty() && !authority.may_act_for(&request.heads.workspace_id)
+    {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "workspace scope denied",
+        ));
+    }
+    tracing::debug!(
+        rpc_method = "publishPrepared",
+        objects = request.objects.len(),
+        bytes = body.len(),
+        "rpc request"
+    );
+    drop(body);
+    let heads = request.heads.clone();
+    blocking(&server, move |server| {
+        server.repository.stage_prepared_publish_sync(&request)
+    })
+    .await
+    .map_err(|error| {
+        match error.downcast_ref::<jj_tandem_repository::PreparedPublishError>() {
+            Some(jj_tandem_repository::PreparedPublishError::IdentityMismatch) => ApiError::new(
+                StatusCode::CONFLICT,
+                "prepared identity or normalized payload differs; heads were not published",
+            ),
+            Some(jj_tandem_repository::PreparedPublishError::Invalid) => {
+                ApiError::bad_request("invalid prepared publish")
+            }
+            None => ApiError::internal(error),
+        }
+    })?;
+    update_heads(State(server), headers, extensions, Json(heads)).await
 }
 
 async fn update_heads(

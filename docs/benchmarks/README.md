@@ -21,6 +21,9 @@ HTTP attempts, ETags, retries and socket reuse, with Cloudflare API evidence.
 The [local preparation gate](local-publish-parity.md) records ordinary fingerprint
 parity and a native jj rewrite-metadata collision that stops the combined-publish
 experiment before an endpoint or performance comparison.
+The subsequent [combined-publish experiment](combined-publish.md) adds explicit
+identity rejection, exercises durability and scope, and compares six mutation
+requests with one on exe.dev and R2.
 
 ## Workspace build-cache isolation
 

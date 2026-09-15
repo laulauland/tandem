@@ -18,6 +18,8 @@ fn independent_rewrite_predecessors_can_change_server_commit_identity(
     let settings = jj_tandem_test_support::test_settings()?;
     let server_dir = tempfile::tempdir()?;
     let server = Repository::new(&settings, server_dir.path().to_owned(), None)?;
+    let mut cluster = jj_tandem_test_support::cluster::Cluster::start()?;
+    let client = jj_tandem_client::TandemClient::connect(&cluster.addr, &cluster.admin_token)?;
     let signature = jj_lib::backend::Signature {
         name: "Test User".into(),
         email: "test@tandem.dev".into(),
@@ -38,12 +40,19 @@ fn independent_rewrite_predecessors_can_change_server_commit_identity(
         let root = store.get_commit(store.root_commit_id())?;
         let mut tx = repo.start_transaction();
         let mut commits = Vec::new();
+        let mut objects = Vec::new();
         for text in [previous_text, b"identical edited file\n".as_slice()] {
             let path = RepoPathBuf::from_internal_string("edited.txt")?;
             let file_id = store
                 .write_file(&path, &mut std::io::Cursor::new(text))
                 .block_on()?;
             assert_eq!(server.put_object_sync("file", text)?.0, file_id.to_bytes());
+            client.put_object(jj_tandem_protocol::wire::KIND_FILE, text)?;
+            objects.push(jj_tandem_protocol::wire::PreparedObject {
+                kind: jj_tandem_protocol::wire::KIND_FILE,
+                id: file_id.to_bytes(),
+                data: text.to_vec(),
+            });
             let mut tree = MergedTreeBuilder::new(root.tree());
             tree.set_or_remove(
                 path,
@@ -64,6 +73,12 @@ fn independent_rewrite_predecessors_can_change_server_commit_identity(
                 server.put_object_sync("tree", &tree_bytes)?.0,
                 tree_id.to_bytes()
             );
+            client.put_object(jj_tandem_protocol::wire::KIND_TREE, &tree_bytes)?;
+            objects.push(jj_tandem_protocol::wire::PreparedObject {
+                kind: jj_tandem_protocol::wire::KIND_TREE,
+                id: tree_id.to_bytes(),
+                data: tree_bytes,
+            });
             let builder = match commits.last() {
                 Some(previous) => tx.repo_mut().rewrite_commit(previous),
                 None => tx
@@ -79,6 +94,14 @@ fn independent_rewrite_predecessors_can_change_server_commit_identity(
                 .write()?;
             let data =
                 jj_lib::simple_backend::commit_to_proto(commit.store_commit()).encode_to_vec();
+            objects.push(jj_tandem_protocol::wire::PreparedObject {
+                kind: jj_tandem_protocol::wire::KIND_COMMIT,
+                id: commit.id().to_bytes(),
+                data: data.clone(),
+            });
+            if writer == 0 || commits.is_empty() {
+                client.put_object(jj_tandem_protocol::wire::KIND_COMMIT, &data)?;
+            }
             let (remote_id, normalized) = server.put_object_sync("commit", &data)?;
             if writer == 1 && !commits.is_empty() {
                 // Both native repositories use the same settings. Git hashes do
@@ -127,6 +150,46 @@ fn independent_rewrite_predecessors_can_change_server_commit_identity(
                 }
             }
             commits.push(commit);
+        }
+        if writer == 1 {
+            tx.repo_mut()
+                .edit(WorkspaceNameBuf::from("writer"), commits.last().unwrap())?;
+            tx.repo_mut().rebase_descendants()?;
+            let unpublished = tx.write("prepare colliding rewrite")?;
+            let operation = unpublished.operation();
+            let request = jj_tandem_protocol::wire::PreparedPublish {
+                objects,
+                view: proto_convert::view_to_proto(operation.view()?.store_view()).encode_to_vec(),
+                operation: proto_convert::operation_to_proto(operation.store_operation())
+                    .encode_to_vec(),
+                heads: jj_tandem_protocol::wire::UpdateHeadsBody {
+                    old_ids: vec![],
+                    new_id: operation.id().hex(),
+                    workspace_id: "writer".into(),
+                },
+            };
+            let before = client.get_heads_state()?;
+            let index_before = std::fs::read(cluster.bucket.join(jj_tandem_wal::INDEX_KEY))?;
+            let response = reqwest::blocking::Client::new()
+                .post(format!("{}/api/publish", cluster.base_url()))
+                .bearer_auth(&cluster.admin_token)
+                .header(
+                    "If-Match",
+                    jj_tandem_protocol::http::etag_for_version(before.version),
+                )
+                .body(jj_tandem_protocol::wire::encode_prepared_publish(&request))
+                .send()?;
+            assert_eq!(response.status(), 409, "{}", response.text()?);
+            assert_eq!(client.get_heads_state()?.heads, before.heads);
+            assert_eq!(client.get_heads_state()?.version, before.version);
+            assert_eq!(
+                std::fs::read(cluster.bucket.join(jj_tandem_wal::INDEX_KEY))?,
+                index_before
+            );
+            cluster.cold_restart()?;
+            let fresh =
+                jj_tandem_client::TandemClient::connect(&cluster.addr, &cluster.admin_token)?;
+            assert_eq!(fresh.get_heads_state()?.heads, before.heads);
         }
     }
     Ok(())

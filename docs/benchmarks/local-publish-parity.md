@@ -66,3 +66,7 @@ and the matched six-versus-one exe.dev/R2 comparison therefore remain untested.
 Those later gates were not represented as passed. The independent
 [R2 HTTP-attempt measurement](r2-http-attempts.md) is complete and includes its
 own disposable-host evidence and cleanup; it is not a combined-request result.
+
+The subsequent [combined-publish experiment](combined-publish.md) continues with
+explicit identity rejection before head publication, as authorized after this
+gate. The original counterexample remains a rejection regression.

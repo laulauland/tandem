@@ -16,7 +16,7 @@
 | `jj-tandem-server` | `crates/server/Cargo.toml` | yes | jj-tandem-protocol, jj-tandem-repository, jj-tandem-storage |
 | `jj-tandem-simulation` | `testing/simulation/Cargo.toml` | no | — |
 | `jj-tandem-storage` | `crates/storage/Cargo.toml` | yes | — |
-| `jj-tandem-test-support` | `testing/test-support/Cargo.toml` | no | jj-tandem-client, jj-tandem-protocol, jj-tandem-repository, jj-tandem-server, jj-tandem-wal, jj-tandem-workspace |
+| `jj-tandem-test-support` | `testing/test-support/Cargo.toml` | no | jj-tandem-client, jj-tandem-jj, jj-tandem-protocol, jj-tandem-repository, jj-tandem-server, jj-tandem-wal, jj-tandem-workspace |
 | `jj-tandem-wal` | `crates/wal/Cargo.toml` | yes | — |
 | `jj-tandem-workspace` | `crates/workspace/Cargo.toml` | yes | jj-tandem-client, jj-tandem-jj, jj-tandem-protocol |
 
@@ -48,6 +48,7 @@ All other accepted commands are dispatched to embedded jj.
 | POST | `/api/views` |
 | GET | `/api/views/{id}` |
 | GET, POST | `/api/heads` |
+| POST | `/api/publish` |
 | GET | `/api/events` |
 | POST | `/api/tokens` |
 | POST | `/api/workspaces/{id}/writer` |
@@ -81,6 +82,7 @@ All other accepted commands are dispatched to embedded jj.
 - `crates/repository/src/bucket.rs`
 - `crates/repository/src/faults.rs`
 - `crates/repository/src/lib.rs`
+- `crates/repository/src/prepared.rs`
 - `crates/repository/src/repair.rs`
 - `crates/repository/src/scope.rs`
 - `crates/server/src/auth.rs`
@@ -103,12 +105,14 @@ All other accepted commands are dispatched to embedded jj.
 - `testing/test-support/src/cluster.rs`
 - `testing/test-support/src/lib.rs`
 - `testing/test-support/src/oracle.rs`
+- `testing/test-support/src/prepared.rs`
 - `testing/test-support/src/readiness.rs`
 - `testing/test-support/src/rng.rs`
 - `testing/test-support/src/schedule.rs`
 
 ## Generated test modules
 
+- `crates/cli/tests/combined_publish.rs`
 - `crates/cli/tests/common/bucket_harness.rs`
 - `crates/cli/tests/common/lines.rs`
 - `crates/cli/tests/common/mod.rs`
@@ -146,11 +150,12 @@ All other accepted commands are dispatched to embedded jj.
 - `testing/simulation/tests/properties/roundtrip.rs`
 - `testing/simulation/tests/properties.rs`
 
-The Cargo test targets are `crates/cli/tests/integration.rs`, `crates/cli/tests/local_publish_parity.rs`, `crates/protocol/tests/wire.rs`, `crates/wal/tests/wal.rs`, `testing/benchmarks/tests/portability.rs`, `testing/simulation/tests/dst.rs`, `testing/simulation/tests/properties.rs`;
+The Cargo test targets are `crates/cli/tests/combined_publish.rs`, `crates/cli/tests/integration.rs`, `crates/cli/tests/local_publish_parity.rs`, `crates/protocol/tests/wire.rs`, `crates/wal/tests/wal.rs`, `testing/benchmarks/tests/portability.rs`, `testing/simulation/tests/dst.rs`, `testing/simulation/tests/properties.rs`;
 unit tests remain beside their source modules.
 
 ## Benchmark targets
 
+- `jj-tandem-benchmarks`: `combined_publish`
 - `jj-tandem-benchmarks`: `snapshot_publish_latency`
 - `jj-tandem-benchmarks`: `stage6_mixed_load`
 - `jj-tandem-benchmarks`: `tcp_commit_path`

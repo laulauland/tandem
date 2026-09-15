@@ -28,6 +28,24 @@ fn batch_outcome() -> impl Strategy<Value = BatchOutcome> {
 
 proptest! {
     #[test]
+    fn prepared_publish_roundtrips_and_hostile_frames_do_not_panic(
+        items in proptest::collection::vec(batch_item(), 0..8),
+        view in proptest::collection::vec(any::<u8>(), 0..256),
+        operation in proptest::collection::vec(any::<u8>(), 0..256),
+        tail in proptest::collection::vec(any::<u8>(), 0..512),
+    ) {
+        let request = PreparedPublish {
+            objects: items.into_iter().map(|item| PreparedObject {kind:item.kind,id:vec![3;20],data:item.data}).collect(),
+            view, operation,
+            heads: UpdateHeadsBody {old_ids:vec![],new_id:"ab".repeat(64),workspace_id:"writer".into()},
+        };
+        let encoded = encode_prepared_publish(&request);
+        prop_assert_eq!(decode_prepared_publish(&encoded).unwrap(),request);
+        let mut hostile = b"TPP1".to_vec(); hostile.extend_from_slice(&tail);
+        let _ = decode_prepared_publish(&hostile);
+    }
+
+    #[test]
     fn operation_upload_round_trips_arbitrary_payloads(
         view in proptest::collection::vec(any::<u8>(), 0..512),
         operation in proptest::collection::vec(any::<u8>(), 1..512),
@@ -225,4 +243,27 @@ fn capability_names_round_trip() {
         );
     }
     assert_eq!(RepoCapability::from_name("watchheads"), None);
+}
+
+#[test]
+fn prepared_frame_roundtrips_and_rejects_every_truncation() {
+    let request = PreparedPublish {
+        objects: vec![PreparedObject {
+            kind: KIND_FILE,
+            id: vec![3; 20],
+            data: b"file".to_vec(),
+        }],
+        view: vec![1, 2],
+        operation: vec![3, 4],
+        heads: UpdateHeadsBody {
+            old_ids: vec![],
+            new_id: "ab".repeat(64),
+            workspace_id: "writer".into(),
+        },
+    };
+    let bytes = encode_prepared_publish(&request);
+    assert_eq!(decode_prepared_publish(&bytes).unwrap(), request);
+    for cut in 0..bytes.len() {
+        assert!(decode_prepared_publish(&bytes[..cut]).is_err());
+    }
 }

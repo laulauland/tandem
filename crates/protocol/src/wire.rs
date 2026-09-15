@@ -252,6 +252,72 @@ pub struct BatchItem {
     pub data: Vec<u8>,
 }
 
+/// Locally prepared native jj objects, in dependency order, followed by the
+/// view/operation and the existing head CAS request. No identity correction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedPublish {
+    pub objects: Vec<PreparedObject>,
+    pub view: Vec<u8>,
+    pub operation: Vec<u8>,
+    pub heads: UpdateHeadsBody,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedObject {
+    pub kind: u16,
+    pub id: Vec<u8>,
+    pub data: Vec<u8>,
+}
+
+pub fn encode_prepared_publish(publish: &PreparedPublish) -> Vec<u8> {
+    let mut out = b"TPP1".to_vec();
+    push_blob(
+        &mut out,
+        &serde_json::to_vec(&publish.heads).expect("head request serializes"),
+    );
+    out.extend_from_slice(&(publish.objects.len() as u32).to_le_bytes());
+    for object in &publish.objects {
+        out.extend_from_slice(&object.kind.to_le_bytes());
+        push_blob(&mut out, &object.id);
+        push_blob(&mut out, &object.data);
+    }
+    push_blob(&mut out, &publish.view);
+    push_blob(&mut out, &publish.operation);
+    out
+}
+
+pub fn decode_prepared_publish(bytes: &[u8]) -> Result<PreparedPublish, WireError> {
+    if bytes.len() > MAX_REQUEST_BODY_BYTES {
+        return Err(err("prepared publish exceeds request limit"));
+    }
+    let mut reader = Reader::new(bytes);
+    if reader.take(4)? != b"TPP1" {
+        return Err(err("not a prepared publish frame"));
+    }
+    let heads = serde_json::from_slice(&reader.blob()?).map_err(|_| err("invalid head request"))?;
+    let count = reader.record_count(10)?;
+    if count > 64 {
+        return Err(err("prepared publish exceeds 64 objects"));
+    }
+    let mut objects = Vec::with_capacity(count);
+    for _ in 0..count {
+        objects.push(PreparedObject {
+            kind: reader.u16()?,
+            id: reader.blob()?,
+            data: reader.blob()?,
+        });
+    }
+    let view = reader.blob()?;
+    let operation = reader.blob()?;
+    reader.finish()?;
+    Ok(PreparedPublish {
+        objects,
+        view,
+        operation,
+        heads,
+    })
+}
+
 /// What writing one batch item produced. A failure is per-item: one bad blob
 /// does not fail the blobs next to it in the same frame.
 #[derive(Debug, Clone, PartialEq, Eq)]

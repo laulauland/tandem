@@ -13,6 +13,8 @@
 //! settled on an interrupted clone's placeholder, and `authority` enforces
 //! publish scope using the caller's already-authenticated identity.
 
+mod prepared;
+pub use prepared::PreparedPublishError;
 mod authority;
 mod bucket;
 mod faults;

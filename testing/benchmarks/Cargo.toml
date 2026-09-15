@@ -21,7 +21,12 @@ harness = false
 name = "stage6_mixed_load"
 harness = false
 
+[[bench]]
+name = "combined_publish"
+harness = false
+
 [dev-dependencies]
+jj-tandem-protocol.workspace = true
 jj-lib.workspace = true
 jj-tandem-client.workspace = true
 pollster.workspace = true

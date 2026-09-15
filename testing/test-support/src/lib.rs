@@ -11,6 +11,7 @@
 pub mod agent;
 pub mod cluster;
 pub mod oracle;
+pub mod prepared;
 pub mod readiness;
 pub mod rng;
 pub mod schedule;
