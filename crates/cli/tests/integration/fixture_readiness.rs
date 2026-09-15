@@ -27,18 +27,21 @@
 //!
 //! One test per way, and each holds the readiness predicate to it.
 
+#[cfg(target_os = "linux")]
 use std::net::TcpStream;
 
 use crate::common;
 
 /// A socket bound to `port` on loopback and connected to itself.
+/// This Linux kernel reproducer is refused by macOS; the generic readiness
+/// handshake tests below still run on both platforms.
 ///
 /// This is the same pair of syscalls `connect` makes when it picks a source
 /// port equal to the destination: bind, then connect to the address just
 /// bound. `std::net::TcpStream` has no way to spell it, because it has no way
 /// to choose a source port, which is precisely why the collision is the
 /// kernel's to make and not the caller's to avoid.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn self_connected(port: u16) -> Option<TcpStream> {
     use std::os::fd::FromRawFd;
 
@@ -51,8 +54,6 @@ fn self_connected(port: u16) -> Option<TcpStream> {
             return None;
         }
         let addr = libc::sockaddr_in {
-            #[cfg(target_os = "macos")]
-            sin_len: std::mem::size_of::<libc::sockaddr_in>() as u8,
             sin_family: libc::AF_INET as libc::sa_family_t,
             sin_port: port.to_be(),
             // Already in network order: the bytes of 127.0.0.1, in the order
@@ -72,7 +73,7 @@ fn self_connected(port: u16) -> Option<TcpStream> {
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_connect_that_succeeded_is_not_a_server_that_started() {
     let addr = common::free_addr();

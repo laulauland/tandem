@@ -66,7 +66,8 @@ Before admitting clients:
 3. Supply a stable admin token through protected environment or service-secret
    storage. Do not put it in shell history, process arguments, images, or logs.
    Set `TANDEM_DISTRIBUTION_DIR` to the protected deployment's release directory;
-   the current installer serves `td-x86_64-unknown-linux-gnu` from that directory.
+   the installer serves `td-x86_64-unknown-linux-gnu` for Linux and
+   `td-aarch64-apple-darwin` for Apple Silicon macOS from that directory.
    Set `TANDEM_PUBLIC_URL` to the proxy's public HTTP(S) origin. The host renders
    that validated origin into its site and installer and does not infer it from
    request headers.
@@ -83,8 +84,8 @@ materialization and its supposed backup.
 
 ## Workspace access
 
-The public installer downloads the native GNU/Linux binary and asks the host for
-a signed owner credential. It stores one credential per exact host in
+The public installer downloads the matching native Linux or Apple Silicon
+macOS binary and asks the host for a signed owner credential. It stores one credential per exact host in
 `$XDG_CONFIG_HOME/td/credentials`, or `$HOME/.config/td/credentials`, with mode
 0600. Reinstall verifies and preserves a valid credential from the same host so
 namespace ownership is not replaced. A named clone reads that file, claims its

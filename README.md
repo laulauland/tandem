@@ -13,8 +13,8 @@ an S3-compatible bucket](docs/self-hosting.md).
 
 ## Get started on tandem.land
 
-The hosted installer supports GNU/Linux x86_64 and saves an owner credential
-for this host. Replace `you` with your namespace and `my-project` with your
+The hosted installer supports GNU/Linux x86_64 and Apple Silicon macOS. It saves
+an owner credential for this host. Replace `you` with your namespace and `my-project` with your
 repository name; the first clone creates them when needed.
 
 ```bash

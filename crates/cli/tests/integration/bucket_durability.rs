@@ -288,10 +288,11 @@ fn maximum_history_work(log: &Path) -> usize {
         .expect("read server log")
         .lines()
         .filter_map(|line| {
-            line.split_whitespace()
-                .find_map(|field| field.strip_prefix("history_operations="))
+            let event: serde_json::Value =
+                serde_json::from_str(line).expect("structured server log event");
+            event["fields"]["history_operations"].as_u64()
         })
-        .map(|value| value.parse().expect("numeric history work field"))
+        .map(|value| usize::try_from(value).expect("history work fits usize"))
         .max()
         .expect("publish emitted structured history work")
 }

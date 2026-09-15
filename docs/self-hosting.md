@@ -84,10 +84,14 @@ sudo install -m 0755 target/release/tandem \
   /opt/tandem/dist/td-x86_64-unknown-linux-gnu
 ```
 
-Do not rename a binary for a different architecture to that filename. Clients
-on other supported build platforms can build the source themselves and use
-the owner bootstrap below. The bundled download installer currently supports
-GNU/Linux x86_64 only.
+The installer also supports **Apple Silicon macOS**. To serve those clients,
+build the same source revision on an Apple Silicon Mac with the Cargo command
+above. Transfer that Mac binary to your Linux host and install it as
+`/opt/tandem/dist/td-aarch64-apple-darwin`. The installer selects the matching
+artifact automatically. A Linux executable cannot substitute for a Mac one.
+
+Clients can also build the source themselves and use the owner bootstrap below
+when their platform artifact is not available on the host.
 
 Install the [service definition](../deploy/self-hosted/tandem.service):
 
@@ -120,7 +124,7 @@ same catalog/prefix; initial failover is a fenced restart or replacement.
 
 ## Connect an owner and an agent
 
-On GNU/Linux x86_64, use your own host's installer:
+On GNU/Linux x86_64 or Apple Silicon macOS, use your own host's installer:
 
 ```bash
 curl -fsSL https://tandem.example/install -o /tmp/tandem-install.sh

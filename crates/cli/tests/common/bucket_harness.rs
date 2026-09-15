@@ -69,7 +69,7 @@ impl BucketHarness {
         assert!(self.server.is_none(), "server already running");
         let mut args: Vec<&str> = vec!["--bucket", &self.bucket_spec];
         if log.is_some() {
-            args.extend(["--log-level", "debug"]);
+            args.extend(["--log-level", "debug", "--log-format", "json"]);
         }
         let env = [("TANDEM_ADMIN_TOKEN", self.admin_token.as_str())];
         let mut child = spawn_server_with_args_env_and_log(

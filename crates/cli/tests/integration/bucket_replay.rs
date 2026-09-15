@@ -383,7 +383,10 @@ fn up_on_an_empty_directory_materializes_and_serves() {
     );
 
     let first = status();
-    assert_eq!(first["bucket"]["location"], bucket_spec);
+    assert_eq!(
+        first["bucket"]["location"],
+        bucket.canonicalize().unwrap().to_string_lossy().as_ref()
+    );
     assert_eq!(
         first["bucket"]["replayedEntries"], 0,
         "an empty bucket has nothing to replay: {first}"
