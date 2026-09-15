@@ -45,7 +45,6 @@
           <p>Keep the host signing secret, retained keys and deployment configuration outside the disposable cache. Run one active host for the bucket prefix. To replace it, fence the old process, start with an empty cache and the same bucket and credentials, then verify published file bytes before admitting clients.</p>
           <p><a href="https://github.com/laulauland/tandem/blob/main/docs/self-hosting.md">Follow the self-hosting guide →</a></p>
           <p>The guide includes a source build, an example systemd service, configuration for your own S3 endpoint, and a local Docker S3 demo. A bucket container on the same machine is useful for trying the setup; it cannot protect data against losing that machine.</p>
-          <p class="caption">tandem.land uses exe.dev in Frankfurt and Cloudflare R2 in Western Europe. Cloudflare retains DNS and R2; the website and repository API run in the native host. Your deployment can use a different host and storage provider.</p>
         </section>
         <section aria-labelledby="deeper">
           <h2 id="deeper">Implementation detail</h2>

@@ -34,6 +34,8 @@ h1 { margin: 0; font-size: clamp(4rem, 12vw, 7.4rem); font-weight: 500; letter-s
 .top-nav { display: flex; justify-content: center; gap: 1.4rem; margin-top: 1.2rem; color: var(--faint); font-size: .95rem; }
 .home-sheet { max-width: 43rem; margin: clamp(3rem, 7vw, 5.5rem) auto 0; }
 .home-sheet section { margin-bottom: 3rem; }
+.example-heading { margin: 1.8rem 0 .6rem; font-size: 1.15rem; font-weight: 500; }
+.sample + .output { margin-top: -.4rem; border-top: 0; }
 .sheet { display: grid; grid-template-columns: minmax(0, 43rem) 12rem; gap: clamp(2.5rem, 6vw, 5.5rem); justify-content: center; margin-top: clamp(3rem, 7vw, 5.5rem); }
 article { min-width: 0; }
 section { margin: 0 0 3.4rem; }
