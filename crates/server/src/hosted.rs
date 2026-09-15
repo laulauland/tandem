@@ -152,8 +152,8 @@ impl HostedServer {
             catalog_reads: AtomicU64::new(0),
             catalog_bytes: AtomicU64::new(0),
             open_limit: OpenLimit::new(4),
-            creation_limit: Mutex::new(CloneLimit::new(Instant::now(), 10, 60)),
-            workspace_setup_limit: Mutex::new(CloneLimit::new(Instant::now(), 30, 120)),
+            creation_limit: Mutex::new(CloneLimit::new(Instant::now(), 10, 600)),
+            workspace_setup_limit: Mutex::new(CloneLimit::new(Instant::now(), 30, 1200)),
             distribution_dir: std::env::var_os("TANDEM_DISTRIBUTION_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("/opt/tandem/releases")),

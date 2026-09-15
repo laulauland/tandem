@@ -86,8 +86,8 @@ materialization and its supposed backup.
 
 The hosted server allows 10 repository-creation attempts and 30 workspace-setup
 attempts per owner in each 60-second window. These budgets are shared across
-that owner's namespaces and repositories. Host-wide budgets allow 60 creation
-attempts and 120 workspace-setup attempts per window, including requests made
+that owner's namespaces and repositories. Host-wide budgets allow 600 creation
+attempts and 1,200 workspace-setup attempts per window, including requests made
 with newly issued owner credentials.
 
 Workspace setup includes the token request made by each `td clone`, including
