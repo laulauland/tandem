@@ -21,20 +21,10 @@ one active publish and up to eight queued. Staged
 objects stop below 64 MiB per repository to reserve WAL framing and metadata,
 and at 512 MiB across the host. An encoded WAL entry is capped at 64 MiB before
 its output allocation.
-The production service runs this shape at `https://tandem.land` on the
-supervised exe.dev host `tandem-frankfurt` in Frankfurt, with published history
-under the `production` prefix in R2 bucket `tandem-native`, located in Western
-Europe (`WEUR`). Cloudflare retains DNS and R2; both `tandem.land` and
-`www.tandem.land` have DNS-only CNAMEs and explicit exe.dev domain attachments
-to this host. The deployed source revision is
-`67fa558dea88717d7e0e3522d0451669d9722362`; its GNU/Linux binary SHA-256 is
-`c35ccb063623fa38702225dd825c9e7b60eef5897cf7ac6ddb2c5c1c91432b8a`.
-
-The Europe replacement recovered a previously published qualification file
-with its existing scoped credential, accepted a normal snapshot through the
-public domain, and recovered all recorded bytes after both an unclean process
-restart and an empty local cache. The active and retained signing configuration
-was preserved byte-for-byte. See the [qualification evidence](benchmarks/normal-prepared-snapshots.md).
+`tandem.land` runs on one supervised exe.dev host in Frankfurt, with durable
+storage in Cloudflare R2 in Western Europe. Cloudflare provides DNS and R2;
+exe.dev terminates public HTTPS. The deployment manifest, rather than this
+guide, records the running binary and service configuration.
 
 Keep the active host signing secret, retained signing keys and bucket
 credentials in protected configuration outside the VM as well as in its
@@ -47,14 +37,9 @@ new credentials use the active key. This overlap does not reissue owners or
 retire an old key. Never run a replacement alongside an active host: stop or
 fence the old process first.
 
-The controller recovery source is
-`$HOME/.config/tandem-native/host.env`. The reviewed service definition is
-archived at `$HOME/.local/state/tandem-native/production/tandem.service`, and
-the current deployment manifest at
-`$HOME/.local/state/tandem-native/production/current.json` identifies the
-immutable binary. Restore all three;
-the environment file contains protected material and must not enter logs,
-evidence, images, or the repository.
+Keep a protected deployment record outside the host that identifies the binary
+checksum, service definition, bucket and prefix, public domain, and location of
+the secret backup. Do not put secret values in that record or in this repository.
 
 For a host replacement, preserve the reviewed binary, service unit, active and
 retained signing keys, bucket configuration, proxy configuration, and the
@@ -106,20 +91,10 @@ namespace ownership is not replaced. A named clone reads that file, claims its
 namespace, and creates the repository when needed. Explicit `TANDEM_TOKEN` still
 takes precedence. Never capture installer responses or credentials in logs.
 
-Give each active agent a unique workspace identity. `tandem clone` accepts the
-admin token and exchanges it for a scoped token, or accepts an already-scoped
-token. For explicit minting:
-
-```bash
-printf 'header = "Authorization: Bearer %s"\n' "$TANDEM_ADMIN_TOKEN" | \
-  curl --config - --fail --silent --show-error https://tandem.example/api/tokens \
-  -H 'content-type: application/json' \
-  --data '{"workspaceId":"agent-a","ttlSeconds":3600}'
-```
-
-Reading the authorization header from standard input keeps the expanded token
-out of the curl process arguments. Do not wrap this command in evidence capture;
-its response contains the new workspace token.
+Give each active agent a unique workspace identity and a scoped credential.
+Follow the [workspace access procedure](self-hosting.md#connect-an-owner-and-an-agent)
+to provision access to a named repository. An owner credential is for trusted
+setup; do not distribute it to every agent.
 
 Workspace tokens expire and are not refreshable in place. There is no
 individual revocation. Removing a retained key invalidates credentials it
@@ -135,21 +110,6 @@ the lease. Use distinct identities for distinct agents.
 Foreground `tandem serve` requires a configured admin token and never generates
 one into its logs. `tandem up` can generate one for local interactive startup;
 its terminal output is sensitive and must not be captured as log evidence.
-
-## Workspace distribution
-
-All production packages share `[workspace.package].version`; every production
-path dependency also names that version in `[workspace.dependencies]`. Keep
-these in lockstep while Tandem remains pre-1.0. Do not bump internal packages
-independently. The CLI package remains `jj-tandem` and provides the `td` executable alongside `tandem`; install a source checkout with `cargo install --path crates/cli`.
-
-The release skill derives a dependency-first publication order from Cargo
-metadata, checks it against architecture boundaries, and excludes non-published
-test and benchmark packages. A coordinated crates.io release must publish each
-dependency and wait for registry indexing before its consumers, with the CLI
-last. Local packaging is not proof of registry availability. New package names
-and their ownership must be verified during the separately authorized first
-publication; this repository refactor does not perform one.
 
 ## Observability
 
@@ -233,5 +193,4 @@ termination both request graceful shutdown; an unclean death must still
 preserve every acknowledged publish.
 
 For cross-machine acceptance and disaster-recovery drills, use the repo-local
-`distributed-smoke` skill. For releases, use the `release` skill. Both require
-an explicit review before externally mutating production or upstream state.
+`distributed-smoke` skill. For releases, use the `release` skill. Follow their verification and evidence procedures.

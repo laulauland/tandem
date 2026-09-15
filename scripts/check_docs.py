@@ -32,6 +32,11 @@ RETIRED_PATHS = (
     "docs/exec-plans/",
     "docs/product-specs/",
     "qa/",
+    "docs/benchmarks/",
+    "docs/generated/",
+    "docs/hosting-on-exe.md",
+    "docs/publish-improvements.md",
+    "docs/decision-ledger.md",
 )
 
 RETIRED_TERMS = {

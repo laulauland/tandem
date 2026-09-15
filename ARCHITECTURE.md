@@ -141,7 +141,8 @@ boundary.
 
 The server embeds jj-lib over a normal colocated jj/Git repository. It exposes
 an authenticated HTTP API for immutable objects, operations, views, mutable
-heads, token minting, writer leases, and server-sent event wake-ups. The route definitions and generated CLI help describe the current API surface.
+heads, token minting, writer leases, and server-sent event wake-ups. The route
+definitions and generated CLI help describe the current API surface.
 
 The `jj-tandem-server` HTTP host parses and authenticates requests, manages
 writer leases and event streams, and owns control sockets and lifecycle. The headless

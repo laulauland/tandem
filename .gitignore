@@ -2,8 +2,8 @@
 .fp/snapshots/
 
 # Rust
+/vendor/**/Cargo.lock
 target/
-Cargo.lock
 __pycache__/
 
 # IDE

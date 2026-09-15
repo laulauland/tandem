@@ -633,15 +633,13 @@ mod tests {
             resolve_binary_override(&binary, || panic!("checkout unavailable")),
             binary
         );
-        {
-            assert_eq!(
-                artifact_path("sample.json", Some(temp.path()), || panic!(
-                    "checkout unavailable"
-                ))
-                .unwrap(),
-                temp.path().join("sample.json")
-            );
-        }
+        assert_eq!(
+            artifact_path("sample.json", Some(temp.path()), || panic!(
+                "checkout unavailable"
+            ))
+            .unwrap(),
+            temp.path().join("sample.json")
+        );
     }
 
     #[test]

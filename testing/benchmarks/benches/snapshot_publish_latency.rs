@@ -279,8 +279,7 @@ fn main() -> Result<()> {
         files_per_round: FILES_PER_ROUND,
         snapshot_publish,
     };
-    // Under `target/` unless `TANDEM_BENCH_RECORD` says otherwise, so that
-    // running the bench is not itself a change to the revision.
+    // Reports stay outside the checked-in documentation.
     let artifact = write_json_artifact(
         &format!("snapshot_publish_latency_{label}_latest.json"),
         &report,
