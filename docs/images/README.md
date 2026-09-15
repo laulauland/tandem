@@ -18,6 +18,7 @@ as described in [workspace access](../self-hosting.md#connect-an-owner-and-an-ag
 Replace the server address and workspace below with that credential's scope.
 
 ```bash
+set +x
 umask 077
 tandem_build_secret=$(mktemp)
 trap 'rm -f "$tandem_build_secret"' EXIT

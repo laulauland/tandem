@@ -84,7 +84,6 @@ cargo test --workspace
 Set `TANDEM_TEST_S3_BUCKET` to an existing test bucket to run the S3-backed
 integration tier. Never point tests at a production prefix.
 
-
 ## Measure performance
 
 Run measurements against a disposable repository and storage prefix. Retain
@@ -116,7 +115,7 @@ refresh. Do not present it as end-to-end edit latency without measuring those
 other phases. Fixed request delay models added latency; it does not measure
 network transit or object-store processing.
 
-The default reports stay beneath the Cargo target directory. Set
+The default reports stay beneath `target/benchmarks/` in the checkout. Set
 `TANDEM_BENCH_OUTPUT_DIR` to an absolute evidence directory to retain a run.
 `TANDEM_BENCH_BIN` selects an existing matching CLI binary; a copied standalone
 benchmark needs both paths. Never capture bearer values in reports or command

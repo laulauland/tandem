@@ -26,6 +26,8 @@ jobs:
           sysctl -n machdep.cpu.brand_string
           rustc -vV
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - name: Run workspace tests on macOS
         run: cargo test --workspace --locked
       - name: Build the native installer artifact
@@ -34,6 +36,8 @@ jobs:
           mkdir -p artifacts
           cp target/release/tandem artifacts/td-aarch64-apple-darwin
           file artifacts/td-aarch64-apple-darwin
+          otool -L artifacts/td-aarch64-apple-darwin
+          vtool -show-build artifacts/td-aarch64-apple-darwin
           artifacts/td-aarch64-apple-darwin --version
           shasum -a 256 artifacts/td-aarch64-apple-darwin > artifacts/SHA256SUMS
       - uses: actions/upload-artifact@v4

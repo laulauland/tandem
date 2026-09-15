@@ -51,6 +51,8 @@ fn self_connected(port: u16) -> Option<TcpStream> {
             return None;
         }
         let addr = libc::sockaddr_in {
+            #[cfg(target_os = "macos")]
+            sin_len: std::mem::size_of::<libc::sockaddr_in>() as u8,
             sin_family: libc::AF_INET as libc::sa_family_t,
             sin_port: port.to_be(),
             // Already in network order: the bytes of 127.0.0.1, in the order
