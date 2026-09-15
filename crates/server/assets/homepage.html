@@ -3,44 +3,50 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Tandem is a source-control forge built around networked jj workspaces.">
+  <meta name="description" content="Tandem is a prototype source-control host built on jj.">
   <title>Tandem — jj workspaces over the network</title>
   <link rel="stylesheet" href="/site.css">
 </head>
 <body>
   <main>
     <header class="masthead">
-      <p class="running-head">Jujutsu workspaces over the network</p>
       <h1>Tandem</h1>
-      <p class="deck">A source-control forge built around networked jj workspaces.</p>
+      <p class="deck">A prototype source-control host built on jj</p>
       <div class="printer-rule" aria-hidden="true"><span></span></div>
       <nav class="top-nav" aria-label="Main navigation"><a href="#quick-start">Get started</a><a href="/architecture">How it works</a><a href="#self-host">Self-host</a><a href="https://github.com/laulauland/tandem">Source</a></nav>
     </header>
     <article class="home-sheet">
       <section class="preamble" aria-label="About Tandem">
-        <p>Tandem is a forge without a repository web UI. Its interface is Jujutsu (jj): local workspaces connected to shared history over the network.</p>
-        <p>People and agents edit, build and test on their own machines. They share published changes while keeping control of their own working files.</p>
+        <p>Tandem is a forge without a repository web UI. You can think of it as “jj workspaces over the wire”. Each checkout is a workspace; published updates in one workspace are synced and visible in the others.</p>
       </section>
       <section id="quick-start" aria-labelledby="quick-start-heading">
         <h2 id="quick-start-heading">Quick start</h2>
         <pre class="sample" data-label="Install, clone, and start the workspace daemon"><span class="prompt">$</span> curl -fsSL @@TANDEM_PUBLIC_URL@@/install | sh
-<span class="prompt">$</span> export PATH="$HOME/.local/bin:$PATH"
+# make sure ~/.local/bin is on your PATH
 <span class="prompt">$</span> td clone @@TANDEM_PUBLIC_URL@@/you/my-project my-project --workspace agent-a
 <span class="prompt">$</span> cd my-project
 <span class="prompt">$</span> td daemon</pre>
-        <p class="caption">GNU/Linux x86_64 and Apple Silicon macOS. Replace <code>you</code> with your namespace; the first clone creates the repository. The installer saves an owner credential for this host. Other platforms can <a href="https://github.com/laulauland/tandem#readme">build from source</a>.</p>
+        <p><code>td daemon</code> watches this workspace, snapshots file changes, and publishes them to the shared repository. Leave it running while you work.</p>
       </section>
-      <section aria-labelledby="visible-result">
-        <h2 id="visible-result">One edit, shared history</h2>
+      <section aria-label="Workspace example">
         <h3 class="example-heading">1. Edit a file in agent A’s workspace</h3>
-        <p>Leave the daemon running. In another terminal, write a file inside <code>my-project</code>:</p>
-        <pre class="sample" data-label="Agent A · command"><span class="prompt">$</span> printf 'hello from agent-a\n' &gt; hello.txt</pre>
+        <p>After editing <code>hello.txt</code> in agent A’s workspace, inspect the change:</p>
+        <pre class="sample" data-label="Agent A · diff"><span class="prompt">$</span> td diff --git
+diff --git a/hello.txt b/hello.txt
+new file mode 100644
+index 0000000000..f5ccd1bacb
+--- /dev/null
++++ b/hello.txt
+@@ -0,0 +1,1 @@
++hello from agent-a
+</pre>
         <p>The daemon snapshots the edit and publishes it to the shared repository.</p>
         <h3 class="example-heading">2. Read it from agent B’s workspace</h3>
-        <p>Give agent B its own workspace and a scoped credential for the same repository. <a href="https://github.com/laulauland/tandem/blob/main/docs/self-hosting.md#connect-an-owner-and-an-agent">Set up agent B →</a></p>
+        <p>Give agent B its own workspace and a scoped credential for the same repository.</p>
         <p>After A’s snapshot is published, B can read the file from shared history:</p>
         <pre class="sample" data-label="Agent B · command"><span class="prompt">$</span> td file show --ignore-working-copy -r 'agent-a@' hello.txt</pre>
-        <pre class="output sample" data-label="Output"><span class="result">hello from agent-a</span></pre>
+        <pre class="output sample" data-label="Output"><span class="result">hello from agent-a
+</span></pre>
         <p class="caption">B reads A’s published file. B’s own working files stay unchanged.</p>
       </section>
       <section id="self-host" aria-labelledby="self-host-heading">
