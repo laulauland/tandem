@@ -714,6 +714,18 @@ fn run_clone(
                     .send()
                 {
                     Ok(created) if created.status().is_success() => {}
+                    Ok(created) if created.status() == reqwest::StatusCode::TOO_MANY_REQUESTS => {
+                        let retry = created
+                            .headers()
+                            .get(reqwest::header::RETRY_AFTER)
+                            .and_then(|value| value.to_str().ok())
+                            .and_then(|value| value.parse::<u64>().ok());
+                        match retry {
+                            Some(seconds) => eprintln!("error: repository creation at {} is rate limited; retry in {seconds} seconds", target.base_url),
+                            None => eprintln!("error: repository creation at {} is rate limited; try again later", target.base_url),
+                        }
+                        return ExitCode::FAILURE;
+                    }
                     Ok(created) => {
                         eprintln!(
                             "error: repository creation answered HTTP {}",

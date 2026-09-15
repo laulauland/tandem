@@ -18,7 +18,9 @@ use serde::{Deserialize, Serialize};
 use tower::ServiceExt as _;
 use tracing::Instrument as _;
 
+use crate::clone_limits::CloneLimit;
 use crate::Server;
+use std::time::Instant;
 
 const CATALOG_PREFIX: &str = "_hosting/namespaces";
 
@@ -51,6 +53,8 @@ pub struct HostedServer {
     catalog_reads: AtomicU64,
     catalog_bytes: AtomicU64,
     open_limit: OpenLimit,
+    creation_limit: Mutex<CloneLimit>,
+    workspace_setup_limit: Mutex<CloneLimit>,
     distribution_dir: PathBuf,
     public_url: String,
     faults: Arc<jj_tandem_repository::FaultPoints>,
@@ -148,6 +152,8 @@ impl HostedServer {
             catalog_reads: AtomicU64::new(0),
             catalog_bytes: AtomicU64::new(0),
             open_limit: OpenLimit::new(4),
+            creation_limit: Mutex::new(CloneLimit::new(Instant::now(), 10, 60)),
+            workspace_setup_limit: Mutex::new(CloneLimit::new(Instant::now(), 30, 120)),
             distribution_dir: std::env::var_os("TANDEM_DISTRIBUTION_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("/opt/tandem/releases")),
@@ -676,6 +682,35 @@ fn owner_response(server: &HostedServer) -> Response {
         .into_response()
 }
 
+fn clone_admission(
+    limit: &Mutex<CloneLimit>,
+    owner: &str,
+    operation: &'static str,
+) -> Option<Response> {
+    let mut limit = match limit.lock() {
+        Ok(limit) => limit,
+        Err(error) => {
+            tracing::error!(%error, operation, "clone admission lock failed");
+            return Some(StatusCode::SERVICE_UNAVAILABLE.into_response());
+        }
+    };
+    let delay = limit.admit(owner, Instant::now()).err()?;
+    let seconds = delay.as_secs() + u64::from(delay.subsec_nanos() > 0);
+    tracing::info!(
+        operation,
+        retry_after_seconds = seconds,
+        "clone request rate limited"
+    );
+    Some(
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            [(header::RETRY_AFTER, seconds.to_string())],
+            format!("Too many {operation} attempts; retry in {seconds} seconds.\n"),
+        )
+            .into_response(),
+    )
+}
+
 async fn create_repository(
     State(server): State<Arc<HostedServer>>,
     Path((namespace, repository)): Path<(String, String)>,
@@ -692,6 +727,13 @@ async fn create_repository(
     };
     if !server.verifies_owner_token(&token) {
         return StatusCode::NOT_FOUND.into_response();
+    }
+    if let Some(response) = clone_admission(
+        &server.creation_limit,
+        &fingerprint(&token),
+        "repository creation",
+    ) {
+        return response;
     }
     tokio::task::spawn_blocking(move || create_repository_parsed(&server, name, token, || {}))
         .await
@@ -882,6 +924,18 @@ async fn dispatch_repository(
             HeaderValue::from_str(&format!("Bearer {key}")).unwrap(),
         );
     }
+    if request.method() == axum::http::Method::POST
+        && rest == "api/tokens"
+        && bearer(&request).is_some_and(|token| server.authority_for(token).is_some())
+    {
+        if let Some(response) = clone_admission(
+            &hosted.workspace_setup_limit,
+            &owner_fingerprint,
+            "workspace setup",
+        ) {
+            return response;
+        }
+    }
     let query = request
         .uri()
         .query()
@@ -965,6 +1019,114 @@ mod tests {
             .to_string();
         let host = Arc::new(HostedServer::new(cache, &bucket, "host-secret").unwrap());
         (temporary, host)
+    }
+
+    #[tokio::test]
+    async fn clone_creation_is_limited_before_catalog_work() {
+        let (_temporary, host) = host();
+        let token = host.owner_token(&[19; 32]);
+        let app = router(host.clone());
+        for _ in 0..10 {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri("/rate-owner/project")
+                        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert!(response.status().is_success());
+        }
+        let reads = host.catalog_reads.load(Ordering::Relaxed);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/another-namespace/project")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(
+            response.headers()[header::RETRY_AFTER]
+                .to_str()
+                .unwrap()
+                .parse::<u64>()
+                .unwrap()
+                > 0
+        );
+        assert_eq!(host.catalog_reads.load(Ordering::Relaxed), reads);
+        assert!(host.namespace("another-namespace").unwrap().is_none());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/rate-owner/project/api/info")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn existing_repository_workspace_setup_is_limited() {
+        let (_temporary, host) = host();
+        let token = host.owner_token(&[20; 32]);
+        assert!(create_repository_sync(
+            &host,
+            "rate-owner".into(),
+            "project".into(),
+            token.clone()
+        )
+        .is_success());
+        let app = router(host);
+        let mut scoped = None;
+        for index in 0..31 {
+            let presented = if index % 2 == 1 {
+                scoped.as_deref().unwrap()
+            } else {
+                token.as_str()
+            };
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/rate-owner/project/api/tokens")
+                        .header(header::AUTHORIZATION, format!("Bearer {presented}"))
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(r#"{"workspaceId":"agent-a"}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            if index == 0 {
+                assert!(response.status().is_success());
+                let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                    .await
+                    .unwrap();
+                let body: OwnerBody = serde_json::from_slice(&bytes).unwrap();
+                scoped = Some(body.token);
+            } else if index < 30 {
+                if index % 2 == 1 {
+                    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+                } else {
+                    assert!(response.status().is_success());
+                }
+            } else {
+                assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+            }
+        }
     }
 
     #[test]

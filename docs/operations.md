@@ -82,6 +82,22 @@ The bucket must already exist. A filesystem bucket is useful for development,
 but placing it inside the server repo means one disk failure loses both the
 materialization and its supposed backup.
 
+## Clone admission limits
+
+The hosted server allows 10 repository-creation attempts and 30 workspace-setup
+attempts per owner in each 60-second window. These budgets are shared across
+that owner's namespaces and repositories. Host-wide budgets allow 60 creation
+attempts and 120 workspace-setup attempts per window, including requests made
+with newly issued owner credentials.
+
+Workspace setup includes the token request made by each `td clone`, including
+clones that already hold a scoped credential. Direct API requests use the same
+limits. Rejections return HTTP 429 with `Retry-After`; wait for that interval
+before trying again. Reads, snapshots, and running daemons do not consume these
+budgets. Creation retries count even when the repository already exists.
+Counters are bounded, held in memory, and reset when the host restarts. These
+are admission limits, not a permanent repository quota.
+
 ## Workspace access
 
 The public installer downloads the matching native Linux or Apple Silicon

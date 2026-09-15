@@ -658,3 +658,64 @@ fn run_binary_in(
     isolate_env(&mut command, home);
     command.output().unwrap()
 }
+
+#[test]
+fn clone_reports_creation_rate_limit_without_creating_a_workspace() {
+    let temporary = tempfile::tempdir().unwrap();
+    let home = isolated_home(temporary.path());
+    let address = free_addr();
+    let secret = jj_tandem_server::generate_admin_token();
+    let (child, lines) = spawn_server_with_args_and_env_with_lines(
+        &temporary.path().join("cache"),
+        &address,
+        &[
+            "--hosted",
+            "--log-level",
+            "info",
+            "--bucket",
+            temporary.path().join("bucket").to_str().unwrap(),
+        ],
+        &[("TANDEM_ADMIN_TOKEN", &secret)],
+        &home,
+    );
+    let mut server = ProcessGuard::with_lines(child, lines);
+    server.wait_for_listening(&address);
+    let http = reqwest::blocking::Client::new();
+    let base = format!("http://{address}");
+    let owner: serde_json::Value = http
+        .post(format!("{base}/install/token"))
+        .send()
+        .unwrap()
+        .json()
+        .unwrap();
+    let token = owner["token"].as_str().unwrap();
+    for _ in 0..10 {
+        assert!(http
+            .put(format!("{base}/rate-owner/project"))
+            .bearer_auth(token)
+            .send()
+            .unwrap()
+            .status()
+            .is_success());
+    }
+    let destination = temporary.path().join("rejected");
+    let url = format!("{base}/rate-owner/another-project");
+    let output = run_tandem_in_with_env(
+        temporary.path(),
+        &[
+            "clone",
+            &url,
+            destination.to_str().unwrap(),
+            "--workspace",
+            "agent-a",
+        ],
+        &[("TANDEM_TOKEN", token)],
+        &home,
+    );
+    assert!(!output.status.success());
+    let message = String::from_utf8(output.stderr).unwrap();
+    assert!(message.contains(&url));
+    assert!(message.contains("rate limited; retry in"));
+    assert!(!message.contains(token));
+    assert!(!destination.exists());
+}

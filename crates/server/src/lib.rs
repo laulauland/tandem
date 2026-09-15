@@ -1,6 +1,7 @@
 //! Network host around the headless Tandem repository authority.
 
 mod auth;
+mod clone_limits;
 pub mod control;
 mod hosted;
 mod http;
